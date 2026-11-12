@@ -39,6 +39,14 @@ jobs:
       - name: Byte-compile all backend modules
         run: python -m compileall -q backend
 
+      - name: The access-list CLI must be runnable
+        env:
+          MONGO_URI: mongomock://cli
+          JWT_SECRET: ci-only-secret-value-not-used-by-tests
+        run: |
+          python -m backend.manage_access add ci.user@example.invalid
+          python -m backend.manage_access list
+
   vision:
     name: Vision stack (optional)
     runs-on: ubuntu-latest

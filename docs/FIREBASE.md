@@ -19,6 +19,10 @@ setting on the backend.
 | Web app id | `1:734375891811:web:6851938bef332bc0e53956` |
 | Analytics measurement id | `G-7MXBNH3N7D` |
 
+> **Authentication** is covered separately in
+> [`docs/AUTHENTICATION.md`](AUTHENTICATION.md) — the sign-in model, the
+> access list, the Firebase console setup, and why Supabase is not needed.
+
 > **The API key is deliberately not committed.** Firebase web API keys are
 > public identifiers (they identify the project, they do not authorise access
 > to data — access is governed by Firestore/Storage security rules), but
@@ -65,15 +69,19 @@ Firebase** — it is an optional enhancement, not a dependency.
 ## 3. Frontend integration
 
 The SDK is vendored under `frontend/vendor/firebase/` (the `compat` UMD
-builds of `firebase/app`, `firebase/analytics` and `firebase/firestore` from
-`firebase@11.10.0`, Apache-2.0) and loaded **lazily** by
-`frontend/js/firebase.js`:
+builds of `firebase/app`, `firebase/auth`, `firebase/analytics` and
+`firebase/firestore` from `firebase@11.10.0`, Apache-2.0) and loaded
+**lazily** by `frontend/js/firebase.js`:
 
 1. `initFirebase()` fetches `/api/config/firebase`.
 2. If `enabled` is false it returns immediately — nothing is downloaded.
-3. Otherwise it injects the `<script>` tags for the vendored bundles.
+3. Otherwise it injects the `<script>` tags for the vendored bundles. The
+   `app` bundle is always loaded first, because the `auth` and `analytics`
+   bundles depend on it.
 4. `window.firebase.initializeApp(config)` is called once.
 5. Analytics is started only when a `measurementId` is present.
+6. The Authentication bundle is loaded only when a page actually needs to
+   sign somebody in.
 
 Events recorded: `app_open`, `login`, `logout`, `screen_view`,
 `capture_frame`, `detection_result`, `export_data`.

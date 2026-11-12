@@ -270,6 +270,37 @@ API key is never committed. The console works fully without Firebase.
 
 See [`docs/FIREBASE.md`](docs/FIREBASE.md).
 
+## Authentication
+
+Sign-in is handled by **Firebase Authentication** — email/password and Google —
+with access restricted to a list of authorised email addresses.
+
+Two independent gates must both pass:
+
+1. **Firebase** decides whether the credential is valid. Email/password only
+   accepts accounts you created in the Firebase console.
+2. **The backend's access list** decides whether that identity may use the
+   portal. Google sign-in is refused for any email that is not on the list.
+
+The browser exchanges the Firebase ID token for the application's own
+short-lived HttpOnly session cookie at `POST /api/auth/firebase`. The Firebase
+token is verified server-side against Google's **public** signing keys, so
+there is **no service account and no private key** to manage. The ID token is
+used once and discarded.
+
+Manage the access list with the bundled CLI:
+
+```bash
+python -m backend.manage_access list
+python -m backend.manage_access add transport.office@srmtrp.edu.in
+python -m backend.manage_access set-role principal@srmtrp.edu.in head_admin
+python -m backend.manage_access deactivate transport.office@srmtrp.edu.in
+```
+
+The Firebase console setup, the auto-provisioning rules and the reasoning
+behind **not** adding Supabase are in
+[`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md).
+
 ## API reference
 
 All endpoints are same-origin JSON APIs. Authentication is a short-lived JWT in
@@ -278,7 +309,9 @@ an HttpOnly, SameSite=Lax cookie (`transport_token`).
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/api/health` | – | Liveness probe |
-| `POST` | `/api/auth/login` | – | Sign in (rate limited) |
+| `GET` | `/api/auth/config` | – | Which sign-in methods this deployment offers |
+| `POST` | `/api/auth/firebase` | – | Exchange a Firebase ID token for a session cookie |
+| `POST` | `/api/auth/login` | – | Sign in with a local account (rate limited) |
 | `GET` | `/api/auth/me` | session | Current user |
 | `POST` | `/api/auth/logout` | session | Sign out (audited) |
 | `GET` | `/api/config` | head_admin | Camera tiles, flag labels, thresholds |

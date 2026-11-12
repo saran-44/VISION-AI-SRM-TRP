@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
+from .access import AccessDenied, resolve_identity
 from .auth import (
     clear_auth_cookie,
     create_access_token,
@@ -40,6 +41,7 @@ from .schemas import (
     DriverUpdate,
     EventCreate,
     EventFilter,
+    FirebaseTokenSchema,
     LoginSchema,
     SearchFilter,
 )
@@ -54,6 +56,12 @@ from .services import (
     naive_now,
     record_audit,
     xlsx_bytes,
+)
+from .firebase_auth import (
+    FirebaseAuthError,
+    email_of,
+    provider_of,
+    verify_id_token as verify_firebase_id_token,
 )
 from .vision import (
     VisionUnavailable,
@@ -252,6 +260,8 @@ def create_app(config: Config | None = None, mongo_client=None) -> Flask:
     @app.post("/api/auth/login")
     @limiter.limit(config.login_rate_limit)
     def login():
+        if not config.legacy_password_login_enabled:
+            return jsonify({"error": "Password sign-in is disabled on this deployment."}), 403
         payload, error = validate(LoginSchema)
         if error:
             return error
@@ -264,6 +274,97 @@ def create_app(config: Config | None = None, mongo_client=None) -> Flask:
         response = make_response(jsonify({"user": safe_user, "expires_at": iso_utc(expires_at)}))
         set_auth_cookie(response, token, config)
         record_audit(db, safe_user, "login", "users", str(user["_id"]), flask_request=request)
+        return response
+
+    @app.get("/api/auth/config")
+    def auth_config():
+        """Public description of the sign-in methods this deployment offers.
+
+        The login page uses this to decide whether to show the Firebase form,
+        the Google button, the legacy password form, or a combination.
+        """
+        firebase_ready = bool(config.firebase_project_id) and config.firebase_auth_enabled
+        providers = list(config.firebase_allowed_providers) if firebase_ready else []
+        return jsonify({
+            "mode": "firebase" if firebase_ready else "password",
+            "firebase": {
+                "enabled": firebase_ready,
+                "providers": providers,
+                "auto_provision": config.firebase_auto_provision,
+            },
+            "legacy_password_login": config.legacy_password_login_enabled,
+        })
+
+    @app.post("/api/auth/firebase")
+    @limiter.limit(config.login_rate_limit)
+    def firebase_login():
+        """Exchange a verified Firebase ID token for a session cookie.
+
+        The browser authenticates with Firebase (email/password or Google) and
+        posts the resulting ID token here. The token is verified against
+        Google's signing keys, the identity is checked against the access
+        list, and this application issues its own short-lived HttpOnly session
+        cookie. The Firebase token itself is never stored.
+        """
+        if not config.firebase_auth_enabled or not config.firebase_project_id:
+            return jsonify({"error": "Firebase sign-in is not configured on this deployment."}), 503
+
+        payload, error = validate(FirebaseTokenSchema)
+        if error:
+            return error
+
+        try:
+            claims = verify_firebase_id_token(payload.id_token, config.firebase_project_id)
+        except FirebaseAuthError as exc:
+            record_audit(
+                db,
+                None,
+                "login_failed",
+                "users",
+                None,
+                after={"reason": exc.message, "provider": "firebase"},
+                flask_request=request,
+            )
+            return jsonify({"error": exc.message}), exc.status
+
+        try:
+            user, created = resolve_identity(
+                db,
+                claims,
+                allowed_providers=config.firebase_allowed_providers,
+                auto_provision=config.firebase_auto_provision,
+                default_role=config.firebase_default_role,
+            )
+        except AccessDenied as exc:
+            record_audit(
+                db,
+                None,
+                "login_denied",
+                "users",
+                email_of(claims),
+                after={"reason": exc.message, "provider": provider_of(claims)},
+                flask_request=request,
+            )
+            return jsonify({"error": exc.message}), exc.status
+
+        safe_user = public_user(user)
+        token, expires_at = create_access_token(config, user)
+        response = make_response(jsonify({
+            "user": safe_user,
+            "expires_at": iso_utc(expires_at),
+            "provider": provider_of(claims),
+            "created": created,
+        }))
+        set_auth_cookie(response, token, config)
+        record_audit(
+            db,
+            safe_user,
+            "login" if not created else "login_provisioned",
+            "users",
+            str(user["_id"]),
+            after={"provider": provider_of(claims)},
+            flask_request=request,
+        )
         return response
 
     @app.get("/api/auth/me")

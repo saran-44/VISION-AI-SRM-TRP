@@ -30,16 +30,17 @@
 7. [Upgrade component B — cameras](#7-upgrade-component-b--cameras)
 8. [Upgrade component C — golden glass light theme](#8-upgrade-component-c--golden-glass-light-theme)
 9. [Upgrade component D — Firebase](#9-upgrade-component-d--firebase)
-10. [Upgrade component E — frontend/backend connection](#10-upgrade-component-e--frontendbackend-connection)
-11. [API reference](#11-api-reference)
-12. [Configuration reference](#12-configuration-reference)
-13. [Deployment](#13-deployment)
-14. [Security and privacy](#14-security-and-privacy)
-15. [Testing and verification](#15-testing-and-verification)
-16. [Git and Git Bash command reference](#16-git-and-git-bash-command-reference)
-17. [Repository map](#17-repository-map)
-18. [Outstanding work and known risks](#18-outstanding-work-and-known-risks)
-19. [Appendix — verified environment facts](#19-appendix--verified-environment-facts)
+10. [Upgrade component F — Firebase Authentication](#10-upgrade-component-f--firebase-authentication)
+11. [Upgrade component E — frontend/backend connection](#11-upgrade-component-e--frontendbackend-connection)
+12. [API reference](#12-api-reference)
+13. [Configuration reference](#13-configuration-reference)
+14. [Deployment](#14-deployment)
+15. [Security and privacy](#15-security-and-privacy)
+16. [Testing and verification](#16-testing-and-verification)
+17. [Git and Git Bash command reference](#17-git-and-git-bash-command-reference)
+18. [Repository map](#18-repository-map)
+19. [Outstanding work and known risks](#19-outstanding-work-and-known-risks)
+20. [Appendix — verified environment facts](#20-appendix--verified-environment-facts)
 
 ---
 
@@ -58,6 +59,7 @@ This upgrade adds four capabilities on top of the existing platform:
 | B | **Live camera access** — browser webcam now, NVR/DVR via HLS/MJPEG later | `frontend/js/cameras.js` + `GET /api/stream/<camera_id>` |
 | C | **Golden glass light theme** with the official SRM TRP crest | `frontend/assets/theme.css` + `logo-emblem.png` / `logo-wordmark.png` |
 | D | **Firebase** (`srmtrpai`) for Hosting and Analytics | `firebase.json`, `.firebaserc`, `frontend/js/firebase.js`, `/api/config/firebase` |
+| E | **Firebase Authentication** — email/password + Google sign-in, restricted to an authorised email list | `backend/firebase_auth.py`, `backend/access.py`, `backend/manage_access.py`, `POST /api/auth/firebase` |
 
 **What was explicitly *not* done, and why.** The upstream model project is a
 Colab notebook with no service API, no licence and no committed weights. Rather
@@ -665,7 +667,80 @@ which suits the project's no-build-step frontend.
 
 ---
 
-## 10. Upgrade component E — frontend/backend connection
+## 10. Upgrade component F — Firebase Authentication
+
+Full detail: **`docs/AUTHENTICATION.md`**.
+
+### 10.1 The model
+
+The portal authenticates with **Firebase Authentication** (email/password and
+Google) and authorises against a **server-side access list**. Two independent
+gates must both pass:
+
+1. **Firebase** decides whether the *credential* is valid.
+2. **The backend's access list** (the MongoDB `users` collection) decides
+   whether that *identity* may use the portal.
+
+The second gate is not redundant. Firebase's email/password provider only
+accepts accounts an administrator created, but the **Google provider issues
+a valid token for any Google account on Earth** — relying on Firebase alone
+would let anyone with a Google account into the portal.
+
+| Provider | Unknown email | Rule |
+| --- | --- | --- |
+| `password` | Admitted on first use | A successful sign-in proves an administrator created that Firebase account, so the access record is created automatically (`FIREBASE_AUTO_PROVISION`). |
+| `google.com` | **Refused** | Google accounts cannot be curated in the Firebase console, so the email must already be on the access list. |
+
+### 10.2 What was built
+
+| Path | Role |
+| --- | --- |
+| `backend/firebase_auth.py` | Verifies a Firebase ID token (RS256) against Google's **public** signing keys. No service account, no private key. |
+| `backend/access.py` | The access list: resolve, authorise, auto-provision, bind the Firebase UID. |
+| `backend/manage_access.py` | The `python -m backend.manage_access` CLI. |
+| `backend/app.py` | `POST /api/auth/firebase`, `GET /api/auth/config`. |
+| `backend/schemas.py` | `FirebaseTokenSchema`. |
+| `frontend/js/auth.js` | Sign-in flows and the token exchange. |
+| `frontend/js/login.js` | The login page, rewritten. |
+| `frontend/js/firebase.js` | Lazy loading, now including the Auth bundle. |
+| `frontend/vendor/firebase/firebase-auth-compat.js` | The vendored Auth SDK. |
+
+### 10.3 The session
+
+The Firebase ID token is exchanged for the application's own session: an
+HS256 JWT in an HttpOnly, `SameSite=Lax`, `Secure`-in-production cookie,
+valid for `JWT_TTL_MINUTES`. The Firebase token is used once and discarded —
+it is never stored and never reachable from JavaScript.
+
+### 10.4 Verification order
+
+`POST /api/auth/firebase` checks, in order: token shape → RS256 signature →
+audience → issuer → expiry → allowed provider → access list → Firebase UID
+binding. Only then is the session cookie issued.
+
+### 10.5 The access-list CLI
+
+```bash
+python -m backend.manage_access list
+python -m backend.manage_access add transport.office@srmtrp.edu.in
+python -m backend.manage_access set-role principal@srmtrp.edu.in head_admin
+python -m backend.manage_access deactivate transport.office@srmtrp.edu.in
+python -m backend.manage_access activate transport.office@srmtrp.edu.in
+python -m backend.manage_access unlink transport.office@srmtrp.edu.in
+```
+
+### 10.6 Why not Supabase
+
+Firebase. The decisive point is that this project's data lives in **MongoDB**,
+not Postgres — Supabase's headline feature, Row Level Security, protects
+*only* Postgres tables, so it would not apply to a single row of the actual
+data. The allowlist would still be enforced in application code exactly as
+described above, while adding a second provider, SDK and set of secrets.
+See [`docs/AUTHENTICATION.md` §7](AUTHENTICATION.md#7-why-not-supabase).
+
+---
+
+## 11. Upgrade component E — frontend/backend connection
 
 The console calls the API on the **same origin** (`/api/...`), which Firebase
 Hosting rewrites to the backend. The browser therefore sees a single origin:
@@ -689,14 +764,16 @@ firebase deploy --only hosting
 
 ---
 
-## 11. API reference
+## 12. API reference
 
 ### 11.1 Existing routes (unchanged)
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/api/health` | public | Liveness probe. |
-| `POST` | `/api/auth/login` | public | Exchange credentials for a session cookie. |
+| `GET` | `/api/auth/config` | public | Which sign-in methods this deployment offers. |
+| `POST` | `/api/auth/firebase` | public | Exchange a Firebase ID token for a session cookie. |
+| `POST` | `/api/auth/login` | public | Exchange local credentials for a session cookie (break-glass). |
 | `POST` | `/api/auth/logout` | session | Clear the session. |
 | `GET` | `/api/auth/me` | session | Current user profile. |
 | `GET` | `/api/config` | `head_admin` | Camera definitions, flag labels, rule thresholds, `camera_support`. |
@@ -799,7 +876,7 @@ non-MJPEG camera (with a message pointing at the HLS/MJPEG gateway URL).
 
 ---
 
-## 12. Configuration reference
+## 13. Configuration reference
 
 ### 12.1 Existing variables
 
@@ -838,12 +915,17 @@ non-MJPEG camera (with a message pointing at the HLS/MJPEG gateway URL).
 | `FIREBASE_MESSAGING_SENDER_ID` | `734375891811` | Messaging sender id. |
 | `FIREBASE_APP_ID` | `1:734375891811:web:6851938bef332bc0e53956` | Web app id. |
 | `FIREBASE_MEASUREMENT_ID` | `G-7MXBNH3N7D` | Analytics measurement id. |
+| `FIREBASE_AUTH_ENABLED` | `true` | Master switch for Firebase sign-in (effective only when a project id is set). |
+| `FIREBASE_ALLOWED_PROVIDERS` | `password,google.com` | Which Firebase providers are accepted. |
+| `FIREBASE_AUTO_PROVISION` | `true` | Auto-create the access record on a first email/password sign-in. |
+| `FIREBASE_DEFAULT_ROLE` | `transport_office` | The role given to an auto-provisioned account. |
+| `LEGACY_PASSWORD_LOGIN_ENABLED` | `true` | Keep the local MongoDB password login as a break-glass path. |
 
 `.env.example` documents all of them.
 
 ---
 
-## 13. Deployment
+## 14. Deployment
 
 ### 13.1 Topology
 
@@ -907,7 +989,7 @@ serve the API from the backend origin directly, adding that origin to
 
 ---
 
-## 14. Security and privacy
+## 15. Security and privacy
 
 | Area | Measure |
 | --- | --- |
@@ -923,7 +1005,7 @@ serve the API from the backend origin directly, adding that origin to
 
 ---
 
-## 15. Testing and verification
+## 16. Testing and verification
 
 ### 15.1 Backend
 
@@ -931,13 +1013,13 @@ serve the API from the backend origin directly, adding that origin to
 .venv/bin/python -m pytest backend/tests -q
 ```
 
-**78 tests pass** (60 pre-existing + 18 new in `backend/tests/test_detection.py`).
+**115 tests pass** (60 pre-existing + 18 detection + 37 authentication).
 
 ### 15.2 Frontend
 
 ```bash
 node scripts/check_frontend.mjs
-# → Frontend checks passed: 19 modules, 9 pages, all references resolve.
+# → Frontend checks passed: 20 modules, 9 pages, all references resolve.
 ```
 
 ### 15.3 Secrets
@@ -966,7 +1048,7 @@ curl -s -X POST http://localhost:5000/api/detection/scan \
 
 ---
 
-## 16. Git and Git Bash command reference
+## 17. Git and Git Bash command reference
 
 > These are **Git Bash** commands (Windows). They work identically in a POSIX
 > shell. The user performs the remote connection and deployment themselves.
@@ -1077,7 +1159,7 @@ git push --force-with-lease origin feature/arena-upgrade
 
 ---
 
-## 17. Repository map
+## 18. Repository map
 
 ```
 frontend/                         repository root
@@ -1089,6 +1171,9 @@ frontend/                         repository root
 ├── backend/
 │   ├── app.py                    Flask factory, routes, SSE, security headers
 │   ├── auth.py                   Argon2, JWT, cookie, RBAC, device keys
+│   ├── access.py                 ★ the access list: authorise, auto-provision, bind
+│   ├── firebase_auth.py          ★ Firebase ID token verification (Google JWKS)
+│   ├── manage_access.py          ★ the access-list CLI
 │   ├── config.py                 env config, camera + Firebase validation
 │   ├── db.py                     Mongo client, indexes, safe serialisation
 │   ├── schemas.py                strict Pydantic request/query models
@@ -1109,7 +1194,8 @@ frontend/                         repository root
 │   │   ├── layout.js             shell, sidebar, topbar, theme toggle
 │   │   ├── login.js              login form + session
 │   │   ├── cameras.js            ★ getUserMedia, HLS, MJPEG, RTSP notice
-│   │   ├── firebase.js           ★ lazy SDK init, analytics events
+│   │   ├── auth.js               ★ Firebase sign-in flows and the token exchange
+│   │   ├── firebase.js           ★ lazy SDK init, auth + analytics events
 │   │   ├── dashboard.js          ★ browser camera + scan-plate wiring
 │   │   ├── sse.js                live events with polling fallback
 │   │   ├── charts.js  filters.js  tables.js  exports.js
@@ -1124,12 +1210,14 @@ frontend/                         repository root
 │   │   ├── favicon.png           ★ favicon from the crest
 │   ├── vendor/
 │   │   ├── chart.umd.js  hls.min.js  xlsx.full.min.js
-│   │   └── firebase/             ★ firebase 11.10.0 compat builds + LICENSE
+│   │   └── firebase/             ★ firebase 11.10.0 compat builds (app, auth,
+│                              analytics, firestore) + LICENSE
 ├── deploy/
 │   ├── Dockerfile                ★ container image
 │   └── cloudbuild.yaml           ★ Cloud Build → Cloud Run pipeline
 ├── docs/
 │   ├── UPGRADE_SPECIFICATION.md  ★ this document
+│   ├── AUTHENTICATION.md         ★ Firebase sign-in, the access list, Supabase
 │   ├── DETECTION.md              ★ model provenance + detection API
 │   ├── CAMERAS.md                ★ browser / HLS / MJPEG / RTSP gateway
 │   ├── FIREBASE.md               ★ Firebase setup and deployment
@@ -1146,7 +1234,7 @@ frontend/                         repository root
 
 ---
 
-## 18. Outstanding work and known risks
+## 19. Outstanding work and known risks
 
 ### 18.1 Blockers before production
 
@@ -1184,7 +1272,7 @@ frontend/                         repository root
 
 ---
 
-## 19. Appendix — verified environment facts
+## 20. Appendix — verified environment facts
 
 Everything in this appendix was executed and observed in the working
 environment, not inferred.
@@ -1203,8 +1291,8 @@ environment, not inferred.
 | Python | 3.11 |
 | torch / torchvision | 2.9.1+cu128 / 0.24.1+cu128 |
 | ultralytics / opencv | 8.4.20 / 4.10.0.84 |
-| Backend tests | **78 passed** |
-| Frontend check | 19 modules, 9 pages, all references resolve |
+| Backend tests | **115 passed** |
+| Frontend check | 20 modules, 9 pages, all references resolve |
 | Source repository | `814725105014-debug/SRM-TRP-TRANSPORT-AI` — 1 commit, **no licence**, weights not committed |
 | Rejected repository | `hemanathanmd01/Clg-bus-project` — no weights, no licence, credential-bearing |
 | Empty sibling repo | `814725105014-debug/SRM-TRP-TRANSPORT-AI-NEW` — `409 Git Repository is empty` |

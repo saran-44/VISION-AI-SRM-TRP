@@ -7,14 +7,15 @@
  * not configured the module resolves to a disabled state and nothing is
  * downloaded.
  *
- * Analytics is optional and is only started when a measurement id exists and
- * the visitor has not opted out.
+ * Authentication (email/password and Google) and Analytics are optional. The
+ * console works without them.
  */
 
 const SDK_BASE = '/vendor/firebase/';
 
 const SCRIPTS = {
   app: 'firebase-app-compat.js',
+  auth: 'firebase-auth-compat.js',
   analytics: 'firebase-analytics-compat.js',
   firestore: 'firebase-firestore-compat.js',
 };
@@ -23,8 +24,10 @@ let loadPromise = null;
 let state = {
   enabled: false,
   analytics: false,
+  auth: false,
   projectId: null,
   app: null,
+  authInstance: null,
   analyticsInstance: null,
   firestore: null,
   error: null,
@@ -80,9 +83,12 @@ export function isFirebaseEnabled() {
 /**
  * Initialise Firebase. Safe to call on every page; it only performs work once.
  *
+ * @param {object} [options]
+ * @param {boolean} [options.auth] load the Authentication bundle as well
+ * @param {boolean} [options.analytics] load the Analytics bundle as well
  * @returns {Promise<object>} the current state
  */
-export async function initFirebase() {
+export async function initFirebase(options = {}) {
   if (state.app) return state;
   try {
     const response = await fetch('/api/config/firebase', { credentials: 'same-origin' });
@@ -94,10 +100,16 @@ export async function initFirebase() {
     if (!payload?.enabled || !config.apiKey) {
       state.enabled = false;
       state.analytics = false;
+      state.auth = false;
       return state;
     }
 
-    await loadSdk(payload?.analytics ? ['analytics'] : []);
+    const wantsAnalytics = options.analytics === undefined ? payload?.analytics : options.analytics;
+    const wantsAuth = Boolean(options.auth);
+    const extras = [];
+    if (wantsAuth) extras.push('auth');
+    if (wantsAnalytics) extras.push('analytics');
+    await loadSdk(extras);
 
     if (!window.firebase) throw new Error('The Firebase SDK did not initialise.');
 
@@ -107,7 +119,17 @@ export async function initFirebase() {
     state.app = window.firebase.apps[0] || null;
     state.enabled = true;
 
-    if (payload?.analytics && window.firebase.analytics) {
+    if (wantsAuth && window.firebase.auth) {
+      try {
+        state.authInstance = window.firebase.auth();
+        state.auth = true;
+      } catch (error) {
+        state.auth = false;
+        state.error = `Authentication unavailable: ${error?.message || 'unknown error'}`;
+      }
+    }
+
+    if (wantsAnalytics && window.firebase.analytics) {
       try {
         state.analyticsInstance = window.firebase.analytics();
         state.analytics = true;
@@ -120,6 +142,7 @@ export async function initFirebase() {
   } catch (error) {
     state.enabled = false;
     state.analytics = false;
+    state.auth = false;
     state.error = error?.message || 'Firebase initialisation failed.';
     return state;
   }
