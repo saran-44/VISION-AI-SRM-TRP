@@ -93,6 +93,11 @@ is wrapped so an outage can never break the transport UI.
 
 ## 4. Firebase CLI
 
+> Deploying from Windows with Git Bash? Follow
+> [`docs/DEPLOY_WINDOWS.md`](DEPLOY_WINDOWS.md) — it covers the whole chain
+> (toolchain install → login → Cloud Run → Hosting) with Windows-specific
+> notes.
+
 ```bash
 # One-time setup
 npm install -g firebase-tools
@@ -111,7 +116,7 @@ firebase deploy --only hosting
 `firebase.json` publishes the `frontend/` directory:
 
 - `/api/**` is rewritten to the Cloud Run / Cloud Functions service
-  `srmtrpai` in `asia-south1`.
+  `srm-trp-transport` in `asia-south1`.
 - Everything else falls back to `/index.html` for client-side routing.
 - `/assets/**` and `/vendor/**` get a one-year immutable cache header.
 - `/api/**` is explicitly `no-store`.
@@ -156,7 +161,7 @@ gcloud run deploy srm-trp-transport \
   --platform managed \
   --allow-unauthenticated \
   --set-env-vars "ENVIRONMENT=production,MONGO_DB_NAME=srmtrpai" \
-  --set-secrets "MONGO_URI=mongo-uri:latest,JWT_SECRET=jwt-secret:latest,DEVICE_API_KEYS=device-keys:latest" \
+  --set-secrets "MONGO_URI=mongo-uri:latest,JWT_SECRET=jwt-secret:latest,DEVICE_API_KEYS=device-keys:latest,FIREBASE_API_KEY=firebase-api-key:latest" \
   --set-env-vars "FIREBASE_PROJECT_ID=srmtrpai,FIREBASE_AUTH_DOMAIN=srmtrpai.firebaseapp.com,FIREBASE_APP_ID=1:734375891811:web:6851938bef332bc0e53956,FIREBASE_MEASUREMENT_ID=G-7MXBNH3N7D"
 ```
 

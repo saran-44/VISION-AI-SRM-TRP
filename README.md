@@ -346,6 +346,11 @@ and pull request.
 
 ## Deployment
 
+> Deploying from Windows with Git Bash? Follow
+> [`docs/DEPLOY_WINDOWS.md`](docs/DEPLOY_WINDOWS.md) — the full chain
+> (toolchain install → log in → Cloud Run → Firebase Hosting) with
+> Windows-specific notes.
+
 1. **Provision MongoDB** — a dedicated database with a least-privilege user.
    Indexes are created automatically on startup.
 2. **Set the environment** — at minimum `ENVIRONMENT=production`, `MONGO_URI`,

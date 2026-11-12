@@ -1,0 +1,21 @@
+# Normalise line endings.
+
+# The container build runs on Linux. A Windows checkout that rewrites LF as
+# CRLF produces a Dockerfile whose shell commands end in \r, which fails the
+# build with "/bin/sh^M: not found". Keep text files LF everywhere.
+* text=auto eol=lf
+
+# These are the only formats that must keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets must never be touched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pt binary
+*.woff binary
+*.woff2 binary
