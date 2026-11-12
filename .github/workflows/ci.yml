@@ -98,6 +98,9 @@ jobs:
       - name: Check imports, assets and element references
         run: node scripts/check_frontend.mjs
 
+      - name: Check the Firebase sign-out flow
+        run: node scripts/check_auth_flow.mjs
+
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest

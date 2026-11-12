@@ -14,7 +14,7 @@
  * is rejected even though Firebase signed it happily.
  */
 
-import { initFirebase } from './firebase.js';
+import { initFirebase, signOutFirebase } from './firebase.js';
 
 export class AuthError extends Error {
   constructor(message, code = 'auth/unknown') {
@@ -131,11 +131,9 @@ export async function signInWithGoogle() {
 
 /** Sign out of Firebase and clear the application session cookie. */
 export async function signOut() {
-  try {
-    if (state.authInstance) await state.authInstance.signOut();
-  } catch (_error) {
-    // The local session is cleared regardless of the Firebase result.
-  }
+  // The Firebase session is ended first so the browser does not keep a
+  // signed-in identity that the server has already rejected.
+  await signOutFirebase();
   try {
     await fetch('/api/auth/logout', {
       method: 'POST',
