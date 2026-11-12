@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transport Office - Bus Terminal</title>
+    <link rel="icon" type="image/jpg" href="srmminilogo.jpg">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Boxicons -->
+    <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=1.1">
+    <style>
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .input-group label {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--text-main);
+        }
+
+        .input-group input,
+        .input-group select {
+            padding: 0.8rem 1rem;
+            border: 1px solid var(--border);
+            border-radius: 0.6rem;
+            background-color: transparent;
+            color: var(--text-main);
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.2s;
+            font-family: inherit;
+        }
+
+        .input-group input:focus,
+        .input-group select:focus {
+            border-color: var(--primary);
+        }
+
+        .dark-theme .input-group input,
+        .dark-theme .input-group select {
+            background-color: #1e293b;
+        }
+
+        /* Success Message styling */
+        .toast-msg {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: var(--success);
+            color: white;
+            padding: 1rem 1.5rem;
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+            transform: translateY(150%);
+            transition: transform 0.3s ease;
+            z-index: 1000;
+        }
+
+        .toast-msg.show {
+            transform: translateY(0);
+        }
+
+        .form-actions {
+            display: flex;
+            justify-content: flex-end;
+            border-top: 1px solid var(--border);
+            padding-top: 1.5rem;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="logo">
+                <img src="logo.png" alt="SRM TRP Engineering College Logo">
+            </div>
+
+            <ul class="nav-menu">
+                <li class="nav-item active">
+                    <a href="#" class="nav-link">
+                        <i class='bx bx-plus-circle'></i> Add Details
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="all-drivers.html" class="nav-link">
+                        <i class='bx bx-group'></i> All Drivers
+                    </a>
+                </li>
+            </ul>
+
+            <div class="bottom-nav">
+                <li class="nav-item">
+                    <a href="index.html" class="nav-link" style="color: var(--danger);">
+                        <i class='bx bx-log-out'></i> Log Out
+                    </a>
+                </li>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Top Navigation Bar -->
+            <header class="topbar">
+                <button class="icon-btn menu-toggle" onclick="toggleSidebar()">
+                    <i class='bx bx-menu'></i>
+                </button>
+                <div class="search-bar" id="searchBar">
+                    <button class="close-search-btn hide-on-desktop" onclick="toggleMobileSearch(false)">
+                        <i class='bx bx-arrow-back'></i>
+                    </button>
+                    <i class='bx bx-search'></i>
+                    <input type="text" id="searchInput" placeholder="Search by driver name or bus no... (Press Enter)"
+                        onkeyup="handleSearch(event)">
+                </div>
+
+                <div class="topbar-right">
+                    <div id="liveClock"
+                        style="display: flex; align-items: center; background-color: var(--card-bg); padding: 0.6rem 1.2rem; border-radius: 2rem; box-shadow: 0 2px 10px rgba(0,0,0,0.02); font-weight: 600; font-size: 0.95rem; color: var(--text-main);">
+                        <i class='bx bx-time'
+                            style='color: var(--primary); font-size: 1.2rem; margin-right: 0.5rem;'></i> Loading...
+                    </div>
+
+                    <button class="icon-btn mobile-search-toggle hide-on-desktop" onclick="toggleMobileSearch(true)"
+                        title="Search">
+                        <i class='bx bx-search'></i>
+                    </button>
+
+                    <button class="icon-btn theme-toggle" title="Toggle Dark Theme" onclick="toggleTheme()">
+                        <i class='bx bx-moon'></i>
+                    </button>
+
+                    <div class="user-profile">
+                        <img src="https://ui-avatars.com/api/?name=Transport+Office&background=10b981&color=fff"
+                            alt="Office">
+                        <div class="profile-info">
+                            <h4>Transport Admin</h4>
+                            <p>Data Entry</p>
+                        </div>
+                        <i class='bx bx-chevron-down'></i>
+                    </div>
+                </div>
+            </header>
+
+            <div class="dashboard-content">
+                <div class="page-header">
+                    <h1 class="page-title">Manage Transport Record</h1>
+                </div>
+
+                <div class="card" style="max-width: 900px; padding: 2.5rem;">
+
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                        <h2 class="card-title" style="font-size: 1.25rem;"><i class='bx bx-user-plus'></i> Enter Driver
+                            & Bus Data</h2>
+
+                        <a href="all-drivers.html" class="btn btn-outline"
+                            style="text-decoration: none; padding: 0.6rem 1rem;">
+                            <i class='bx bx-group'></i> View All Drivers
+                        </a>
+                    </div>
+
+                    <form id="recordForm" onsubmit="handleFormSubmit(event)">
+
+                        <div class="form-grid">
+                            <!-- Driver Name -->
+                            <div class="input-group">
+                                <label for="driverName">Driver Name <span style="color:var(--danger)">*</span></label>
+                                <input type="text" id="driverName" placeholder="e.g. John Doe" required>
+                            </div>
+
+                            <!-- Phone Number -->
+                            <div class="input-group">
+                                <label for="phoneNo">Contact Number (Phone)</label>
+                                <input type="tel" id="phoneNo" placeholder="e.g. +91 98765 43210">
+                            </div>
+
+                            <!-- Bus Number (Internal ID) -->
+                            <div class="input-group">
+                                <label for="busID">Bus Number (Internal ID) <span
+                                        style="color:var(--danger)">*</span></label>
+                                <input type="text" id="busID" placeholder="e.g. 40" required>
+                            </div>
+
+                            <!-- Bus Registration Number -->
+                            <div class="input-group">
+                                <label for="busReg">Registration Number</label>
+                                <input type="text" id="busReg" placeholder="e.g. TN 45 AX 1040">
+                            </div>
+
+                            <!-- RC Number -->
+                            <div class="input-group">
+                                <label for="rcNo">RC Number</label>
+                                <input type="text" id="rcNo" placeholder="e.g. RC2023000456">
+                            </div>
+
+                            <!-- Insurance Validation -->
+                            <div class="input-group">
+                                <label for="insurance">Insurance Validity</label>
+                                <input type="date" id="insurance">
+                            </div>
+                        </div>
+
+                        <!-- Notes optional -->
+                        <div class="input-group" style="margin-bottom: 1.5rem;">
+                            <label for="notes">Additional Remarks (Optional)</label>
+                            <input type="text" id="notes" placeholder="Any specific notes for the dashboard admin..."
+                                style="padding: 1.2rem 1rem;">
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary"
+                                style="padding: 0.8rem 2rem; border-radius: 0.5rem; font-size: 1rem;">
+                                <i class='bx bx-save'></i> Save Record
+                            </button>
+                        </div>
+                    </form>
+
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast-msg" id="toastMsg">
+        <i class='bx bx-check-circle'></i> Record saved successfully!
+    </div>
+
+    <script>
+        // Live Clock
+        function updateClock() {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const dateString = now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+            document.getElementById('liveClock').innerHTML = `<i class='bx bx-time' style='color: var(--primary); font-size: 1.2rem; margin-right: 0.5rem;'></i> <span>${timeString}</span> <span style='color: var(--text-muted); font-size: 0.8rem; margin-left: 0.5rem; font-weight: 500;'>${dateString}</span>`;
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // Handle Form Submission
+        function handleFormSubmit(e) {
+            e.preventDefault();
+
+            const form = e.target;
+            const submitBtn = document.getElementById('submitBtn');
+            const originalBtnText = submitBtn.innerHTML;
+
+            submitBtn.innerHTML = "<i class='bx bx-loader-alt bx-spin'></i> Saving...";
+            submitBtn.disabled = true;
+
+            const data = {
+                name: document.getElementById('driverName').value,
+                phone: document.getElementById('phoneNo').value,
+                allottedBus: document.getElementById('busID').value,
+                busRegNo: document.getElementById('busReg').value,
+                rcNumber: document.getElementById('rcNo').value,
+                insurance: document.getElementById('insurance').value,
+                notes: document.getElementById('notes').value,
+                photo: `https://ui-avatars.com/api/?name=${encodeURIComponent(document.getElementById('driverName').value)}&background=2563eb&color=fff&size=80`
+            };
+
+            fetch('http://localhost:5000/api/drivers', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(data)
+            })
+                .then(response => response.json())
+                .then(result => {
+                    if (result.error) throw new Error(result.error);
+
+                    const toast = document.getElementById('toastMsg');
+                    toast.classList.add('show');
+                    setTimeout(() => {
+                        toast.classList.remove('show');
+                    }, 3000);
+
+                    form.reset();
+                })
+                .catch(error => {
+                    console.error("Error saving driver:", error);
+                    alert("Failed to save driver. Make sure the Python API is running on port 5000.");
+                })
+                .finally(() => {
+                    submitBtn.innerHTML = originalBtnText;
+                    submitBtn.disabled = false;
+                });
+        }
+
+        // --- Dark Theme Toggle ---
+        function toggleTheme() {
+            const body = document.body;
+            body.classList.toggle('dark-theme');
+
+            const themeIcon = document.querySelector('.theme-toggle i');
+            if (body.classList.contains('dark-theme')) {
+                themeIcon.classList.remove('bx-moon');
+                themeIcon.classList.add('bx-sun');
+                localStorage.setItem('busDashboardTheme', 'dark');
+            } else {
+                themeIcon.classList.remove('bx-sun');
+                themeIcon.classList.add('bx-moon');
+                localStorage.setItem('busDashboardTheme', 'light');
+            }
+        }
+
+        // Apply saved theme on load
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedTheme = localStorage.getItem('busDashboardTheme');
+            if (savedTheme === 'dark') {
+                document.body.classList.add('dark-theme');
+                const themeIcon = document.querySelector('.theme-toggle i');
+                if (themeIcon) {
+                    themeIcon.classList.remove('bx-moon');
+                    themeIcon.classList.add('bx-sun');
+                }
+            }
+        });
+
+        // --- Sidebar Toggle ---
+        function toggleSidebar() {
+            const sidebar = document.querySelector('.sidebar');
+            sidebar.classList.toggle('active');
+
+            if (sidebar.classList.contains('active')) {
+                const overlay = document.createElement('div');
+                overlay.classList.add('sidebar-overlay');
+                document.body.appendChild(overlay);
+
+                overlay.addEventListener('click', () => {
+                    sidebar.classList.remove('active');
+                    overlay.remove();
+                });
+            } else {
+                const existingOverlay = document.querySelector('.sidebar-overlay');
+                if (existingOverlay) {
+                    existingOverlay.remove();
+                }
+            }
+        }
+    </script>
+
+    <!-- Script for Search Functionality -->
+    <script>
+        // Mock Data for Drivers (used for searching and validating if a driver exists before opening the tab)
+        const driversData = [
+            { name: "lenin", allottedBus: "40" },
+            { name: "Nethin", allottedBus: "36" },
+            { name: "Hari harasuthan", allottedBus: "74" },
+            { name: "Pam Beesly", allottedBus: "12" },
+            { name: "tony", allottedBus: "22" },
+            { name: "Ijaz", allottedBus: "77" }
+        ];
+
+        const searchInput = document.getElementById('searchInput');
+
+        function handleSearch(event) {
+            if (event && event.key !== 'Enter') {
+                return;
+            }
+
+            const query = searchInput.value.toLowerCase().trim();
+
+            if (query.length === 0) {
+                return;
+            }
+
+            // Find driver by name OR bus number
+            const foundDriver = driversData.find(d =>
+                d.name.toLowerCase().includes(query) ||
+                d.allottedBus === query
+            );
+
+            if (foundDriver) {
+                // Open driver details in a new tab using the driver name to ensure consistency
+                window.open(`driver-details.html?driver=${encodeURIComponent(foundDriver.name)}`, '_blank');
+                searchInput.value = ''; // Clear input
+                toggleMobileSearch(false); // Close mobile search overlay if active
+            } else {
+                alert(`No driver or bus found matching "${query}"`);
+            }
+        }
+
+        function toggleMobileSearch(show) {
+            const searchBar = document.getElementById('searchBar');
+            if (show) {
+                searchBar.classList.add('active');
+                document.getElementById('searchInput').focus();
+            } else {
+                searchBar.classList.remove('active');
+            }
+        }
+    </script>
+</body>
+
+</html>

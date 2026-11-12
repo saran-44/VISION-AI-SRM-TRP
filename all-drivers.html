@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>All Drivers - Bus Terminal</title>
+    <link rel="icon" type="image/jpg" href="srmminilogo.jpg">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Boxicons -->
+    <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=1.1">
+    <style>
+        .table-container {
+            overflow-x: auto;
+            background: var(--card-bg);
+            border-radius: 1rem;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+            margin-top: 1.5rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th,
+        td {
+            padding: 1.25rem 1rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-main);
+        }
+
+        th {
+            background-color: var(--app-bg);
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        td {
+            font-size: 0.95rem;
+            vertical-align: middle;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background-color: rgba(37, 99, 235, 0.02);
+        }
+
+        .driver-cell {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .driver-cell img {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            object-fit: cover;
+        }
+
+        .driver-cell span {
+            font-weight: 500;
+        }
+
+        .action-btn {
+            background: none;
+            border: none;
+            color: var(--primary);
+            font-size: 1.25rem;
+            cursor: pointer;
+            padding: 0.4rem;
+            border-radius: 0.4rem;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+        }
+
+        .action-btn:hover {
+            background-color: var(--primary-light);
+            color: var(--primary-hover);
+        }
+
+        .dark-theme tr:hover {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .dark-theme th {
+            background-color: #1e293b;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="logo">
+                <img src="logo.png" alt="SRM TRP Engineering College Logo">
+            </div>
+
+            <ul class="nav-menu">
+                <li class="nav-item">
+                    <a href="TransportOffice.html" class="nav-link">
+                        <i class='bx bx-plus-circle'></i> Add Details
+                    </a>
+                </li>
+                <li class="nav-item active">
+                    <a href="all-drivers.html" class="nav-link">
+                        <i class='bx bx-group'></i> All Drivers
+                    </a>
+                </li>
+            </ul>
+
+            <div class="bottom-nav">
+                <li class="nav-item">
+                    <a href="index.html" class="nav-link" style="color: var(--danger);">
+                        <i class='bx bx-log-out'></i> Log Out
+                    </a>
+                </li>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Top Navigation Bar -->
+            <header class="topbar">
+                <button class="icon-btn menu-toggle" onclick="toggleSidebar()">
+                    <i class='bx bx-menu'></i>
+                </button>
+                <div class="search-bar" id="searchBar">
+                    <button class="close-search-btn hide-on-desktop" onclick="toggleMobileSearch(false)">
+                        <i class='bx bx-arrow-back'></i>
+                    </button>
+                    <i class='bx bx-search'></i>
+                    <input type="text" id="searchInput" placeholder="Search by driver name or bus no... (Press Enter)"
+                        onkeyup="handleSearch(event)">
+                </div>
+
+                <div class="topbar-right">
+                    <button class="icon-btn mobile-search-toggle hide-on-desktop" onclick="toggleMobileSearch(true)"
+                        title="Search">
+                        <i class='bx bx-search'></i>
+                    </button>
+
+                    <button class="icon-btn theme-toggle" title="Toggle Dark Theme" onclick="toggleTheme()">
+                        <i class='bx bx-moon'></i>
+                    </button>
+
+                    <div class="user-profile">
+                        <img src="https://ui-avatars.com/api/?name=Transport+Office&background=10b981&color=fff"
+                            alt="Office">
+                        <div class="profile-info">
+                            <h4>Transport Admin</h4>
+                            <p>Data Entry</p>
+                        </div>
+                        <i class='bx bx-chevron-down'></i>
+                    </div>
+                </div>
+            </header>
+
+            <div class="dashboard-content">
+                <div class="page-header" style="justify-content: flex-start; gap: 1rem;">
+                    <a href="TransportOffice.html"
+                        style="color: var(--text-muted); font-size: 1.5rem; text-decoration: none;"><i
+                            class='bx bx-arrow-back'></i></a>
+                    <h1 class="page-title">Registered Drivers</h1>
+                </div>
+
+                <div class="table-container">
+                    <table id="driversTable">
+                        <thead>
+                            <tr>
+                                <th>Driver Information</th>
+                                <th>Phone Number</th>
+                                <th>Allocated Bus</th>
+                                <th>Registration No.</th>
+                                <th>Insurance</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="driverListBody">
+                            <!-- Populated heavily by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let driversData = [];
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const tbody = document.getElementById('driverListBody');
+
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 2rem;"><i class='bx bx-loader-alt bx-spin' style='font-size: 2rem; color: var(--primary);'></i><p style="margin-top: 0.5rem; color: var(--text-muted);">Loading drivers from database...</p></td></tr>`;
+
+            fetch('http://localhost:5000/api/drivers')
+                .then(response => response.json())
+                .then(data => {
+                    driversData = data;
+                    tbody.innerHTML = '';
+
+                    if (data.length === 0) {
+                        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 2rem; color: var(--text-muted);">No drivers found in the database.</td></tr>`;
+                        return;
+                    }
+
+                    data.forEach(driver => {
+                        const name = driver.name || "Unknown";
+                        const photo = driver.photo || `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=2563eb&color=fff&size=80`;
+                        const phone = driver.phone || "N/A";
+                        const bus = driver.allottedBus || "N/A";
+                        const reg = driver.busRegNo || "N/A";
+                        const ins = driver.insurance || "N/A";
+
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td>
+                                <div class="driver-cell">
+                                    <img src="${photo}" alt="${name}">
+                                    <span>${name}</span>
+                                </div>
+                            </td>
+                            <td>${phone}</td>
+                            <td>
+                                <div class="bus-badge"><i class='bx bx-bus'></i> ${bus}</div>
+                            </td>
+                            <td>${reg}</td>
+                            <td><span style="color: var(--success);"><i class='bx bx-check-circle'></i> ${ins}</span></td>
+                            <td>
+                                <a href="driver-details.html?driver=${encodeURIComponent(name)}" target="_blank" class="action-btn" title="View Full Profile">
+                                    <i class='bx bx-link-external'></i>
+                                </a>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                })
+                .catch(error => {
+                    console.error("Error fetching drivers:", error);
+                    tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 2rem; color: var(--danger);"><i class='bx bx-error' style='font-size: 2rem;'></i><p style="margin-top: 0.5rem;">Failed to connect to database. Is the API server running?</p></td></tr>`;
+                });
+        });
+
+        // --- Dark Theme Toggle ---
+        function toggleTheme() {
+            const body = document.body;
+            body.classList.toggle('dark-theme');
+
+            const themeIcon = document.querySelector('.theme-toggle i');
+            if (body.classList.contains('dark-theme')) {
+                themeIcon.classList.remove('bx-moon');
+                themeIcon.classList.add('bx-sun');
+                localStorage.setItem('busDashboardTheme', 'dark');
+            } else {
+                themeIcon.classList.remove('bx-sun');
+                themeIcon.classList.add('bx-moon');
+                localStorage.setItem('busDashboardTheme', 'light');
+            }
+        }
+
+        // Apply saved theme on load
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedTheme = localStorage.getItem('busDashboardTheme');
+            if (savedTheme === 'dark') {
+                document.body.classList.add('dark-theme');
+                const themeIcon = document.querySelector('.theme-toggle i');
+                if (themeIcon) {
+                    themeIcon.classList.remove('bx-moon');
+                    themeIcon.classList.add('bx-sun');
+                }
+            }
+        });
+
+        // --- Sidebar Toggle ---
+        function toggleSidebar() {
+            const sidebar = document.querySelector('.sidebar');
+            sidebar.classList.toggle('active');
+
+            if (sidebar.classList.contains('active')) {
+                const overlay = document.createElement('div');
+                overlay.classList.add('sidebar-overlay');
+                document.body.appendChild(overlay);
+
+                overlay.addEventListener('click', () => {
+                    sidebar.classList.remove('active');
+                    overlay.remove();
+                });
+            } else {
+                const existingOverlay = document.querySelector('.sidebar-overlay');
+                if (existingOverlay) {
+                    existingOverlay.remove();
+                }
+            }
+        }
+
+        // --- Search Functionality ---
+        const searchInput = document.getElementById('searchInput');
+
+        function handleSearch(event) {
+            if (event && event.key !== 'Enter') {
+                return;
+            }
+
+            const query = searchInput.value.toLowerCase().trim();
+            if (query.length === 0) return;
+
+            const foundDriver = driversData.find(d =>
+                d.name.toLowerCase().includes(query) ||
+                d.allottedBus === query
+            );
+
+            if (foundDriver) {
+                window.open(`driver-details.html?driver=${encodeURIComponent(foundDriver.name)}`, '_blank');
+                searchInput.value = '';
+                toggleMobileSearch(false);
+            } else {
+                alert(`No driver or bus found matching "${query}"`);
+            }
+        }
+
+        function toggleMobileSearch(show) {
+            const searchBar = document.getElementById('searchBar');
+            if (show) {
+                searchBar.classList.add('active');
+                document.getElementById('searchInput').focus();
+            } else {
+                searchBar.classList.remove('active');
+            }
+        }
+    </script>
+</body>
+
+</html>

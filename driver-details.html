@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver Details - Campus Bus Terminal</title>
+    <link rel="icon" type="image/jpg" href="srmminilogo.jpg">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Boxicons -->
+    <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=1.2">
+    <style>
+        body {
+            background-color: var(--app-bg);
+            padding: 2rem;
+            display: block;
+            /* Override default centered body */
+            height: auto;
+            overflow-y: auto;
+        }
+
+        .details-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: var(--card-bg);
+            border-radius: 1.5rem;
+            padding: 2.5rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+        }
+
+        .header-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 1rem;
+        }
+
+        .page-title {
+            font-size: 1.5rem;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .page-title i {
+            color: var(--primary);
+        }
+
+        .back-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        .back-btn:hover {
+            color: var(--primary);
+        }
+
+        .not-found-msg {
+            text-align: center;
+            padding: 4rem 0;
+            color: var(--text-muted);
+        }
+
+        /* Mobile Responsiveness */
+        @media (max-width: 640px) {
+            body {
+                padding: 1rem;
+            }
+
+            .details-container {
+                padding: 1.5rem;
+                border-radius: 1rem;
+            }
+
+            .header-actions {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 1rem;
+            }
+
+            .page-title {
+                font-size: 1.25rem;
+            }
+
+            .searchResults-grid {
+                grid-template-columns: 1fr;
+                gap: 2rem;
+            }
+
+            .driver-card {
+                flex-direction: column;
+                text-align: center;
+            }
+
+            .driver-info {
+                align-items: center;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .bus-details-list li {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.5rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="details-container">
+        <div class="header-actions">
+            <h1 class="page-title"><i class='bx bx-id-card'></i> Driver & Bus Profile</h1>
+            <a href="#" onclick="window.close()" class="back-btn"><i class='bx bx-arrow-back'></i> Close Tab</a>
+        </div>
+
+        <div id="contentArea">
+            <div class="not-found-msg">
+                <i class='bx bx-loader-alt bx-spin'
+                    style="font-size: 3rem; color: var(--primary); margin-bottom: 1rem;"></i>
+                <p>Loading driver details...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script for Search Functionality -->
+    <script>
+        // Mock Data for Drivers (Same as Bus.html)
+        const driversData = [
+            {
+                name: "lenin",
+                phone: "+91 98765 43210",
+                photo: "https://ui-avatars.com/api/?name=lenin&background=2563eb&color=fff&size=150",
+                licenseImg: "https://via.placeholder.com/600x350.png?text=Driving+License+-+Lenin",
+                busRegNo: "TN 45 AX 1040",
+                allottedBus: "40",
+                rcNo: "RC2023000456",
+                insurance: "Valid (Expires Dec 2026)"
+            },
+            {
+                name: "Nethin",
+                phone: "+91 91234 56789",
+                photo: "https://ui-avatars.com/api/?name=Nethin&background=10b981&color=fff&size=150",
+                licenseImg: "https://via.placeholder.com/600x350.png?text=Driving+License+-+Nethin",
+                busRegNo: "TN 45 BX 2036",
+                allottedBus: "36",
+                rcNo: "RC2023000789",
+                insurance: "Valid (Expires Jan 2027)"
+            },
+            {
+                name: "Hari harasuthan",
+                phone: "+91 99887 76655",
+                photo: "https://ui-avatars.com/api/?name=Hari+harasuthan&background=f59e0b&color=fff&size=150",
+                licenseImg: "https://via.placeholder.com/600x350.png?text=Driving+License+-+Hari",
+                busRegNo: "TN 45 CX 3074",
+                allottedBus: "74",
+                rcNo: "RC2023000123",
+                insurance: "Valid (Expires Mar 2026)"
+            },
+            {
+                name: "Pam Beesly",
+                phone: "+91 98765 12345",
+                photo: "https://ui-avatars.com/api/?name=Pam+Beesly&background=ef4444&color=fff&size=150",
+                licenseImg: "https://via.placeholder.com/600x350.png?text=Driving+License+-+Pam",
+                busRegNo: "TN 45 DX 4012",
+                allottedBus: "12",
+                rcNo: "RC2023000987",
+                insurance: "Valid (Expires Nov 2025)"
+            },
+            {
+                name: "tony",
+                phone: "+91 99999 88888",
+                photo: "https://ui-avatars.com/api/?name=tony&background=8b5cf6&color=fff&size=150",
+                licenseImg: "https://via.placeholder.com/600x350.png?text=Driving+License+-+Tony",
+                busRegNo: "TN 45 EX 5022",
+                allottedBus: "22",
+                rcNo: "RC2023000555",
+                insurance: "Valid (Expires Feb 2027)"
+            },
+            {
+                name: "Ijaz",
+                phone: "+91 91111 22222",
+                photo: "https://ui-avatars.com/api/?name=Ijaz&background=3b82f6&color=fff&size=150",
+                licenseImg: "https://via.placeholder.com/600x350.png?text=Driving+License+-+Ijaz",
+                busRegNo: "TN 45 FX 6033",
+                allottedBus: "77",
+                rcNo: "RC2023000666",
+                insurance: "Valid (Expires Apr 2026)"
+            }
+        ];
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const driverQuery = urlParams.get('driver');
+            const contentArea = document.getElementById('contentArea');
+
+            // Apply theme if set in local storage
+            const savedTheme = localStorage.getItem('busDashboardTheme');
+            if (savedTheme === 'dark') {
+                document.body.classList.add('dark-theme');
+            }
+
+            if (!driverQuery) {
+                contentArea.innerHTML = `
+                    <div class="not-found-msg">
+                        <i class='bx bx-error-circle' style="font-size: 3rem; color: var(--danger); margin-bottom: 1rem;"></i>
+                        <p>No driver specified. Please search from the dashboard.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Find driver by name OR bus number
+            const foundDriver = driversData.find(d =>
+                d.name.toLowerCase() === driverQuery.toLowerCase() ||
+                d.allottedBus === driverQuery
+            );
+
+            if (foundDriver) {
+                document.title = `${foundDriver.name} - Driver Details`;
+                contentArea.innerHTML = `
+                    <div class="searchResults-grid">
+                        <!-- Left Col: Driver Info -->
+                        <div class="result-section">
+                            <h4>Driver Information</h4>
+                            <div class="driver-card">
+                                <img src="${foundDriver.photo}" alt="${foundDriver.name}" class="driver-photo" style="width: 80px; height: 80px;">
+                                <div class="driver-info">
+                                    <h3 style="font-size: 1.4rem;">${foundDriver.name}</h3>
+                                    <p style="font-size: 1rem;"><i class='bx bx-phone'></i> ${foundDriver.phone}</p>
+                                </div>
+                            </div>
+                            <div class="license-img-container">
+                                <img src="${foundDriver.licenseImg}" alt="Driving License">
+                            </div>
+                        </div>
+
+                        <!-- Right Col: Bus Info -->
+                        <div class="result-section">
+                            <h4>Allotted Bus Details</h4>
+                            <ul class="bus-details-list">
+                                <li>
+                                    <span class="label">Bus Number / ID</span>
+                                    <span class="value"><div class="bus-badge" style="font-size: 1.2rem; padding: 0.5rem 1rem;"><i class='bx bx-bus'></i> ${foundDriver.allottedBus}</div></span>
+                                </li>
+                                <li>
+                                    <span class="label">Registration No.</span>
+                                    <span class="value" style="font-size: 1.1rem;">${foundDriver.busRegNo}</span>
+                                </li>
+                                <li>
+                                    <span class="label">RC Number</span>
+                                    <span class="value">${foundDriver.rcNo}</span>
+                                </li>
+                                <li>
+                                    <span class="label">Insurance Status</span>
+                                    <span class="value" style="color: var(--success);"><i class='bx bx-check-circle'></i> ${foundDriver.insurance}</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                `;
+            } else {
+                contentArea.innerHTML = `
+                    <div class="not-found-msg">
+                        <i class='bx bx-search' style="font-size: 3rem; color: #cbd5e1; margin-bottom: 1rem;"></i>
+                        <p>No driver found matching "${driverQuery}"</p>
+                    </div>
+                `;
+            }
+        });
+    </script>
+</body>
+
+</html>
