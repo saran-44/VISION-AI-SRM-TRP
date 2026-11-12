@@ -35,6 +35,9 @@ def build_config(**overrides) -> Config:
         cors_allowed_origins=("http://localhost:3000",),
         device_api_keys=(DEVICE_KEY,),
         rate_limit_enabled=False,
+        # A Firebase project id so the Firebase sign-in paths are exercised.
+        # The "not configured" behaviour is tested with an explicit override.
+        firebase_project_id="srmtrpai",
     )
     return replace(base, **overrides) if overrides else base
 

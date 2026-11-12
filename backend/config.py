@@ -122,6 +122,11 @@ class Config:
     frontend_dir: Path = ROOT / "frontend"
     firebase: dict[str, str] = field(default_factory=dict)
     firebase_project_id: str = ""
+    firebase_auth_enabled: bool = True
+    firebase_allowed_providers: tuple[str, ...] = ("password", "google.com")
+    firebase_auto_provision: bool = True
+    firebase_default_role: str = "transport_office"
+    legacy_password_login_enabled: bool = True
 
     @classmethod
     def from_env(cls, overrides: dict | None = None) -> "Config":
@@ -152,6 +157,17 @@ class Config:
             camera_streams=camera_streams,
             firebase=firebase,
             firebase_project_id=firebase.get("projectId", ""),
+            # Firebase sign-in is only usable when a project id is configured.
+            # The flag stays on by default so that adding the project id is
+            # enough to switch it on.
+            firebase_auth_enabled=_bool("FIREBASE_AUTH_ENABLED", True)
+            and bool(firebase.get("projectId")),
+            firebase_allowed_providers=_csv("FIREBASE_ALLOWED_PROVIDERS")
+            or ("password", "google.com"),
+            firebase_auto_provision=_bool("FIREBASE_AUTO_PROVISION", True),
+            firebase_default_role=os.getenv("FIREBASE_DEFAULT_ROLE", "transport_office").strip()
+            or "transport_office",
+            legacy_password_login_enabled=_bool("LEGACY_PASSWORD_LOGIN_ENABLED", True),
         )
         if overrides:
             cfg = replace(cfg, **overrides)
@@ -177,3 +193,17 @@ class Config:
             raise RuntimeError("OVERSTAY_HOURS must be positive")
         if self.jwt_ttl_minutes < 1 or self.jwt_ttl_minutes > 60:
             raise RuntimeError("JWT_TTL_MINUTES must be between 1 and 60")
+        known_providers = {"password", "google.com"}
+        unknown = set(self.firebase_allowed_providers) - known_providers
+        if unknown:
+            raise RuntimeError(
+                "FIREBASE_ALLOWED_PROVIDERS contains unsupported providers: "
+                + ", ".join(sorted(unknown))
+            )
+        if self.firebase_default_role not in {"head_admin", "transport_office"}:
+            raise RuntimeError("FIREBASE_DEFAULT_ROLE must be head_admin or transport_office")
+        if self.firebase_auth_enabled and not self.firebase_project_id:
+            raise RuntimeError(
+                "Firebase sign-in is enabled but no Firebase project id is configured. "
+                "Set FIREBASE_PROJECT_ID, or turn FIREBASE_AUTH_ENABLED off."
+            )

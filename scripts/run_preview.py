@@ -27,7 +27,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.app import create_app  # noqa: E402
-from backend.config import Config  # noqa: E402
+from backend.config import Config, _bool, _firebase_config  # noqa: E402
 from backend.db import create_mongo_client, get_database  # noqa: E402
 from backend.seed_demo import seed_demo_data  # noqa: E402
 
@@ -37,6 +37,8 @@ from backend.seed_demo import seed_demo_data  # noqa: E402
 
 
 def build_config(mongo_uri: str, jwt_secret: str) -> Config:
+    firebase = _firebase_config()
+    project_id = firebase.get("projectId", "")
     base = Config(
         environment="development",
         debug=False,
@@ -58,6 +60,24 @@ def build_config(mongo_uri: str, jwt_secret: str) -> Config:
         ),
         rate_limit_enabled=True,
         app_timezone=os.getenv("APP_TIMEZONE", "Asia/Kolkata"),
+        firebase=firebase,
+        firebase_project_id=project_id,
+        # Firebase sign-in is only usable once a project id is configured.
+        firebase_auth_enabled=_bool("FIREBASE_AUTH_ENABLED", True) and bool(project_id),
+        firebase_allowed_providers=tuple(
+            provider.strip()
+            for provider in os.getenv(
+                "FIREBASE_ALLOWED_PROVIDERS", "password,google.com"
+            ).split(",")
+            if provider.strip()
+        )
+        or ("password", "google.com"),
+        firebase_auto_provision=_bool("FIREBASE_AUTO_PROVISION", True),
+        firebase_default_role=os.getenv(
+            "FIREBASE_DEFAULT_ROLE", "transport_office"
+        ).strip()
+        or "transport_office",
+        legacy_password_login_enabled=_bool("LEGACY_PASSWORD_LOGIN_ENABLED", True),
     )
     base.validate()
     return base

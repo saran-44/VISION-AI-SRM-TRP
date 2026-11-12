@@ -36,6 +36,12 @@ class LoginSchema(StrictModel):
         return value.lower()
 
 
+class FirebaseTokenSchema(StrictModel):
+    """The Firebase ID token handed over after a successful Firebase sign-in."""
+
+    id_token: str = Field(min_length=20, max_length=8192)
+
+
 class DriverBase(StrictModel):
     name: str = Field(min_length=2, max_length=80)
     phone: str | None = Field(default=None, min_length=7, max_length=25, pattern=r"^[+0-9()\- ]+$")
