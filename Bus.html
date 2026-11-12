@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campus Bus Terminal Dashboard</title>
+    <link rel="icon" type="image/jpg" href="srmminilogo.jpg">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Boxicons -->
+    <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+    <!-- SheetJS for Excel Download -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <link rel="stylesheet" href="style.css?v=1.1">
+
+</head>
+
+<body>
+
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="logo">
+                <img src="logo.png" alt="SRM TRP Engineering College Logo">
+            </div>
+
+            <ul class="nav-menu">
+                <li class="nav-item active">
+                    <a href="Bus.html" class="nav-link">
+                        <i class='bx bx-grid-alt'></i> Dashboard
+                    </a>
+                </li>
+                <li class="nav-item" id="navAddDetails" style="display: none;">
+                    <a href="TransportOffice.html" class="nav-link">
+                        <i class='bx bx-plus-circle'></i> Add Details
+                    </a>
+                </li>
+            </ul>
+
+            <div class="bottom-nav">
+
+                <li class="nav-item">
+                    <a href="index.html" class="nav-link" style="color: var(--danger);">
+                        <i class='bx bx-log-out'></i> Log Out
+                    </a>
+                </li>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Top Navigation Bar -->
+            <header class="topbar">
+                <button class="icon-btn menu-toggle" onclick="toggleSidebar()">
+                    <i class='bx bx-menu'></i>
+                </button>
+                <div class="search-bar" id="searchBar">
+                    <button class="close-search-btn hide-on-desktop" onclick="toggleMobileSearch(false)">
+                        <i class='bx bx-arrow-back'></i>
+                    </button>
+                    <i class='bx bx-search'></i>
+                    <input type="text" id="searchInput" placeholder="Search by driver name or bus no... (Press Enter)"
+                        onkeyup="handleSearch(event)">
+                </div>
+
+                <div class="topbar-right">
+                    <div id="liveClock"
+                        style="display: flex; align-items: center; background-color: var(--card-bg); padding: 0.6rem 1.2rem; border-radius: 2rem; box-shadow: 0 2px 10px rgba(0,0,0,0.02); font-weight: 600; font-size: 0.95rem; color: var(--text-main);">
+                        <i class='bx bx-time'
+                            style='color: var(--primary); font-size: 1.2rem; margin-right: 0.5rem;'></i> Loading...
+                    </div>
+
+                    <button class="icon-btn mobile-search-toggle hide-on-desktop" onclick="toggleMobileSearch(true)"
+                        title="Search">
+                        <i class='bx bx-search'></i>
+                    </button>
+
+                    <button class="icon-btn theme-toggle" title="Toggle Dark Theme" onclick="toggleTheme()">
+                        <i class='bx bx-moon'></i>
+                    </button>
+
+                    <button class="icon-btn has-notification">
+                        <i class='bx bx-bell'></i>
+                    </button>
+
+                    <div class="user-profile">
+                        <img src="https://ui-avatars.com/api/?name=Head+Admin&background=2563eb&color=fff" alt="Admin">
+                        <div class="profile-info">
+                            <h4>Head Admin</h4>
+                            <p>System Administrator</p>
+                        </div>
+                        <i class='bx bx-chevron-down'></i>
+                    </div>
+                </div>
+            </header>
+
+            <div class="dashboard-content">
+                <div class="page-header">
+                    <h1 class="page-title">Live Dashboard</h1>
+                    <button class="btn btn-outline" onclick="refreshData()">
+                        <i class='bx bx-refresh'></i> Refresh Data
+                    </button>
+                </div>
+
+                <!-- Statistics Grid -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon blue">
+                            <i class='bx bx-bus-school'></i>
+                        </div>
+                        <div class="stat-details">
+                            <h3>Total Campus Buses</h3>
+                            <p>84</p>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon green">
+                            <i class='bx bx-log-in-circle'></i>
+                        </div>
+                        <div class="stat-details">
+                            <h3>Total Entries Today</h3>
+                            <p id="totalEntries">142</p>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon orange">
+                            <i class='bx bx-buildings'></i>
+                        </div>
+                        <div class="stat-details">
+                            <h3>Currently Inside</h3>
+                            <p>28</p>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon red">
+                            <i class='bx bx-error'></i>
+                        </div>
+                        <div class="stat-details">
+                            <h3>Flagged Vehicles</h3>
+                            <p>2</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Camera and Latest Scan Area -->
+                <div class="middle-grid" style="grid-template-columns: 2fr 1fr;">
+                    <!-- CCTV Cameras Grid -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                        <!-- Camera 1 -->
+                        <div class="card" style="padding: 1.25rem;">
+                            <div class="card-header" style="margin-bottom: 0.75rem;">
+                                <h2 class="card-title" style="font-size: 1rem;"><i class='bx bx-cctv'></i> Gate 1 Entry
+                                </h2>
+                                <span class="status-badge"
+                                    style="background: rgba(16, 185, 129, 0.1); color: var(--success); font-size: 0.75rem; padding: 0.2rem 0.6rem;">
+                                    <i class='bx bx-check-circle'></i> Online
+                                </span>
+                            </div>
+                            <div class="camera-container" style="height: 160px;">
+                                <div class="live-badge"
+                                    style="top: 0.5rem; left: 0.5rem; font-size: 0.7rem; padding: 0.2rem 0.5rem;">
+                                    <div class="dot"></div> LIVE
+                                </div>
+                                <div class="camera-overlay">
+                                    <video src="https://files.catbox.moe/oy3vld.mp4" class="camera-bg" autoplay loop
+                                        muted playsinline style="width: 100%; height: 100%; object-fit: cover;"></video>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Camera 2 -->
+                        <div class="card" style="padding: 1.25rem;">
+                            <div class="card-header" style="margin-bottom: 0.75rem;">
+                                <h2 class="card-title" style="font-size: 1rem;"><i class='bx bx-cctv'></i> Gate 1 Exit
+                                </h2>
+                                <span class="status-badge"
+                                    style="background: rgba(16, 185, 129, 0.1); color: var(--success); font-size: 0.75rem; padding: 0.2rem 0.6rem;">
+                                    <i class='bx bx-check-circle'></i> Online
+                                </span>
+                            </div>
+                            <div class="camera-container" style="height: 160px;">
+                                <div class="live-badge"
+                                    style="top: 0.5rem; left: 0.5rem; font-size: 0.7rem; padding: 0.2rem 0.5rem;">
+                                    <div class="dot"></div> LIVE
+                                </div>
+                                <div class="camera-overlay">
+                                    <video src="https://files.catbox.moe/gpo9fj.mp4" class="camera-bg" autoplay loop
+                                        muted playsinline style="width: 100%; height: 100%; object-fit: cover;"></video>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Camera 3 -->
+                        <div class="card" style="padding: 1.25rem;">
+                            <div class="card-header" style="margin-bottom: 0.75rem;">
+                                <h2 class="card-title" style="font-size: 1rem;"><i class='bx bx-cctv'></i> Gate 2 Entry
+                                </h2>
+                                <span class="status-badge"
+                                    style="background: rgba(16, 185, 129, 0.1); color: var(--success); font-size: 0.75rem; padding: 0.2rem 0.6rem;">
+                                    <i class='bx bx-check-circle'></i> Online
+                                </span>
+                            </div>
+                            <div class="camera-container" style="height: 160px;">
+                                <div class="live-badge"
+                                    style="top: 0.5rem; left: 0.5rem; font-size: 0.7rem; padding: 0.2rem 0.5rem;">
+                                    <div class="dot"></div> LIVE
+                                </div>
+                                <div class="camera-overlay">
+                                    <video src="https://files.catbox.moe/g9lufm.mp4" class="camera-bg" autoplay loop
+                                        muted playsinline style="width: 100%; height: 100%; object-fit: cover;"></video>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Camera 4 -->
+                        <div class="card" style="padding: 1.25rem;">
+                            <div class="card-header" style="margin-bottom: 0.75rem;">
+                                <h2 class="card-title" style="font-size: 1rem;"><i class='bx bx-cctv'></i> Gate 2 Exit
+                                </h2>
+                                <span class="status-badge"
+                                    style="background: rgba(16, 185, 129, 0.1); color: var(--success); font-size: 0.75rem; padding: 0.2rem 0.6rem;">
+                                    <i class='bx bx-check-circle'></i> Online
+                                </span>
+                            </div>
+                            <div class="camera-container" style="height: 160px;">
+                                <div class="live-badge"
+                                    style="top: 0.5rem; left: 0.5rem; font-size: 0.7rem; padding: 0.2rem 0.5rem;">
+                                    <div class="dot"></div> LIVE
+                                </div>
+                                <div class="camera-overlay">
+                                    <video src="https://files.catbox.moe/dt2djz.mp4" class="camera-bg" autoplay loop
+                                        muted playsinline style="width: 100%; height: 100%; object-fit: cover;"></video>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Latest Detection Result -->
+                    <div class="card hide-on-mobile" style="height: 100%;">
+                        <div class="card-header">
+                            <h2 class="card-title"><i class='bx bx-scan'></i> Last Detected</h2>
+                        </div>
+                        <div class="scan-details" style="justify-content: flex-start; padding-top: 2rem;">
+                            <p style="color: var(--text-muted); font-weight: 500;">Bus Number Detected</p>
+                            <div class="number-plate" style="font-size: 3rem; margin: 2rem 0;">
+                                BUS-40
+                            </div>
+                            <div class="scan-status" style="font-size: 1.25rem; margin-bottom: 1rem;">
+                                <i class='bx bx-check-shield'></i> Authorized Entry
+                            </div>
+                            <div class="scan-meta">
+                                Scanned 2 seconds ago • OCR Confidence: 98%
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Entries Table -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Recent In/Out Logs</h2>
+                        <div style="display: flex; gap: 10px;">
+                            <button class="btn btn-primary" id="downloadExcelBtn">
+                                <i class='bx bx-export'></i> Download Excel
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="table-container">
+                        <table id="logsTable">
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Bus Number</th>
+                                    <th>Direction</th>
+                                    <th>Driver Name</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Today, 08:45 AM</td>
+                                    <td>
+                                        <div class="bus-badge"><i class='bx bx-bus'></i> 40</div>
+                                    </td>
+                                    <td><span class="status-badge status-in"><i class='bx bx-down-arrow-alt'></i>
+                                            IN</span></td>
+                                    <td>lenin</td>
+                                    <td>Verified OCR</td>
+                                    <td><button class="action-btn" title="View Details"><i
+                                                class='bx bx-dots-vertical-rounded'></i></button></td>
+                                </tr>
+                                <tr>
+                                    <td>Today, 08:30 AM</td>
+                                    <td>
+                                        <div class="bus-badge"><i class='bx bx-bus'></i> 36</div>
+                                    </td>
+                                    <td><span class="status-badge status-in"><i class='bx bx-down-arrow-alt'></i>
+                                            IN</span></td>
+                                    <td>Jim Halpert</td>
+                                    <td>Verified OCR</td>
+                                    <td><button class="action-btn" title="View Details"><i
+                                                class='bx bx-dots-vertical-rounded'></i></button></td>
+                                </tr>
+                                <tr>
+                                    <td>Today, 08:15 AM</td>
+                                    <td>
+                                        <div class="bus-badge"><i class='bx bx-bus'></i> 74</div>
+                                    </td>
+                                    <td><span class="status-badge status-out"><i class='bx bx-up-arrow-alt'></i>
+                                            OUT</span></td>
+                                    <td>Dwight Schrute</td>
+                                    <td>Verified OCR</td>
+                                    <td><button class="action-btn" title="View Details"><i
+                                                class='bx bx-dots-vertical-rounded'></i></button></td>
+                                </tr>
+                                <tr>
+                                    <td>Today, 07:50 AM</td>
+                                    <td>
+                                        <div class="bus-badge"><i class='bx bx-bus'></i> 12</div>
+                                    </td>
+                                    <td><span class="status-badge status-out"><i class='bx bx-up-arrow-alt'></i>
+                                            OUT</span></td>
+                                    <td>Pam Beesly</td>
+                                    <td>Manually Logged</td>
+                                    <td><button class="action-btn" title="View Details"><i
+                                                class='bx bx-dots-vertical-rounded'></i></button></td>
+                                </tr>
+                                <tr>
+                                    <td>Today, 07:42 AM</td>
+                                    <td>
+                                        <div class="bus-badge"><i class='bx bx-bus'></i> 22</div>
+                                    </td>
+                                    <td><span class="status-badge status-in"><i class='bx bx-down-arrow-alt'></i>
+                                            IN</span></td>
+                                    <td>Stanley Hudson</td>
+                                    <td>Verified OCR</td>
+                                    <td><button class="action-btn" title="View Details"><i
+                                                class='bx bx-dots-vertical-rounded'></i></button></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Live Clock
+        function updateClock() {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const dateString = now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+            document.getElementById('liveClock').innerHTML = `<i class='bx bx-time' style='color: var(--primary); font-size: 1.2rem; margin-right: 0.5rem;'></i> <span>${timeString}</span> <span style='color: var(--text-muted); font-size: 0.8rem; margin-left: 0.5rem; font-weight: 500;'>${dateString}</span>`;
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // Simulate Camera refresh
+        function refreshData() {
+            const btn = document.querySelector('.btn-outline i');
+            btn.classList.add('bx-spin');
+
+            setTimeout(() => {
+                btn.classList.remove('bx-spin');
+                // Simulate new entry
+                const tbody = document.querySelector('tbody');
+                const row = document.createElement('tr');
+
+                const currentTimes = new Date();
+                const timeString = currentTimes.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const directionIn = Math.random() > 0.5;
+                const badges = directionIn ? '<span class="status-badge status-in"><i class="bx bx-down-arrow-alt"></i> IN</span>' : '<span class="status-badge status-out"><i class="bx bx-up-arrow-alt"></i> OUT</span>';
+                const busNums = [40, 36, 74, 12, 22, 55, 18];
+                const randBus = busNums[Math.floor(Math.random() * busNums.length)];
+
+                row.innerHTML = `
+                    <td>Today, ${timeString}</td>
+                    <td><div class="bus-badge"><i class='bx bx-bus'></i> ${randBus}</div></td>
+                    <td>${badges}</td>
+                    <td>Auto Gen User</td>
+                    <td>Verified OCR</td>
+                    <td><button class="action-btn" title="View Details"><i class='bx bx-dots-vertical-rounded'></i></button></td>
+                `;
+
+                // Add highlight animation
+                row.style.backgroundColor = '#eff6ff';
+                tbody.insertBefore(row, tbody.firstChild);
+
+                if (tbody.children.length > 5) {
+                    tbody.removeChild(tbody.lastChild);
+                }
+
+                setTimeout(() => {
+                    row.style.backgroundColor = '';
+                }, 1000);
+
+                // Update number plate
+                document.querySelector('.number-plate').textContent = `BUS-${randBus}`;
+
+                // Update total
+                let total = parseInt(document.getElementById('totalEntries').textContent);
+                document.getElementById('totalEntries').textContent = total + 1;
+
+            }, 800);
+        }
+
+        // Export table to Excel Feature
+        document.getElementById('downloadExcelBtn').addEventListener('click', function () {
+            // Get table data
+            const table = document.getElementById('logsTable');
+
+            // Create a custom array representation without the the Action column and icons
+            const rows = Array.from(table.rows);
+            const csvData = [];
+
+            // Add Header
+            csvData.push(['Timestamp', 'Bus Number', 'Direction', 'Driver Name', 'Status']);
+
+            // Add Rows
+            for (let i = 1; i < rows.length; i++) {
+                const cells = rows[i].cells;
+                csvData.push([
+                    cells[0].innerText.trim(),
+                    cells[1].innerText.trim(),
+                    cells[2].innerText.trim().replace('IN', 'In').replace('OUT', 'Out'),
+                    cells[3].innerText.trim(),
+                    cells[4].innerText.trim()
+                ]);
+            }
+
+            // Generate Excel
+            const worksheet = XLSX.utils.aoa_to_sheet(csvData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Bus Logs");
+
+            // Download file
+            XLSX.writeFile(workbook, "Campus_Bus_Logs_" + new Date().toISOString().split('T')[0] + ".xlsx");
+        });
+
+
+
+        // --- Auto Update Feature ---
+        async function fetchAndUpdateLogs() {
+            try {
+                // Fetch the file containing the recent logs
+                const response = await fetch('Recent_In_Out_Logs.csv', { cache: 'no-store' });
+                if (!response.ok) return;
+
+                const arrayBuffer = await response.arrayBuffer();
+                const data = new Uint8Array(arrayBuffer);
+                const workbook = XLSX.read(data, { type: 'array' });
+
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+                if (jsonData.length > 1) {
+                    const tbody = document.querySelector('#logsTable tbody');
+                    tbody.innerHTML = '';
+
+                    for (let i = 1; i < jsonData.length; i++) {
+                        const rowData = jsonData[i];
+                        if (rowData.length === 0 || !rowData[0]) continue;
+
+                        const tr = document.createElement('tr');
+                        const timestamp = rowData[0] || '';
+                        const busNum = rowData[1] || '';
+                        const direction = rowData[2] || '';
+                        const driver = rowData[3] || '';
+                        const status = rowData[4] || '';
+
+                        const isOut = direction.toString().toLowerCase().includes('out');
+                        const dirBadge = isOut ?
+                            `<span class="status-badge status-out"><i class='bx bx-up-arrow-alt'></i> OUT</span>` :
+                            `<span class="status-badge status-in"><i class='bx bx-down-arrow-alt'></i> IN</span>`;
+
+                        tr.innerHTML = `
+                            <td>${timestamp}</td>
+                            <td>
+                                <div class="bus-badge"><i class='bx bx-bus'></i> ${busNum}</div>
+                            </td>
+                            <td>${dirBadge}</td>
+                            <td>${driver}</td>
+                            <td>${status}</td>
+                            <td><button class="action-btn" title="View Details"><i class='bx bx-dots-vertical-rounded'></i></button></td>
+                        `;
+                        tbody.appendChild(tr);
+                    }
+
+                    // Update UI counters and latest scan
+                    if (jsonData[1] && jsonData[1][1]) {
+                        document.querySelector('.number-plate').textContent = 'BUS-' + jsonData[1][1];
+                    }
+                }
+            } catch (error) {
+                console.warn('Auto-update using fetch API failed. This is expected if running directly from the file:// protocol without a proper server due to CORS restrictions.', error);
+            }
+        }
+
+        // Check for updates every 3 seconds
+        setInterval(fetchAndUpdateLogs, 3000);
+
+        // Initial fetch on load
+        fetchAndUpdateLogs();
+
+        // --- Dark Theme Toggle ---
+        function toggleTheme() {
+            const body = document.body;
+            body.classList.toggle('dark-theme');
+
+            const themeIcon = document.querySelector('.theme-toggle i');
+            if (body.classList.contains('dark-theme')) {
+                themeIcon.classList.remove('bx-moon');
+                themeIcon.classList.add('bx-sun');
+                localStorage.setItem('busDashboardTheme', 'dark');
+            } else {
+                themeIcon.classList.remove('bx-sun');
+                themeIcon.classList.add('bx-moon');
+                localStorage.setItem('busDashboardTheme', 'light');
+            }
+        }
+
+        // Apply saved theme on load
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedTheme = localStorage.getItem('busDashboardTheme');
+            if (savedTheme === 'dark') {
+                document.body.classList.add('dark-theme');
+                const themeIcon = document.querySelector('.theme-toggle i');
+                if (themeIcon) {
+                    themeIcon.classList.remove('bx-moon');
+                    themeIcon.classList.add('bx-sun');
+                }
+            }
+        });
+
+        // --- Sidebar Toggle ---
+        function toggleSidebar() {
+            const sidebar = document.querySelector('.sidebar');
+
+            sidebar.classList.toggle('active');
+
+            // Optional: Close sidebar when clicking outside on mobile
+            if (sidebar.classList.contains('active')) {
+                const overlay = document.createElement('div');
+                overlay.classList.add('sidebar-overlay');
+                document.body.appendChild(overlay);
+
+                overlay.addEventListener('click', () => {
+                    sidebar.classList.remove('active');
+                    overlay.remove();
+                });
+            } else {
+                const existingOverlay = document.querySelector('.sidebar-overlay');
+                if (existingOverlay) {
+                    existingOverlay.remove();
+                }
+            }
+        }
+    </script>
+
+    <!-- Script for Search Functionality -->
+    <script>
+        // Mock Data for Drivers (used for searching and validating if a driver exists before opening the tab)
+        const driversData = [
+            { name: "lenin", allottedBus: "40" },
+            { name: "Nethin", allottedBus: "36" },
+            { name: "Hari harasuthan", allottedBus: "74" },
+            { name: "Pam Beesly", allottedBus: "12" },
+            { name: "tony", allottedBus: "22" },
+            { name: "Ijaz", allottedBus: "77" }
+        ];
+
+        const searchInput = document.getElementById('searchInput');
+
+        function handleSearch(event) {
+            if (event && event.key !== 'Enter') {
+                return;
+            }
+
+            const query = searchInput.value.toLowerCase().trim();
+
+            if (query.length === 0) {
+                return;
+            }
+
+            // Find driver by name OR bus number
+            const foundDriver = driversData.find(d =>
+                d.name.toLowerCase().includes(query) ||
+                d.allottedBus === query
+            );
+
+            if (foundDriver) {
+                // Open driver details in a new tab using the driver name to ensure consistency
+                window.open(`driver-details.html?driver=${encodeURIComponent(foundDriver.name)}`, '_blank');
+                searchInput.value = ''; // Clear input
+                toggleMobileSearch(false); // Close mobile search overlay if active
+            } else {
+                alert(`No driver or bus found matching "${query}"`);
+            }
+        }
+
+        // --- User Role UI Logic ---
+        window.addEventListener('DOMContentLoaded', () => {
+            const role = localStorage.getItem('userRole');
+            const navAddDetails = document.getElementById('navAddDetails');
+
+            if (role === 'office') {
+                // Update profile info
+                document.querySelector('.user-profile img').src = "https://ui-avatars.com/api/?name=Transport+Office&background=10b981&color=fff";
+                document.querySelector('.profile-info h4').textContent = "Transport Admin";
+                document.querySelector('.profile-info p').textContent = "Data Entry";
+
+                // Show nav item
+                if (navAddDetails) navAddDetails.style.display = 'block';
+            } else if (role === 'head') {
+                // Ensure default Head Admin
+                if (navAddDetails) navAddDetails.style.display = 'none';
+            }
+        });
+
+        function toggleMobileSearch(show) {
+            const searchBar = document.getElementById('searchBar');
+            if (show) {
+                searchBar.classList.add('active');
+                document.getElementById('searchInput').focus();
+            } else {
+                searchBar.classList.remove('active');
+            }
+        }
+    </script>
+</body>
+
+</html>
