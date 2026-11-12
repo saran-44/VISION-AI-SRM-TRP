@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 92" role="img" aria-labelledby="title desc">
+  <title id="title">SRM TRP Transport</title>
+  <desc id="desc">Text-based SRM TRP Transport wordmark in the project blue palette.</desc>
+  <rect x="2" y="2" width="356" height="88" rx="18" fill="#eff6ff" stroke="#2563eb" stroke-width="3"/>
+  <circle cx="48" cy="46" r="28" fill="#2563eb"/>
+  <path d="M34 47h28M48 33v28" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+  <text x="90" y="42" font-family="Inter, Arial, sans-serif" font-size="27" font-weight="800" fill="#1d4ed8">SRM</text>
+  <text x="90" y="68" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="700" letter-spacing="2.4" fill="#1e293b">TRP TRANSPORT</text>
+</svg>

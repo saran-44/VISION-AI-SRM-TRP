@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Logs · SRM TRP Transport</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/vendor/xlsx.full.min.js" defer></script>
+  <script type="module" src="/js/logs.js"></script>
+</head>
+<body>
+  <div id="app-shell"></div>
+  <template id="page-template">
+    <section class="page-header">
+      <div><h1 class="page-title">Live In/Out Logs</h1><p class="card-subtitle">Filter and export events ingested by detection devices.</p></div>
+      <div class="page-header-actions">
+        <span id="logsSummary" class="muted">—</span>
+        <button id="refreshLogs" class="btn btn-outline" type="button"><i class='bx bx-refresh' aria-hidden="true"></i> Refresh</button>
+      </div>
+    </section>
+    <section class="card">
+      <form id="logsFilters" class="filters">
+        <div class="filter-grid">
+          <div class="input-group"><label for="logsDate">Date</label><input id="logsDate" name="date" type="date"></div>
+          <div class="input-group"><label for="logsBus">Bus number</label><input id="logsBus" name="bus_number" type="text" placeholder="BUS-001"></div>
+          <div class="input-group"><label for="logsGate">Gate</label><input id="logsGate" name="gate" type="text" placeholder="Gate 1"></div>
+          <div class="input-group"><label for="logsDirection">Direction</label><select id="logsDirection" name="direction"><option value="">All</option><option value="IN">IN</option><option value="OUT">OUT</option></select></div>
+          <div class="input-group"><label for="logsFlagged">Flagged</label><select id="logsFlagged" name="flagged"><option value="">All</option><option value="true">Flagged only</option><option value="false">Clear only</option></select></div>
+          <div class="input-group"><label for="logsPageSize">Rows</label><select id="logsPageSize" name="page_size"><option value="25">25</option><option value="50">50</option><option value="100">100</option><option value="200">200</option></select></div>
+          <input name="hours" type="hidden" value="24">
+          <input name="page" type="hidden" value="1">
+        </div>
+        <div class="button-row">
+          <button class="btn btn-primary" type="submit"><i class='bx bx-check' aria-hidden="true"></i> Apply</button>
+          <button class="btn btn-outline" type="reset"><i class='bx bx-reset' aria-hidden="true"></i> Reset</button>
+          <button id="exportCsv" class="btn btn-outline" type="button"><i class='bx bx-export' aria-hidden="true"></i> CSV</button>
+          <button id="exportXlsx" class="btn btn-outline" type="button"><i class='bx bx-export' aria-hidden="true"></i> Excel</button>
+        </div>
+      </form>
+    </section>
+    <section class="card">
+      <div class="card-header"><h2 class="card-title">Events</h2></div>
+      <div id="logsState"></div>
+      <div class="table-container">
+        <table id="logsTable" class="data-table">
+          <thead><tr><th>Timestamp</th><th>Bus Number</th><th>Direction</th><th>Gate</th><th>Camera</th><th>Confidence</th><th>Flags / Reason</th><th>Action</th></tr></thead>
+          <tbody id="logsBody"></tbody>
+        </table>
+      </div>
+      <div id="logsPagination"></div>
+    </section>
+  </template>
+</body>
+</html>

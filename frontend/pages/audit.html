@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audit Log · SRM TRP Transport</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script type="module" src="/js/audit.js"></script>
+</head>
+<body>
+  <div id="app-shell"></div>
+  <template id="page-template">
+    <section class="page-header">
+      <div><h1 class="page-title">Audit Log</h1><p id="auditSummary" class="card-subtitle">—</p></div>
+      <div class="page-header-actions"><button id="refreshAudit" class="btn btn-outline" type="button"><i class='bx bx-refresh' aria-hidden="true"></i> Refresh</button></div>
+    </section>
+    <section class="card">
+      <form id="auditSearchForm" class="filters">
+        <div class="filter-grid">
+          <div class="input-group"><label for="auditQuery">Search audit entries</label><input id="auditQuery" name="q" type="search" placeholder="Actor, action, collection or record ID"></div>
+          <input name="page" type="hidden" value="1">
+          <input name="page_size" type="hidden" value="25">
+        </div>
+        <div class="button-row"><button class="btn btn-primary" type="submit"><i class='bx bx-search' aria-hidden="true"></i> Search</button></div>
+      </form>
+    </section>
+    <section class="card">
+      <div class="card-header"><h2 class="card-title">Change history</h2></div>
+      <div id="auditState"></div>
+      <div class="table-container">
+        <table id="auditTable" class="data-table">
+          <thead><tr><th>Time</th><th>Actor</th><th>Role</th><th>Action</th><th>Collection</th><th>Record ID</th><th>Details</th></tr></thead>
+          <tbody id="auditBody"></tbody>
+        </table>
+      </div>
+      <div id="auditPagination"></div>
+    </section>
+  </template>
+</body>
+</html>

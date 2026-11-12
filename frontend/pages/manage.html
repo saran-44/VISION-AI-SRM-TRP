@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Manage Records · SRM TRP Transport</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script type="module" src="/js/manage.js"></script>
+</head>
+<body>
+  <div id="app-shell"></div>
+  <template id="page-template">
+    <section class="page-header">
+      <div><h1 class="page-title">Manage Transport Records</h1><p class="card-subtitle">Add, edit and delete buses and drivers. Every change is audited.</p></div>
+      <div class="page-header-actions"><button id="refreshManage" class="btn btn-outline" type="button"><i class='bx bx-refresh' aria-hidden="true"></i> Refresh</button></div>
+    </section>
+
+    <section class="detail-grid">
+      <article class="card">
+        <div class="card-header"><h2 class="card-title"><i class='bx bx-bus-school' aria-hidden="true"></i> Bus record</h2></div>
+        <form id="busForm">
+          <input name="id" type="hidden" value="">
+          <div class="form-grid">
+            <div class="input-group"><label for="busNumber">Bus number *</label><input id="busNumber" name="bus_number" type="text" placeholder="BUS-001" required></div>
+            <div class="input-group"><label for="busRegistration">Registration</label><input id="busRegistration" name="registration_number" type="text" placeholder="DEMO-REG-001"></div>
+            <div class="input-group"><label for="busRoute">Route</label><input id="busRoute" name="route" type="text" placeholder="Demo Route A"></div>
+            <div class="input-group"><label for="busCapacity">Capacity</label><input id="busCapacity" name="capacity" type="number" min="1" max="120" value="40" required></div>
+            <div class="input-group"><label for="busInsurance">Insurance expiry</label><input id="busInsurance" name="insurance_expiry" type="date"></div>
+            <div class="input-group"><label for="busStatus">Status</label><select id="busStatus" name="status"><option value="active">Active</option><option value="maintenance">Maintenance</option><option value="retired">Retired</option></select></div>
+          </div>
+          <div class="input-group"><label for="busNotes">Notes</label><textarea id="busNotes" name="notes" placeholder="Optional operational note"></textarea></div>
+          <div class="form-actions">
+            <button class="btn btn-outline" type="reset"><i class='bx bx-reset' aria-hidden="true"></i> Clear</button>
+            <button id="busSubmit" class="btn btn-primary" type="submit"><i class='bx bx-save' aria-hidden="true"></i> Save Bus</button>
+          </div>
+        </form>
+      </article>
+
+      <article class="card">
+        <div class="card-header"><h2 class="card-title"><i class='bx bx-user-plus' aria-hidden="true"></i> Driver record</h2></div>
+        <form id="driverForm">
+          <input name="id" type="hidden" value="">
+          <div class="form-grid">
+            <div class="input-group"><label for="driverName">Driver name *</label><input id="driverName" name="name" type="text" placeholder="Demo Driver One" required></div>
+            <div class="input-group"><label for="driverPhone">Contact number</label><input id="driverPhone" name="phone" type="tel" placeholder="+91 00000 00001"></div>
+            <div class="input-group"><label for="driverBus">Assigned bus *</label><select id="driverBus" name="bus_number" required><option value="">Select a registered bus</option></select></div>
+            <div class="input-group"><label for="driverLicense">Licence number</label><input id="driverLicense" name="license_number" type="text" placeholder="DEMO-LIC-001"></div>
+          </div>
+          <div class="input-group"><label for="driverNotes">Notes</label><textarea id="driverNotes" name="notes" placeholder="Optional note"></textarea></div>
+          <div class="switch-row input-group"><input id="driverActive" name="active" type="checkbox" checked><label for="driverActive">Active driver</label></div>
+          <div class="form-actions">
+            <button class="btn btn-outline" type="reset"><i class='bx bx-reset' aria-hidden="true"></i> Clear</button>
+            <button id="driverSubmit" class="btn btn-primary" type="submit"><i class='bx bx-save' aria-hidden="true"></i> Save Driver</button>
+          </div>
+        </form>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="card-header"><h2 class="card-title">Buses</h2></div>
+      <div id="manageBusesState"></div>
+      <div class="table-container">
+        <table id="manageBusesTable" class="data-table">
+          <thead><tr><th>Bus Number</th><th>Registration</th><th>Route</th><th>Capacity</th><th>Insurance</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="manageBusesBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header"><h2 class="card-title">Drivers</h2></div>
+      <div id="manageDriversState"></div>
+      <div class="table-container">
+        <table id="manageDriversTable" class="data-table">
+          <thead><tr><th>Driver</th><th>Phone</th><th>Bus</th><th>Licence</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="manageDriversBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </template>
+</body>
+</html>

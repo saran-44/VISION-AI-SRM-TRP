@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Dashboard · SRM TRP Transport</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/vendor/chart.umd.js" defer></script>
+  <script src="/vendor/hls.min.js" defer></script>
+  <script src="/vendor/xlsx.full.min.js" defer></script>
+  <script type="module" src="/js/dashboard.js"></script>
+</head>
+<body>
+  <div id="app-shell"></div>
+  <template id="page-template">
+    <section class="page-header">
+      <div>
+        <h1 class="page-title">Live Dashboard</h1>
+        <p class="card-subtitle">Gate activity computed from real detection events.</p>
+      </div>
+      <div class="page-header-actions">
+        <span id="streamMode" class="tag">Connecting…</span>
+        <span id="lastUpdated" class="muted">Waiting for data</span>
+        <button id="refreshButton" class="btn btn-outline" type="button"><i class='bx bx-refresh' aria-hidden="true"></i> Refresh Data</button>
+      </div>
+    </section>
+
+    <section class="stats-grid" aria-label="Live statistics">
+      <article class="stat-card">
+        <div class="stat-icon blue"><i class='bx bx-bus-school' aria-hidden="true"></i></div>
+        <div class="stat-details"><h3>Total Campus Buses</h3><p data-stat="total_buses">—</p></div>
+      </article>
+      <article class="stat-card">
+        <div class="stat-icon green"><i class='bx bx-log-in-circle' aria-hidden="true"></i></div>
+        <div class="stat-details"><h3>Total Entries Today</h3><p data-stat="entries_today">—</p></div>
+      </article>
+      <article class="stat-card">
+        <div class="stat-icon orange"><i class='bx bx-buildings' aria-hidden="true"></i></div>
+        <div class="stat-details"><h3>Currently Inside</h3><p data-stat="buses_inside">—</p></div>
+      </article>
+      <article class="stat-card">
+        <div class="stat-icon red"><i class='bx bx-error' aria-hidden="true"></i></div>
+        <div class="stat-details"><h3>Flagged Vehicles</h3><p data-stat="flagged_today">—</p><p id="flagBreakdown" class="card-subtitle">Waiting for live event data…</p></div>
+      </article>
+    </section>
+
+    <section class="middle-grid">
+      <div id="cameraGrid" class="camera-grid" aria-label="Gate camera tiles"></div>
+      <article class="card hide-on-mobile">
+        <div class="card-header"><h2 class="card-title"><i class='bx bx-scan' aria-hidden="true"></i> Last Detected</h2></div>
+        <div id="lastDetectedState"></div>
+        <div class="scan-details">
+          <p class="muted">Bus Number Detected</p>
+          <div id="plateValue" class="number-plate">—</div>
+          <div id="scanStatus" class="scan-status">Awaiting first detection</div>
+          <div id="scanMeta" class="scan-meta">No events have been ingested yet.</div>
+        </div>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2 class="card-title"><i class='bx bx-filter-alt' aria-hidden="true"></i> Filters &amp; export</h2>
+        <span id="eventsSummary" class="muted">—</span>
+      </div>
+      <form id="dashboardFilters" class="filters">
+        <div class="filter-grid">
+          <div class="input-group"><label for="dashDate">Date</label><input id="dashDate" name="date" type="date"></div>
+          <div class="input-group"><label for="dashBus">Bus number</label><input id="dashBus" name="bus_number" type="text" placeholder="BUS-001"></div>
+          <div class="input-group"><label for="dashGate">Gate</label><input id="dashGate" name="gate" type="text" placeholder="Gate 1"></div>
+          <div class="input-group"><label for="dashDirection">Direction</label><select id="dashDirection" name="direction"><option value="">All</option><option value="IN">IN</option><option value="OUT">OUT</option></select></div>
+          <div class="input-group"><label for="dashFlagged">Flagged</label><select id="dashFlagged" name="flagged"><option value="">All</option><option value="true">Flagged only</option><option value="false">Clear only</option></select></div>
+          <div class="input-group"><label for="dashHours">Chart hours</label><input id="dashHours" name="hours" type="number" min="1" max="168" value="24"></div>
+          <input name="page" type="hidden" value="1">
+          <input name="page_size" type="hidden" value="8">
+        </div>
+        <div class="button-row">
+          <button class="btn btn-primary" type="submit"><i class='bx bx-check' aria-hidden="true"></i> Apply filters</button>
+          <button class="btn btn-outline" type="reset"><i class='bx bx-reset' aria-hidden="true"></i> Reset</button>
+          <button id="exportCsv" class="btn btn-outline" type="button"><i class='bx bx-export' aria-hidden="true"></i> CSV</button>
+          <button id="exportXlsx" class="btn btn-outline" type="button"><i class='bx bx-export' aria-hidden="true"></i> Excel</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="chart-grid" aria-label="Event analytics charts">
+      <article class="card chart-card">
+        <div class="card-header"><h2 class="card-title">Entries per hour</h2></div>
+        <div class="chart-wrap"><canvas id="chart-hour" role="img" aria-label="Entries per hour chart"></canvas><div class="chart-state"></div></div>
+      </article>
+      <article class="card chart-card">
+        <div class="card-header"><h2 class="card-title">Entries per gate</h2></div>
+        <div class="chart-wrap"><canvas id="chart-gate" role="img" aria-label="Entries per gate chart"></canvas><div class="chart-state"></div></div>
+      </article>
+      <article class="card chart-card">
+        <div class="card-header"><h2 class="card-title">Entries per bus</h2></div>
+        <div class="chart-wrap"><canvas id="chart-bus" role="img" aria-label="Entries per bus chart"></canvas><div class="chart-state"></div></div>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="card-header"><h2 class="card-title">Recent In/Out Logs</h2></div>
+      <div id="eventsState"></div>
+      <div class="table-container">
+        <table id="eventsTable" class="data-table">
+          <thead><tr><th>Timestamp</th><th>Bus Number</th><th>Direction</th><th>Gate</th><th>Camera</th><th>Confidence</th><th>Flags / Reason</th><th>Action</th></tr></thead>
+          <tbody id="eventsBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </template>
+</body>
+</html>

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign In · SRM TRP Transport</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <link rel="stylesheet" href="/assets/login.css">
+  <script type="module" src="/js/login.js"></script>
+</head>
+<body class="login-page">
+  <main class="login-container">
+    <img class="login-logo" src="/assets/logo.svg" alt="SRM TRP Transport">
+    <h1>Welcome Back</h1>
+    <p>Sign in with your provisioned account to access the campus bus terminal.</p>
+    <form id="loginForm" class="login-form" autocomplete="on">
+      <div class="input-group">
+        <label for="email">Email address</label>
+        <i class='bx bx-user' aria-hidden="true"></i>
+        <input id="email" name="email" type="email" placeholder="name@example.edu" autocomplete="username" required>
+      </div>
+      <div class="input-group">
+        <label for="password">Password</label>
+        <i class='bx bx-lock-alt' aria-hidden="true"></i>
+        <input id="password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" minlength="8" required>
+      </div>
+      <button id="loginSubmit" class="btn btn-primary login-btn" type="submit">Sign In to Dashboard</button>
+      <div id="errorMsg" class="error-message" role="alert" hidden></div>
+    </form>
+    <p class="login-note">Accounts are stored in MongoDB with hashed passwords. Contact your administrator if you need access; demo credentials are never committed to this repository.</p>
+  </main>
+</body>
+</html>
