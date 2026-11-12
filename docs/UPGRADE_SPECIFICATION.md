@@ -1110,6 +1110,10 @@ command must be the last command in the chain so its exit code is meaningful.
 
 ### 16.6 Deploy
 
+> The complete Windows/Git Bash sequence — toolchain install, log in, one-time
+> Google Cloud setup, the Firebase console steps, deploy, verify and rollback —
+> is in **`docs/DEPLOY_WINDOWS.md`**.
+
 ```bash
 # --- frontend (Firebase Hosting) ---
 npm install -g firebase-tools
