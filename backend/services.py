@@ -397,4 +397,15 @@ def camera_config(config: Config) -> dict[str, Any]:
             "ocr_confidence_threshold": config.ocr_confidence_threshold,
             "overstay_hours": config.overstay_hours,
         },
+        "camera_support": {
+            "browser_camera": True,
+            "hls": True,
+            "mjpeg": True,
+            "rtsp": "gateway_required",
+            "notes": (
+                "Raw RTSP cannot be opened by a browser. Bridge IP cameras through "
+                "MediaMTX, FFmpeg or the NVR's own HLS/MJPEG output and point the "
+                "stream URL at that gateway."
+            ),
+        },
     }

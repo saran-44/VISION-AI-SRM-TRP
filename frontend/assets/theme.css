@@ -1,0 +1,611 @@
+/* ==========================================================================
+   SRM TRP Transport — "Golden Glass" theme layer
+   --------------------------------------------------------------------------
+   Loaded after styles.css. It keeps the original layout, card structure,
+   sidebar and typography, and re-skins the colour system onto the official
+   SRM TRP brand palette sampled from the college crest:
+
+       navy  #283060   (crest, wordmark)      gold  #F8E840 (crest ring)
+       green #085828   (crest leaves)         red   #A02820 (SRM lettering)
+
+   The default theme is a warm, light "golden glass" look. The deep-navy
+   "midnight" theme is kept as a dark alternative and is toggled with the
+   theme button in the top bar (body.dark-theme).
+   ========================================================================== */
+
+:root {
+    /* --- brand palette --------------------------------------------------- */
+    --brand-navy: #283060;
+    --brand-navy-deep: #1b2044;
+    --brand-navy-soft: #3a4480;
+    --brand-gold: #d4a017;
+    --brand-gold-bright: #f8e840;
+    --brand-gold-soft: #f6e7b4;
+    --brand-gold-ink: #6b4d05;
+    --brand-cream: #fdfaf2;
+    --brand-ivory: #fbf8ef;
+
+    /* --- light golden glass surfaces ------------------------------------ */
+    --app-bg: #f8f4e9;
+    --app-bg-flat: #f8f4e9;
+    --app-bg-gradient: linear-gradient(160deg, #fdfaf1 0%, #f7f1e0 42%, #eef1fa 100%);
+    --aurora-gold: rgba(248, 232, 64, 0.26);
+    --aurora-navy: rgba(40, 48, 96, 0.16);
+    --aurora-amber: rgba(212, 160, 23, 0.16);
+    --sidebar-bg: rgba(255, 255, 255, 0.62);
+    --card-bg: rgba(255, 255, 255, 0.72);
+    --card-bg-solid: #fffdf7;
+    --card-border: rgba(40, 48, 96, 0.12);
+    --primary: #b8860b;
+    --primary-strong: #8f6708;
+    --primary-light: rgba(212, 160, 23, 0.16);
+    --primary-hover: #8f6708;
+    --primary-contrast: #fffdf7;
+    --text-main: #232a4d;
+    --text-muted: #6b7192;
+    --success: #0f7a4a;
+    --success-bg: rgba(15, 122, 74, 0.12);
+    --warning: #b8860b;
+    --warning-bg: rgba(212, 160, 23, 0.16);
+    --danger: #b3261e;
+    --danger-bg: rgba(179, 38, 30, 0.12);
+    --border: rgba(40, 48, 96, 0.12);
+    --glass-blur: 18px;
+    --glass-shadow: 0 10px 30px rgba(40, 48, 96, 0.09);
+    --glass-shadow-hover: 0 18px 44px rgba(40, 48, 96, 0.16);
+    --gold-sheen: linear-gradient(135deg, rgba(248, 232, 64, 0.32), rgba(212, 160, 23, 0.08));
+}
+
+/* --- midnight (dark) alternative: deep navy with the same gold accents --- */
+body.dark-theme {
+    --app-bg: #1b2044;
+    --app-bg-flat: #1b2044;
+    --app-bg-gradient: linear-gradient(160deg, #12162e 0%, #1b2044 45%, #232a52 100%);
+    --aurora-gold: rgba(248, 232, 64, 0.12);
+    --aurora-navy: rgba(40, 48, 96, 0.5);
+    --aurora-amber: rgba(212, 160, 23, 0.08);
+    --sidebar-bg: rgba(24, 29, 60, 0.66);
+    --card-bg: rgba(30, 36, 74, 0.68);
+    --card-bg-solid: #1e244a;
+    --card-border: rgba(248, 232, 64, 0.16);
+    --primary: #f8e840;
+    --primary-strong: #f8e840;
+    --primary-light: rgba(248, 232, 64, 0.14);
+    --primary-hover: #fdf37a;
+    --primary-contrast: #1b2044;
+    --text-main: #f3f4fb;
+    --text-muted: #a8b0d4;
+    --success: #34d399;
+    --success-bg: rgba(52, 211, 153, 0.16);
+    --warning: #f8e840;
+    --warning-bg: rgba(248, 232, 64, 0.16);
+    --danger: #f87171;
+    --danger-bg: rgba(248, 113, 113, 0.16);
+    --border: rgba(248, 232, 64, 0.16);
+    --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    --glass-shadow-hover: 0 18px 44px rgba(0, 0, 0, 0.45);
+    --gold-sheen: linear-gradient(135deg, rgba(248, 232, 64, 0.18), rgba(212, 160, 23, 0.05));
+}
+
+/* --- page background: soft golden aurora behind the glass ---------------
+   The aurora is painted as extra background layers on <body> itself.
+   A separate pseudo-element with a negative z-index would be painted behind
+   the solid background of .app-container and would never be visible, and the
+   layer order here keeps the aurora above the base gradient but below all
+   content.
+   ------------------------------------------------------------------------ */
+body {
+    background-color: var(--app-bg);
+    background-image:
+        radial-gradient(900px 520px at 8% -8%, var(--aurora-gold), transparent 62%),
+        radial-gradient(760px 460px at 96% 4%, var(--aurora-navy), transparent 60%),
+        radial-gradient(700px 500px at 50% 108%, var(--aurora-amber), transparent 62%),
+        var(--app-bg-gradient);
+    background-attachment: fixed;
+    background-size: cover;
+    background-repeat: no-repeat;
+}
+
+/* The shell must not paint over the aurora. */
+.app-container {
+    background-color: transparent;
+}
+
+/* The scrolling content area and the mobile search sheet are surfaces that
+   would otherwise hide the aurora with a flat fill. */
+.main-content {
+    background-color: transparent;
+}
+
+@media (max-width: 900px) {
+    .search-bar {
+        background-color: transparent;
+    }
+}
+
+/* --- glass surfaces ----------------------------------------------------- */
+.sidebar,
+.topbar,
+.card,
+.stat-card,
+.input-group,
+.search-bar,
+.search-bar input,
+.icon-btn,
+.result-item,
+.modal-content,
+.modal-overlay,
+.state-box,
+.data-table th,
+.data-table td,
+.toast,
+.camera-tile,
+.number-plate {
+    backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+}
+
+.sidebar {
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--card-border);
+    box-shadow: 1px 0 0 rgba(255, 255, 255, 0.4) inset, 14px 0 40px rgba(40, 48, 96, 0.06);
+}
+
+body.dark-theme .sidebar {
+    box-shadow: 1px 0 0 rgba(248, 232, 64, 0.06) inset, 14px 0 40px rgba(0, 0, 0, 0.3);
+}
+
+.topbar {
+    background: var(--sidebar-bg);
+    border-bottom: 1px solid var(--card-border);
+    box-shadow: 0 8px 30px rgba(40, 48, 96, 0.05);
+}
+
+body.dark-theme .topbar {
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.28);
+}
+
+.card,
+.stat-card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 1.1rem;
+    box-shadow: var(--glass-shadow);
+    transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+}
+
+.card:hover,
+.stat-card:hover {
+    box-shadow: var(--glass-shadow-hover);
+    border-color: rgba(212, 160, 23, 0.34);
+}
+
+.stat-card {
+    overflow: hidden;
+    position: relative;
+}
+
+.stat-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--gold-sheen);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+
+.stat-card:hover::after {
+    opacity: 1;
+}
+
+/* --- brand lockup in the sidebar ---------------------------------------- */
+.logo {
+    margin-bottom: 1.6rem;
+    padding: 0.35rem 0.25rem 0.6rem;
+}
+
+.logo img {
+    max-height: 74px;
+    width: auto;
+    filter: drop-shadow(0 6px 16px rgba(40, 48, 96, 0.16));
+}
+
+body.dark-theme .logo img {
+    filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.45)) brightness(1.06);
+}
+
+/* --- navigation ---------------------------------------------------------- */
+.nav-link {
+    color: var(--text-muted);
+    border-radius: 0.8rem;
+    transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.nav-link:hover {
+    background: var(--primary-light);
+    color: var(--primary-strong);
+    transform: translateX(2px);
+}
+
+.nav-item.active .nav-link,
+.nav-link.active {
+    background: var(--primary-light);
+    color: var(--primary-strong);
+    box-shadow: inset 3px 0 0 var(--primary);
+    font-weight: 600;
+}
+
+body.dark-theme .nav-item.active .nav-link,
+body.dark-theme .nav-link.active {
+    color: var(--primary);
+    box-shadow: inset 3px 0 0 var(--primary);
+}
+
+/* --- buttons ------------------------------------------------------------- */
+.btn {
+    border-radius: 0.75rem;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--brand-gold) 0%, #c08a10 100%);
+    color: var(--primary-contrast);
+    box-shadow: 0 6px 18px rgba(184, 134, 11, 0.28);
+}
+
+.btn-primary:hover {
+    background: linear-gradient(135deg, var(--brand-gold-bright) 0%, var(--brand-gold) 100%);
+    color: var(--primary-contrast);
+    box-shadow: 0 10px 24px rgba(184, 134, 11, 0.34);
+}
+
+body.dark-theme .btn-primary {
+    background: linear-gradient(135deg, var(--brand-gold-bright) 0%, var(--brand-gold) 100%);
+    color: var(--primary-contrast);
+}
+
+.btn-outline {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    color: var(--text-main);
+}
+
+.btn-outline:hover {
+    background: var(--primary-light);
+    border-color: var(--primary);
+    color: var(--primary-strong);
+}
+
+.icon-btn {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    box-shadow: var(--glass-shadow);
+}
+
+.icon-btn:hover {
+    background: var(--primary-light);
+    color: var(--primary-strong);
+}
+
+/* --- forms --------------------------------------------------------------- */
+.input-group {
+    background: var(--card-bg);
+    border-radius: 0.85rem;
+    border: 1px solid var(--card-border);
+}
+
+.input-group input,
+.input-group select,
+.input-group textarea {
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+}
+
+.input-group:focus-within {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.input-group label {
+    color: var(--text-muted);
+}
+
+/* --- data table ---------------------------------------------------------- */
+.data-table th {
+    background: rgba(40, 48, 96, 0.06);
+    color: var(--text-main);
+    border-bottom: 1px solid var(--card-border);
+}
+
+body.dark-theme .data-table th {
+    background: rgba(248, 232, 64, 0.08);
+}
+
+.data-table td {
+    border-bottom: 1px solid var(--card-border);
+    color: var(--text-main);
+}
+
+.data-table tr:hover td {
+    background: var(--primary-light);
+}
+
+.action-btn {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    color: var(--text-muted);
+}
+
+.action-btn:hover {
+    background: var(--primary-light);
+    color: var(--primary-strong);
+    border-color: var(--primary);
+}
+
+/* --- status + accent bits ------------------------------------------------ */
+.status-badge {
+    background: var(--primary-light);
+    color: var(--primary-strong);
+}
+
+.status-in {
+    background: var(--success-bg);
+    color: var(--success);
+}
+
+.status-out {
+    background: var(--danger-bg);
+    color: var(--danger);
+}
+
+.bus-badge {
+    background: linear-gradient(135deg, var(--brand-navy) 0%, var(--brand-navy-soft) 100%);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(40, 48, 96, 0.25);
+}
+
+body.dark-theme .bus-badge {
+    background: linear-gradient(135deg, var(--brand-gold) 0%, #c08a10 100%);
+    color: #23203a;
+}
+
+.number-plate {
+    background: linear-gradient(135deg, var(--brand-navy) 0%, #14183a 100%);
+    color: var(--brand-gold-bright);
+    border: 2px solid var(--brand-gold);
+    box-shadow: 0 10px 26px rgba(40, 48, 96, 0.28), inset 0 0 22px rgba(248, 232, 64, 0.12);
+    letter-spacing: 0.06em;
+}
+
+body.dark-theme .number-plate {
+    background: linear-gradient(135deg, #12162e 0%, #232a52 100%);
+}
+
+.flag-chip {
+    background: var(--danger-bg);
+    color: var(--danger);
+}
+
+.flag-chip.ok {
+    background: var(--success-bg);
+    color: var(--success);
+}
+
+.tag {
+    background: var(--primary-light);
+    color: var(--primary-strong);
+}
+
+.chart-state .state-box,
+.state-box {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 0.9rem;
+}
+
+.state-loading {
+    color: var(--text-muted);
+}
+
+.state-error {
+    color: var(--danger);
+    background: var(--danger-bg);
+    border-color: rgba(179, 38, 30, 0.2);
+}
+
+.state-empty {
+    color: var(--text-muted);
+    background: var(--primary-light);
+    border-color: rgba(212, 160, 23, 0.2);
+}
+
+.toast {
+    background: var(--brand-navy);
+    color: #fff;
+}
+
+body.dark-theme .toast {
+    background: var(--card-bg-solid);
+    color: var(--text-main);
+    border: 1px solid var(--card-border);
+}
+
+.modal-content {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    box-shadow: 0 26px 70px rgba(40, 48, 96, 0.24);
+}
+
+body.dark-theme .modal-content {
+    box-shadow: 0 26px 70px rgba(0, 0, 0, 0.55);
+}
+
+.result-item {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+}
+
+/* Nested panels keep the glass treatment rather than a flat fill. */
+.driver-card,
+.bus-details-list {
+    background-color: var(--card-bg);
+    border: 1px solid var(--card-border);
+}
+
+.result-item:hover {
+    border-color: var(--primary);
+    background: var(--primary-light);
+}
+
+.search-bar input {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+}
+
+.profile-avatar {
+    background: linear-gradient(135deg, var(--brand-navy) 0%, var(--brand-gold) 140%);
+    color: #fff;
+}
+
+body.dark-theme .profile-avatar {
+    background: linear-gradient(135deg, var(--brand-gold) 0%, var(--brand-navy) 140%);
+    color: #23203a;
+}
+
+.pagination button:disabled {
+    opacity: 0.4;
+}
+
+/* --- login screen -------------------------------------------------------- */
+body.login-page {
+    background-color: var(--app-bg);
+    background-image:
+        radial-gradient(900px 520px at 12% -10%, rgba(248, 232, 64, 0.34), transparent 60%),
+        radial-gradient(760px 460px at 92% 6%, rgba(40, 48, 96, 0.2), transparent 58%),
+        linear-gradient(160deg, #fdfaf1 0%, #f4eddc 50%, #e9edfa 100%);
+    background-attachment: fixed;
+    background-size: cover;
+}
+
+body.login-page.dark-theme {
+    background-color: var(--app-bg);
+    background-image:
+        radial-gradient(900px 520px at 12% -10%, rgba(248, 232, 64, 0.14), transparent 60%),
+        linear-gradient(160deg, #12162e 0%, #1b2044 60%, #232a52 100%);
+    background-attachment: fixed;
+    background-size: cover;
+}
+
+.login-container {
+    background: rgba(255, 255, 255, 0.74);
+    border: 1px solid rgba(40, 48, 96, 0.12);
+    box-shadow: 0 26px 70px rgba(40, 48, 96, 0.16);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+body.dark-theme .login-container {
+    background: rgba(30, 36, 74, 0.7);
+    border-color: rgba(248, 232, 64, 0.16);
+    box-shadow: 0 26px 70px rgba(0, 0, 0, 0.5);
+}
+
+.login-logo {
+    max-height: 96px;
+    width: auto;
+    object-fit: contain;
+    filter: drop-shadow(0 8px 20px rgba(40, 48, 96, 0.18));
+}
+
+.login-btn {
+    background: linear-gradient(135deg, var(--brand-gold) 0%, #c08a10 100%);
+    color: #fffdf7;
+    box-shadow: 0 10px 26px rgba(184, 134, 11, 0.3);
+}
+
+.login-btn:hover {
+    background: linear-gradient(135deg, var(--brand-gold-bright) 0%, var(--brand-gold) 100%);
+}
+
+/* --- camera tiles -------------------------------------------------------- */
+.camera-container {
+    background: #10142c;
+    border: 1px solid var(--card-border);
+}
+
+.camera-placeholder {
+    background: linear-gradient(135deg, #10142c 0%, #232a52 100%);
+    color: #dfe3f7;
+}
+
+.camera-placeholder i {
+    color: var(--brand-gold-bright);
+}
+
+/* --- camera controls (stop / scan plate) --------------------------------- */
+.camera-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-top: 0.75rem;
+}
+
+.camera-controls:empty {
+    display: none;
+}
+
+.camera-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.9rem;
+    font-size: 0.82rem;
+    border-radius: 0.6rem;
+}
+
+.camera-btn i {
+    font-size: 1rem;
+}
+
+.camera-rtsp-notice {
+    gap: 0.35rem;
+    padding: 1.1rem;
+}
+
+.camera-rtsp-notice i {
+    font-size: 1.8rem;
+}
+
+/* --- reduced transparency preference ------------------------------------- */
+@media (prefers-reduced-transparency: reduce) {
+    .sidebar,
+    .topbar,
+    .card,
+    .stat-card,
+    .input-group,
+    .modal-content,
+    .login-container {
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        background: var(--card-bg-solid);
+    }
+}
+
+/* --- print --------------------------------------------------------------- */
+@media print {
+    body {
+        background: #ffffff;
+        background-image: none;
+    }
+
+    .sidebar,
+    .topbar {
+        display: none;
+    }
+}

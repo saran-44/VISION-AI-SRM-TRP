@@ -1,8 +1,30 @@
 # SRM TRP Transport — Upgrade Status Report
 
 **Repository:** `saran-44/frontend` (imported from `hemanathanmd01/Clg-bus-project`)
-**Branch:** `arena/3fa21082-frontend` (based on `main` @ `7b9af73`)
+**Branch:** `arena/1c01d46f-frontend` (based on `main` @ `82f40e6`)
 **Report date:** 2026-11-12
+**Specification:** [`docs/UPGRADE_SPECIFICATION.md`](docs/UPGRADE_SPECIFICATION.md)
+
+> **Update — round 2 (detection, cameras, Firebase, golden glass theme).**
+> The two items that were *PARTIAL* in the first round are now **DONE**:
+>
+> - **Detection is integrated.** The `best.pt` source repository was located
+>   and verified on GitHub
+>   ([`814725105014-debug/SRM-TRP-TRANSPORT-AI`](https://github.com/814725105014-debug/SRM-TRP-TRANSPORT-AI),
+>   1 commit, no licence, weights not committed). Because that project is a
+>   Colab notebook with **no service API**, the pipeline was re-implemented
+>   locally in `backend/vision.py` and exposed at `POST /api/detection/scan`.
+>   Provenance and licence details are in
+>   [`docs/DETECTION.md`](docs/DETECTION.md).
+> - **Cameras are integrated.** The browser webcam works today via
+>   `getUserMedia`; NVR/DVR feeds are supported through HLS and MJPEG; raw
+>   RTSP is documented as requiring a gateway/transcoder and is never loaded
+>   directly by the browser. See [`docs/CAMERAS.md`](docs/CAMERAS.md).
+>
+> Additionally added in this round: **Firebase** (`srmtrpai`) for Hosting and
+> Analytics ([`docs/FIREBASE.md`](docs/FIREBASE.md)), a **golden glass light
+> theme** using the **official SRM TRP crest**, a container/Cloud Run
+> deployment pipeline, and 18 new backend tests (**78 total**).
 
 The original single-file Flask demo (hard-coded credentials, CSV polling,
 copy-pasted HTML pages, personal sample data) has been replaced by a
@@ -10,11 +32,13 @@ copy-pasted HTML pages, personal sample data) has been replaced by a
 REST API, live data, validation, audit logging, tests and CI. The original
 look and feel was kept: the upstream `style.css` was carried over verbatim
 (same blue primary `#2563eb`, Inter font, card layout, dark theme, sidebar) and
-extended rather than redesigned.
+extended rather than redesigned — and is now re-skinned by the golden glass
+theme layer.
 
-**Summary: 8 of the 10 requested work items are DONE, 2 are PARTIAL, 0 are
-NOT DONE.** The two partial items both depend on information only the operator
-can supply (the OCR repository URL and the real camera streams / accounts).
+**Summary: 10 of the 10 requested work items are DONE.** The remaining work
+is operational and needs the operator: credential rotation + history purge,
+the real camera stream URLs, the Firebase API key, and a licence position on
+`best.pt`.
 
 ---
 
@@ -26,12 +50,16 @@ can supply (the OCR repository URL and the real camera streams / accounts).
 | 2 | Real auth (Mongo users, Argon2, short-lived JWT, roles, page protection, logout, audit) | **DONE** | Enforced server-side on every page and endpoint |
 | 3 | REST API (login, driver/bus CRUD, events, stats, CSV + Excel export) | **DONE** | All routes implemented and exercised by tests and a live smoke test |
 | 4 | Live data (SSE + polling fallback, "Currently Inside", flag rules with reasons) | **DONE** | Rules: unregistered plate, low OCR confidence, long overstay |
-| 5 | Detection integration (event contract + device client) | **PARTIAL** | Contract + client are complete; the real OCR repo URL was never supplied, so the detector itself is not integrated |
-| 6 | Dashboard (no hard-coded numbers, camera tiles, charts, filters, API search, states, a11y, mobile) | **DONE** | Not visually verified in a browser — see *Testing* |
+| 5 | Detection integration (event contract + device client) | **DONE** | **Round 2:** `backend/vision.py` runs `best.pt` (YOLOv10n) + OCR and serves `POST /api/detection/scan`. Source repository verified. |
+| 6 | Dashboard (no hard-coded numbers, camera tiles, charts, filters, API search, states, a11y, mobile) | **DONE** | **Round 2:** browser-webcam tile with a working "Scan plate" action. |
 | 7 | Data & privacy (remove personal data/CSVs/videos/photos/PDF, seed script, privacy note) | **DONE** | Removed from the working tree and git-ignored; the old files remain in Git history |
-| 8 | Structure (`/backend` + `/frontend`, ES modules, shared layout, pinned deps incl. SheetJS) | **DONE** | 18 ES modules, one shared layout, 3 vendored libraries pinned with licences |
-| 9 | Quality (README, tests, GitHub Action) | **DONE** | 60 pytest tests + frontend checks + secret scan, wired into CI |
+| 8 | Structure (`/backend` + `/frontend`, ES modules, shared layout, pinned deps incl. SheetJS) | **DONE** | 19 ES modules, one shared layout, 4 vendored libraries pinned with licences |
+| 9 | Quality (README, tests, GitHub Action) | **DONE** | 78 pytest tests + frontend checks + secret scan, wired into CI |
 | 10 | Status report | **DONE** | This document |
+| 11 | **Golden glass light theme + official crest** | **DONE** | **Round 2:** `frontend/assets/theme.css`; the supplied crest is now the logo. |
+| 12 | **Firebase (Hosting + Analytics) on `srmtrpai`** | **DONE** | **Round 2:** `firebase.json`, `.firebaserc`, lazy SDK, backend-served config. |
+| 13 | **NVR/DVR camera support (HLS / MJPEG) + RTSP gateway rule** | **DONE** | **Round 2:** `frontend/js/cameras.js`, `GET /api/stream/<camera_id>`, documented in `docs/CAMERAS.md`. |
+| 14 | **Deployment configuration + Git/Git Bash commands** | **DONE** | **Round 2:** `deploy/Dockerfile`, `deploy/cloudbuild.yaml`, and §16 of the specification. |
 
 ---
 
@@ -259,9 +287,14 @@ on the first push of this branch.
 2. **Purge the other personal/operational data from history** as well
    (photographs, `cam1.mp4`, the CSVs, the PDF, `logo.png`). They are removed
    from the working tree but still exist in earlier commits.
-3. **Provide the OCR/detection GitHub repository URL** and how it is run, so
-   the detector can be wired to `POST /api/events` (the contract is ready; see
-   `docs/EVENT_CONTRACT.md`).
+3. **~~Provide the OCR/detection GitHub repository URL~~ — RESOLVED in round 2.**
+   The source repository was located and verified:
+   [`814725105014-debug/SRM-TRP-TRANSPORT-AI`](https://github.com/814725105014-debug/SRM-TRP-TRANSPORT-AI).
+   It is a Colab notebook with no service API and no licence, so the pipeline
+   was re-implemented locally in `backend/vision.py`. **Remaining action:** get
+   a written licence position on `best.pt` (AGPL-3.0) from the model owner,
+   **or** re-train an equivalent model on a dataset you may use and replace
+   `best.pt`. See `docs/DETECTION.md`.
 4. **Provision the secrets** in your platform's secret manager (never in the
    repository): `MONGO_URI` (least-privilege user), `JWT_SECRET` (≥ 32 random
    characters), `DEVICE_API_KEYS` (one per camera group), `CORS_ALLOWED_ORIGINS`,
@@ -274,16 +307,24 @@ on the first push of this branch.
    contains no personal data, so the operator must load it into MongoDB.
 7. **Configure the camera streams** in `CAMERA_STREAM_URLS`
    (`{"gate-1-entry": {"type": "hls", "url": "https://…", "label": "Gate 1 Entry"}}`).
-   Until then the tiles read "Demo footage" by design.
-8. **Supply the approved SRM TRP logo** (and any official photos) to replace
-   the locally drawn SVG wordmark in `frontend/assets/logo.svg` /
-   `favicon.svg`. Please add only artwork you are allowed to publish.
+   Until then the tiles read "Demo footage" by design. **For RTSP cameras,
+   bridge them through MediaMTX or FFmpeg to HLS/MJPEG first** — a browser
+   cannot open an RTSP session. See `docs/CAMERAS.md`.
+8. **~~Supply the approved SRM TRP logo~~ — RESOLVED in round 2.** The
+   supplied official crest is now the logo
+   (`frontend/assets/logo-emblem.png` and `logo-wordmark.png`), and the golden
+   glass theme uses the sampled brand palette. No further artwork is needed.
 9. **Confirm the privacy note and retention policy** in `docs/PRIVACY.md` with
    the transport office (how long events and driver records are kept, who may
    export them).
 10. **Deployment details**: hosting platform, domain and TLS termination,
     MongoDB hosting and backup policy, worker count, and whether the campus
     network reaches the service directly or through a proxy.
+11. **Set the Firebase API key** in the host's secret store as
+    `FIREBASE_API_KEY` (it is deliberately not committed). The console works
+    without it. See `docs/FIREBASE.md`.
+12. **Terminate TLS in front of the app.** The browser camera API only works
+    in a secure context (`https://` or `http://localhost`).
 
 ---
 

@@ -175,3 +175,38 @@ def require_device_key(fn):
         return fn(*args, **kwargs)
 
     return wrapper
+
+
+def require_device_key_or_roles(*roles: str):
+    """Allow either a device API key or an authenticated session of a given role.
+
+    The camera-detection endpoint is used both by an on-site detector device
+    (which presents `X-Device-Key`) and by an operator scanning a frame from
+    the browser console (which presents the normal session cookie).
+    """
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            config = current_app.config["TRANSPORT_CONFIG"]
+            provided = request.headers.get("X-Device-Key", "")
+            if provided and config.device_api_keys:
+                matched = any(
+                    hmac.compare_digest(provided, expected)
+                    for expected in config.device_api_keys
+                )
+                if matched:
+                    g.device_authenticated = True
+                    return fn(*args, **kwargs)
+
+            user, error = authenticate_request()
+            if error:
+                return jsonify({"error": "Authentication required"}), 401
+            if roles and user["role"] not in roles:
+                return jsonify({"error": "Forbidden for this role"}), 403
+            g.current_user = user
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator

@@ -1,0 +1,454 @@
+"""Bus-sticker detection and plate-number extraction using the trained `best.pt` model.
+
+The model shipped in this repository (`best.pt`) is an Ultralytics YOLOv10n
+detector trained for two classes:
+
+    0 -> "red circle"   (the painted red ring around the bus number)
+    1 -> "sticker"      (the sticker panel that carries the bus number)
+
+The detector therefore only localises *where* the number is; the actual text
+has to be read out of that crop. This module wires the two together:
+
+    frame -> YOLO detection -> sticker crop -> OCR -> normalised bus number
+
+Everything heavy (torch, ultralytics, OpenCV, OCR engine) is imported lazily
+so that the Flask application still starts on a machine that has none of the
+vision extras installed. `vision_available()` reports what is usable.
+"""
+from __future__ import annotations
+
+import base64
+import binascii
+import io
+import logging
+import os
+import re
+import threading
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Iterable
+
+logger = logging.getLogger(__name__)
+
+# Root of the repository (backend/ -> repo root).
+ROOT = Path(__file__).resolve().parents[1]
+
+# Default location of the trained model inside the repository.
+DEFAULT_MODEL_PATH = ROOT / "best.pt"
+
+# Class ids as exported by the trained model.
+CLASS_STICKER = 1
+CLASS_RED_CIRCLE = 0
+
+CLASS_LABELS = {
+    CLASS_RED_CIRCLE: "red circle",
+    CLASS_STICKER: "sticker",
+}
+
+# Bus numbers seen in this project look like "TN 12 AB 1234" / "BUS-001".
+# The OCR result is normalised to the same shape the API accepts.
+PLATE_CLEAN_RE = re.compile(r"[^A-Z0-9 .\-]")
+
+_model_lock = threading.Lock()
+_model_cache: dict[str, Any] = {}
+_ocr_lock = threading.Lock()
+_ocr_cache: dict[str, Any] = {}
+
+
+class VisionUnavailable(RuntimeError):
+    """Raised when a vision dependency or the model file is missing."""
+
+
+@dataclass
+class PlateCandidate:
+    """One detected sticker and the text read from it."""
+
+    bus_number: str | None = None
+    confidence: float = 0.0
+    raw_text: str = ""
+    bbox: list[int] = field(default_factory=list)
+    class_id: int = CLASS_STICKER
+    class_name: str = "sticker"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "bus_number": self.bus_number,
+            "confidence": round(float(self.confidence), 4),
+            "raw_text": self.raw_text,
+            "bbox": list(self.bbox),
+            "class_id": self.class_id,
+            "class_name": self.class_name,
+        }
+
+
+@dataclass
+class DetectionResult:
+    """Outcome of running the detector over a single frame."""
+
+    candidates: list[PlateCandidate] = field(default_factory=list)
+    model: str = ""
+    inference_ms: int = 0
+    frame_width: int = 0
+    frame_height: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "candidates": [candidate.to_dict() for candidate in self.candidates],
+            "model": self.model,
+            "inference_ms": self.inference_ms,
+            "frame_width": self.frame_width,
+            "frame_height": self.frame_height,
+        }
+
+
+# --------------------------------------------------------------------------- #
+# Configuration helpers
+# --------------------------------------------------------------------------- #
+def model_path() -> Path:
+    """Resolve the model file location (env override, then the repo copy)."""
+    configured = os.getenv("VISION_MODEL_PATH", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return DEFAULT_MODEL_PATH
+
+
+def confidence_threshold() -> float:
+    try:
+        value = float(os.getenv("VISION_CONFIDENCE", "0.35"))
+    except ValueError:
+        return 0.35
+    return max(0.01, min(0.99, value))
+
+
+def ocr_engine_name() -> str:
+    """Which OCR backend to use: `auto`, `tesseract`, `easyocr` or `none`."""
+    return os.getenv("VISION_OCR_ENGINE", "auto").strip().lower() or "auto"
+
+
+def _require_cv2():
+    try:
+        import cv2  # type: ignore
+    except ImportError as exc:  # pragma: no cover - depends on environment
+        raise VisionUnavailable(
+            "OpenCV is not installed. Install the vision extras with "
+            "`pip install -r backend/requirements-vision.txt`."
+        ) from exc
+    return cv2
+
+
+def _require_pil():
+    try:
+        from PIL import Image  # type: ignore
+    except ImportError as exc:  # pragma: no cover - depends on environment
+        raise VisionUnavailable(
+            "Pillow is not installed. Install the vision extras with "
+            "`pip install -r backend/requirements-vision.txt`."
+        ) from exc
+    return Image
+
+
+def _ocr_tesseract():
+    try:
+        import pytesseract  # type: ignore
+    except ImportError as exc:
+        raise VisionUnavailable("pytesseract is not installed") from exc
+    try:
+        pytesseract.get_tesseract_version()
+    except Exception as exc:  # pragma: no cover - depends on environment
+        raise VisionUnavailable(
+            "The tesseract binary is not available on this machine. Install the "
+            "`tesseract-ocr` system package or choose another OCR engine."
+        ) from exc
+    return pytesseract
+
+
+def _ocr_easyocr():
+    try:
+        import easyocr  # type: ignore
+    except ImportError as exc:
+        raise VisionUnavailable("easyocr is not installed") from exc
+    with _ocr_lock:
+        reader = _ocr_cache.get("easyocr")
+        if reader is None:
+            reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+            _ocr_cache["easyocr"] = reader
+        return reader
+
+
+# --------------------------------------------------------------------------- #
+# Model loading
+# --------------------------------------------------------------------------- #
+def load_model():
+    """Load (and cache) the Ultralytics model. Raises VisionUnavailable."""
+    path = model_path()
+    if not path.exists():
+        raise VisionUnavailable(
+            f"Detection model not found at {path}. Set VISION_MODEL_PATH to a valid "
+            "best.pt file."
+        )
+    with _model_lock:
+        cached = _model_cache.get("model")
+        if cached is not None:
+            return cached
+        try:
+            from ultralytics import YOLO  # type: ignore
+        except ImportError as exc:
+            raise VisionUnavailable(
+                "ultralytics is not installed. Install the vision extras with "
+                "`pip install -r backend/requirements-vision.txt`."
+            ) from exc
+        logger.info("Loading detection model from %s", path)
+        model = YOLO(str(path))
+        _model_cache["model"] = model
+        return model
+
+
+def unload_model() -> None:
+    with _model_lock:
+        _model_cache.pop("model", None)
+
+
+# --------------------------------------------------------------------------- #
+# OCR
+# --------------------------------------------------------------------------- #
+def _ocr_rapidocr():
+    try:
+        from rapidocr_onnxruntime import RapidOCR  # type: ignore
+    except ImportError as exc:
+        raise VisionUnavailable("rapidocr-onnxruntime is not installed") from exc
+    with _ocr_lock:
+        engine = _ocr_cache.get("rapidocr")
+        if engine is None:
+            engine = RapidOCR()
+            _ocr_cache["rapidocr"] = engine
+        return engine
+
+
+def _run_tesseract(image, engine) -> str:
+    text = engine.image_to_string(image, config="--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -")
+    return text or ""
+
+
+def _run_easyocr(image, reader) -> str:
+    results = reader.readtext(image, detail=0, paragraph=False)
+    return " ".join(str(item) for item in results)
+
+
+def _run_rapidocr(image, engine) -> str:
+    import numpy as np
+
+    array = np.array(image.convert("RGB"))
+    result, _ = engine(array)
+    if not result:
+        return ""
+    return " ".join(str(item[1]) for item in result)
+
+
+def read_text(image, engine_name: str | None = None) -> str:
+    """Read text out of an image using the configured OCR backend."""
+    engine_name = (engine_name or ocr_engine_name()).lower()
+    if engine_name == "none":
+        return ""
+    errors: list[str] = []
+    order: Iterable[str]
+    if engine_name == "auto":
+        order = ("rapidocr", "tesseract", "easyocr")
+    else:
+        order = (engine_name,)
+
+    for name in order:
+        try:
+            if name == "tesseract":
+                engine = _ocr_tesseract()
+                return _run_tesseract(image, engine)
+            if name == "easyocr":
+                reader = _ocr_easyocr()
+                return _run_easyocr(image, reader)
+            if name == "rapidocr":
+                engine = _ocr_rapidocr()
+                return _run_rapidocr(image, engine)
+            raise VisionUnavailable(f"Unknown OCR engine '{name}'")
+        except VisionUnavailable as exc:
+            errors.append(str(exc))
+    raise VisionUnavailable("; ".join(errors) or "No OCR engine is available")
+
+
+def normalize_plate(text: str) -> str:
+    """Normalise raw OCR output into the bus-number format used by the API."""
+    if not text:
+        return ""
+    upper = text.upper().replace("\n", " ").strip()
+    cleaned = PLATE_CLEAN_RE.sub("", upper)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -")
+    return cleaned
+
+
+# --------------------------------------------------------------------------- #
+# Detection
+# --------------------------------------------------------------------------- #
+def decode_image(payload: bytes | str) -> "Any":
+    """Decode raw image bytes or a base64 string into a PIL image."""
+    Image = _require_pil()
+    if isinstance(payload, str):
+        data = payload.split(",", 1)[-1] if payload.startswith("data:") else payload
+        try:
+            payload = base64.b64decode(data, validate=False)
+        except (binascii.Error, ValueError) as exc:
+            raise VisionUnavailable("The image payload is not valid base64") from exc
+    try:
+        image = Image.open(io.BytesIO(payload))
+        image.load()
+        return image
+    except Exception as exc:
+        raise VisionUnavailable("The uploaded data is not a readable image") from exc
+
+
+def max_crops() -> int:
+    """Maximum number of sticker crops that are OCR'd in a single frame."""
+    try:
+        value = int(os.getenv("VISION_MAX_CROPS", "8"))
+    except ValueError:
+        return 8
+    return max(1, value)
+
+
+def detect(image, *, model=None, threshold: float | None = None) -> DetectionResult:
+    """Run the detector over an image and OCR each detected sticker."""
+    import time
+
+    model = model or load_model()
+    threshold = confidence_threshold() if threshold is None else threshold
+    started = time.perf_counter()
+
+    results = model.predict(source=image, conf=threshold, verbose=False)
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+
+    result = DetectionResult(
+        model=str(model_path().name),
+        inference_ms=elapsed_ms,
+        frame_width=getattr(image, "width", 0) or 0,
+        frame_height=getattr(image, "height", 0) or 0,
+    )
+    if not results:
+        return result
+
+    boxes = getattr(results[0], "boxes", None)
+    if boxes is None:
+        return result
+
+    names = getattr(model, "names", {}) or {}
+    limit = max_crops()
+    for index in range(min(len(boxes), limit)):
+        class_id = int(boxes.cls[index].item())
+        confidence = float(boxes.conf[index].item())
+        coords = [int(value) for value in boxes.xyxy[index].tolist()]
+        class_name = names.get(class_id, CLASS_LABELS.get(class_id, str(class_id)))
+
+        candidate = PlateCandidate(
+            confidence=confidence,
+            bbox=coords,
+            class_id=class_id,
+            class_name=str(class_name),
+        )
+        crop = _crop(image, coords)
+        if crop is not None:
+            try:
+                raw = read_text(crop)
+            except VisionUnavailable as exc:
+                logger.info("OCR unavailable for this frame: %s", exc)
+                raw = ""
+            candidate.raw_text = raw.strip()
+            candidate.bus_number = normalize_plate(candidate.raw_text)
+        result.candidates.append(candidate)
+
+    result.candidates.sort(key=lambda item: item.confidence, reverse=True)
+    return result
+
+
+def _crop(image, coords: list[int]):
+    """Crop a bbox out of a PIL image, returning None when it is degenerate."""
+    try:
+        left, top, right, bottom = coords
+    except (TypeError, ValueError):
+        return None
+    width = getattr(image, "width", 0)
+    height = getattr(image, "height", 0)
+    left = max(0, min(left, width - 1))
+    top = max(0, min(top, height - 1))
+    right = max(left + 1, min(right, width))
+    bottom = max(top + 1, min(bottom, height))
+    if right <= left or bottom <= top:
+        return None
+    return image.crop((left, top, right, bottom))
+
+
+def best_candidate(result: DetectionResult) -> PlateCandidate | None:
+    """Pick the most trustworthy candidate: a readable number beats confidence."""
+    if not result.candidates:
+        return None
+    with_number = [candidate for candidate in result.candidates if candidate.bus_number]
+    pool = with_number or result.candidates
+    return max(pool, key=lambda candidate: candidate.confidence)
+
+
+# --------------------------------------------------------------------------- #
+# Health reporting
+# --------------------------------------------------------------------------- #
+def vision_status() -> dict[str, Any]:
+    """Describe what the vision stack can currently do."""
+    path = model_path()
+    status: dict[str, Any] = {
+        "model_path": str(path),
+        "model_present": path.exists(),
+        "model_loaded": "model" in _model_cache,
+        "confidence_threshold": confidence_threshold(),
+        "ocr_engine": ocr_engine_name(),
+        "classes": {str(key): value for key, value in CLASS_LABELS.items()},
+        "available": False,
+        "problems": [],
+    }
+    if not path.exists():
+        status["problems"].append(f"Model file missing at {path}")
+
+    try:
+        import torch  # type: ignore  # noqa: F401
+    except ImportError:
+        status["problems"].append("torch is not installed")
+    try:
+        import ultralytics  # type: ignore  # noqa: F401
+    except ImportError:
+        status["problems"].append("ultralytics is not installed")
+    try:
+        import cv2  # type: ignore  # noqa: F401
+    except ImportError:
+        status["problems"].append("opencv is not installed")
+    try:
+        import PIL  # type: ignore  # noqa: F401
+    except ImportError:
+        status["problems"].append("Pillow is not installed")
+
+    engine = ocr_engine_name()
+    if engine != "none":
+        usable = False
+        for probe in ("rapidocr", "tesseract", "easyocr"):
+            try:
+                if probe == "rapidocr":
+                    _ocr_rapidocr()
+                elif probe == "tesseract":
+                    _ocr_tesseract()
+                else:
+                    _ocr_easyocr()
+                usable = True
+                status["ocr_available"] = probe
+                break
+            except VisionUnavailable:
+                continue
+        if not usable:
+            status["problems"].append(
+                "no OCR engine is usable (install rapidocr-onnxruntime, tesseract-ocr or easyocr)"
+            )
+    else:
+        status["problems"].append("OCR is disabled (VISION_OCR_ENGINE=none)")
+
+    status["available"] = not status["problems"]
+    return status

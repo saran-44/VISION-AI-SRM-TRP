@@ -5,6 +5,7 @@ import math
 import os
 import re
 import time
+import urllib.request
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from .auth import (
     create_access_token,
     public_user,
     require_device_key,
+    require_device_key_or_roles,
     require_page_roles,
     require_roles,
     set_auth_cookie,
@@ -52,6 +54,13 @@ from .services import (
     naive_now,
     record_audit,
     xlsx_bytes,
+)
+from .vision import (
+    VisionUnavailable,
+    best_candidate,
+    decode_image,
+    detect,
+    vision_status,
 )
 
 
@@ -350,6 +359,148 @@ def create_app(config: Config | None = None, mongo_client=None) -> Flask:
         if not doc:
             return jsonify({"error": "Not found"}), 404
         return jsonify({"event": public_doc(doc)})
+
+    @app.get("/api/config/firebase")
+    def firebase_config():
+        """Public Firebase web configuration for the browser SDK.
+
+        Returns an empty `config` object when the deployment does not use
+        Firebase, so the frontend can simply skip loading the SDK.
+        """
+        return jsonify({
+            "config": config.firebase,
+            "projectId": config.firebase_project_id,
+            "enabled": bool(config.firebase),
+            "analytics": bool(config.firebase.get("measurementId")),
+        })
+
+    # ---------------------------------------------------------------- stream
+    @app.get("/api/stream/<camera_id>")
+    @require_roles("head_admin")
+    def stream_proxy(camera_id: str):
+        """Proxy a configured camera stream to the browser.
+
+        IP cameras and NVR/DVR devices usually live on a private LAN that the
+        browser cannot reach directly (CORS, mixed content, or no route at
+        all). This endpoint relays an MJPEG multipart stream from the
+        configured camera to the console.
+
+        RTSP sources cannot be proxied frame-by-frame here because a
+        multipart/JPEG or HLS transcoder (MediaMTX, FFmpeg, or the recorder's
+        own HLS output) must sit in front of the camera first. Configure the
+        transcoded HTTP(S) URL for those cameras.
+        """
+        stream = config.camera_streams.get(camera_id)
+        if not stream:
+            return jsonify({"error": "Camera stream not found"}), 404
+        if stream["type"] != "mjpeg":
+            return jsonify({
+                "error": "Only MJPEG streams can be proxied. Point this camera at an HLS or MJPEG gateway URL."
+            }), 415
+
+        def generate():
+            try:
+                with urllib.request.urlopen(stream["url"], timeout=10) as upstream:
+                    while True:
+                        chunk = upstream.read(8192)
+                        if not chunk:
+                            break
+                        yield chunk
+            except Exception:  # pragma: no cover - network dependent
+                return
+
+        return Response(
+            generate(),
+            mimetype="multipart/x-mixed-replace; boundary=frame",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # ------------------------------------------------------------- detection
+    @app.get("/api/detection/status")
+    @require_roles("head_admin")
+    def detection_status():
+        """Report whether the sticker-detection stack can run right now."""
+        return jsonify(vision_status())
+
+    @app.post("/api/detection/scan")
+    @require_device_key_or_roles("head_admin")
+    def detection_scan():
+        """Detect bus stickers in a posted image and read their numbers.
+
+        Accepts either a multipart `image` file or a JSON body with an
+        `image` field holding base64 data. The device API key is required, so
+        only a detection device may submit frames.
+        """
+        payload: dict[str, Any] = {}
+        image_source: bytes | str | None = None
+
+        if request.files:
+            upload = request.files.get("image")
+            if upload is None:
+                return jsonify({"error": "An 'image' file part is required"}), 400
+            image_source = upload.read()
+            payload = request.form.to_dict()
+        else:
+            body = request.get_json(silent=True)
+            if not isinstance(body, dict):
+                return jsonify({"error": "A JSON object or image upload is required"}), 400
+            image_source = body.get("image")
+            payload = body
+
+        if not image_source:
+            return jsonify({"error": "No image was supplied"}), 400
+
+        try:
+            image = decode_image(image_source)
+            result = detect(image)
+        except VisionUnavailable as exc:
+            # The detector is unavailable on this host (no model, no OCR
+            # engine). Record the attempt so the gap is visible in the audit
+            # trail, then tell the caller.
+            record_audit(
+                db,
+                {"email": "device-client", "role": "device"},
+                "detection_scan_failed",
+                "events",
+                None,
+                after={"error": str(exc), "source": payload.get("source", "device")},
+                flask_request=request,
+            )
+            return jsonify({"error": str(exc)}), 503
+        except Exception as exc:  # pragma: no cover - defensive
+            current_app.logger.exception("Detection failed")
+            record_audit(
+                db,
+                {"email": "device-client", "role": "device"},
+                "detection_scan_failed",
+                "events",
+                None,
+                after={"error": f"{type(exc).__name__}", "source": payload.get("source", "device")},
+                flask_request=request,
+            )
+            return jsonify({"error": f"Detection failed: {type(exc).__name__}"}), 500
+
+        candidate = best_candidate(result)
+        response: dict[str, Any] = {
+            "detection": result.to_dict(),
+            "bus_number": candidate.bus_number if candidate else None,
+            "confidence": candidate.confidence if candidate else None,
+            "raw_text": candidate.raw_text if candidate else None,
+            "source": payload.get("source", "device"),
+        }
+        record_audit(
+            db,
+            {"email": "device-client", "role": "device"},
+            "detection_scan",
+            "events",
+            None,
+            after=response,
+            flask_request=request,
+        )
+        return jsonify(response)
 
     @app.get("/api/export/events.csv")
     @require_roles("head_admin")

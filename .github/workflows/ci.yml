@@ -39,6 +39,37 @@ jobs:
       - name: Byte-compile all backend modules
         run: python -m compileall -q backend
 
+  vision:
+    name: Vision stack (optional)
+    runs-on: ubuntu-latest
+    # The detector is an optional extra: the core app must work without it.
+    # This job proves the pinned extras still install and that best.pt loads.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the vision extras (CPU wheels)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements-vision.txt \
+            --extra-index-url https://download.pytorch.org/whl/cpu
+
+      - name: The checkpoint must load and report its classes
+        run: |
+          python - <<'PY'
+          from backend.vision import load_model, vision_status
+          status = vision_status()
+          assert status["model_present"], "best.pt is missing"
+          assert status["available"], f"vision stack unavailable: {status['problems']}"
+          model = load_model()
+          assert model.names == {0: "red circle", 1: "sticker"}, model.names
+          print("model OK:", model.names)
+          print("ocr engine:", status["ocr_available"])
+          PY
+
   frontend:
     name: Frontend checks
     runs-on: ubuntu-latest
