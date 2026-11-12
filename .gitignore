@@ -1,0 +1,66 @@
+# --- Secrets and local configuration ---------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+secrets/
+credentials/
+
+# --- Runtime / generated ----------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# --- Node -------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Local database dumps and exports --------------------------------------
+*.dump
+mongodb-dump/
+
+# --- Personal / operational data that must never be committed -------------
+# Gate event exports and driver records contain personal data.
+*.csv
+*.xlsx
+*.xls
+*.pdf
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.heic
+data/
+datasets/
+media/
+videos/
+photos/
+uploads/
+
+# --- Editors / OS ----------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

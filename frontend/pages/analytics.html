@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Analytics · SRM TRP Transport</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/vendor/chart.umd.js" defer></script>
+  <script type="module" src="/js/analytics.js"></script>
+</head>
+<body>
+  <div id="app-shell"></div>
+  <template id="page-template">
+    <section class="page-header">
+      <div><h1 class="page-title">Analytics</h1><p id="analyticsSummary" class="card-subtitle">Waiting for analytics…</p></div>
+      <div class="page-header-actions"><button id="refreshAnalytics" class="btn btn-outline" type="button"><i class='bx bx-refresh' aria-hidden="true"></i> Refresh</button></div>
+    </section>
+    <section class="card">
+      <form id="analyticsFilters" class="filters">
+        <div class="filter-grid">
+          <div class="input-group"><label for="analyticsHours">Hours</label><input id="analyticsHours" name="hours" type="number" min="1" max="168" value="24"></div>
+          <div class="input-group"><label for="analyticsDate">Date override</label><input id="analyticsDate" name="date" type="date"></div>
+          <div class="input-group"><label for="analyticsBus">Bus number</label><input id="analyticsBus" name="bus_number" type="text" placeholder="BUS-001"></div>
+          <div class="input-group"><label for="analyticsGate">Gate</label><input id="analyticsGate" name="gate" type="text" placeholder="Gate 1"></div>
+          <div class="input-group"><label for="analyticsDirection">Direction</label><select id="analyticsDirection" name="direction"><option value="IN">IN</option><option value="OUT">OUT</option></select></div>
+          <input name="page" type="hidden" value="1">
+          <input name="page_size" type="hidden" value="8">
+        </div>
+        <div class="button-row">
+          <button class="btn btn-primary" type="submit"><i class='bx bx-check' aria-hidden="true"></i> Apply</button>
+          <button class="btn btn-outline" type="reset"><i class='bx bx-reset' aria-hidden="true"></i> Reset</button>
+        </div>
+      </form>
+    </section>
+    <section class="chart-grid" aria-label="Analytics charts">
+      <article class="card chart-card"><div class="card-header"><h2 class="card-title">Events per hour</h2></div><div class="chart-wrap"><canvas id="chart-hour" role="img" aria-label="Events per hour chart"></canvas><div class="chart-state"></div></div></article>
+      <article class="card chart-card"><div class="card-header"><h2 class="card-title">Events per gate</h2></div><div class="chart-wrap"><canvas id="chart-gate" role="img" aria-label="Events per gate chart"></canvas><div class="chart-state"></div></div></article>
+      <article class="card chart-card"><div class="card-header"><h2 class="card-title">Events per bus</h2></div><div class="chart-wrap"><canvas id="chart-bus" role="img" aria-label="Events per bus chart"></canvas><div class="chart-state"></div></div></article>
+    </section>
+  </template>
+</body>
+</html>

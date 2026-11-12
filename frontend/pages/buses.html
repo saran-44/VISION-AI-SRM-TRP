@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Buses · SRM TRP Transport</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script type="module" src="/js/buses.js"></script>
+</head>
+<body>
+  <div id="app-shell"></div>
+  <template id="page-template">
+    <section class="page-header">
+      <div><h1 class="page-title">Registered Buses</h1><p id="busesSummary" class="card-subtitle">—</p></div>
+      <div class="page-header-actions">
+        <a id="manageLink" class="btn btn-outline" href="/manage" hidden><i class='bx bx-edit-alt' aria-hidden="true"></i> Manage records</a>
+        <button id="refreshBuses" class="btn btn-outline" type="button"><i class='bx bx-refresh' aria-hidden="true"></i> Refresh</button>
+      </div>
+    </section>
+    <section class="card">
+      <form id="busSearchForm" class="filters">
+        <div class="filter-grid">
+          <div class="input-group"><label for="busQuery">Search buses</label><input id="busQuery" name="q" type="search" placeholder="Bus number, registration or route"></div>
+          <input name="page" type="hidden" value="1">
+          <input name="page_size" type="hidden" value="25">
+        </div>
+        <div class="button-row"><button class="btn btn-primary" type="submit"><i class='bx bx-search' aria-hidden="true"></i> Search</button></div>
+      </form>
+    </section>
+    <section class="card">
+      <div class="card-header"><h2 class="card-title">Bus records</h2></div>
+      <div id="busesState"></div>
+      <div class="table-container">
+        <table id="busesTable" class="data-table">
+          <thead><tr><th>Bus Number</th><th>Registration</th><th>Route</th><th>Capacity</th><th>Insurance</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="busesBody"></tbody>
+        </table>
+      </div>
+      <div id="busesPagination"></div>
+    </section>
+  </template>
+</body>
+</html>

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Driver Details · SRM TRP Transport</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script type="module" src="/js/driver-details.js"></script>
+</head>
+<body>
+  <div id="app-shell"></div>
+  <template id="page-template">
+    <section class="page-header">
+      <div><h1 class="page-title">Driver &amp; Bus Profile</h1><p class="card-subtitle">Read-only record from the transport API.</p></div>
+      <div class="page-header-actions"><a class="btn btn-outline" href="/drivers"><i class='bx bx-arrow-back' aria-hidden="true"></i> Back to Drivers</a></div>
+    </section>
+    <div id="detailState"></div>
+    <div id="detailContent" hidden></div>
+  </template>
+</body>
+</html>
