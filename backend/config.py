@@ -44,6 +44,32 @@ def _parse_origins(values: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(parsed))
 
 
+def _firebase_config() -> dict[str, str]:
+    """Collect the public Firebase web configuration from the environment.
+
+    These values are browser identifiers, not secrets, but they are kept out of
+    source control so that a key can be rotated or replaced without a code
+    change, and so that the repository never carries deployment credentials.
+    """
+    mapping = {
+        "apiKey": "FIREBASE_API_KEY",
+        "authDomain": "FIREBASE_AUTH_DOMAIN",
+        "projectId": "FIREBASE_PROJECT_ID",
+        "storageBucket": "FIREBASE_STORAGE_BUCKET",
+        "messagingSenderId": "FIREBASE_MESSAGING_SENDER_ID",
+        "appId": "FIREBASE_APP_ID",
+        "measurementId": "FIREBASE_MEASUREMENT_ID",
+    }
+    config = {
+        key: os.getenv(env_name, "").strip()
+        for key, env_name in mapping.items()
+    }
+    # A usable configuration needs at least the project id and the app id.
+    if not config.get("projectId") or not config.get("appId"):
+        return {}
+    return {key: value for key, value in config.items() if value}
+
+
 def _parse_camera_streams(raw: str) -> dict[str, dict[str, str]]:
     if not raw.strip():
         return {}
@@ -62,10 +88,10 @@ def _parse_camera_streams(raw: str) -> dict[str, dict[str, str]]:
         url = str(entry.get("url", "")).strip()
         label = str(entry.get("label", camera_id)).strip()
         parts = urlparse(url)
-        if stream_type not in {"hls", "mjpeg"}:
-            raise ValueError("Camera stream type must be hls or mjpeg")
-        if parts.scheme not in {"http", "https"} or not parts.netloc:
-            raise ValueError("Camera stream URLs must use http or https")
+        if stream_type not in {"hls", "mjpeg", "rtsp"}:
+            raise ValueError("Camera stream type must be hls, mjpeg or rtsp")
+        if parts.scheme not in {"http", "https", "rtsp"} or not parts.netloc:
+            raise ValueError("Camera stream URLs must use http, https or rtsp")
         if parts.username or parts.password:
             raise ValueError("Camera stream URLs must not embed credentials")
         if not label or len(label) > 80:
@@ -94,6 +120,8 @@ class Config:
     overstay_hours: float = 12.0
     camera_streams: dict[str, dict[str, str]] = field(default_factory=dict)
     frontend_dir: Path = ROOT / "frontend"
+    firebase: dict[str, str] = field(default_factory=dict)
+    firebase_project_id: str = ""
 
     @classmethod
     def from_env(cls, overrides: dict | None = None) -> "Config":
@@ -103,6 +131,7 @@ class Config:
         jwt_secret = os.getenv("JWT_SECRET", "").strip()
         cors_origins = _parse_origins(_csv("CORS_ALLOWED_ORIGINS"))
         camera_streams = _parse_camera_streams(os.getenv("CAMERA_STREAM_URLS", ""))
+        firebase = _firebase_config()
         cfg = cls(
             environment=environment,
             debug=debug_requested and environment == "development",
@@ -121,6 +150,8 @@ class Config:
             ocr_confidence_threshold=_float("OCR_CONFIDENCE_THRESHOLD", 0.75),
             overstay_hours=_float("OVERSTAY_HOURS", 12.0),
             camera_streams=camera_streams,
+            firebase=firebase,
+            firebase_project_id=firebase.get("projectId", ""),
         )
         if overrides:
             cfg = replace(cfg, **overrides)

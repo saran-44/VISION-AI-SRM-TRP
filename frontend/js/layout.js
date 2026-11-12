@@ -1,5 +1,6 @@
 import { apiGet, apiPost, toQuery } from './api.js';
 import { actionButton, clear, el, icon, iconButton, initials, setState, showToast } from './ui.js';
+import { initFirebase, logEvent } from './firebase.js';
 
 const NAV = {
   head_admin: [
@@ -24,7 +25,8 @@ const ROLE_LABELS = {
 
 function applyTheme() {
   const saved = localStorage.getItem('transport-theme');
-  const dark = saved ? saved === 'dark' : true;
+  // The golden glass look is the primary experience, so light is the default.
+  const dark = saved ? saved === 'dark' : false;
   document.body.classList.toggle('dark-theme', dark);
   return dark;
 }
@@ -64,8 +66,8 @@ function buildSidebar(user, active) {
   return el('aside', { class: 'sidebar', 'aria-label': 'Primary navigation' }, [
     el('div', { class: 'logo' }, [el('img', {
       class: 'app-logo',
-      src: '/assets/logo.svg',
-      alt: 'SRM TRP Transport',
+      src: '/assets/logo-wordmark.png',
+      alt: 'SRM TRP Engineering College',
     })]),
     el('ul', { class: 'nav-menu' }, items),
     el('div', { class: 'bottom-nav' }, [logout]),
@@ -297,5 +299,13 @@ export async function mountShell({ active, allowedRoles = [], pageTitle = 'SRM T
     logoutButton: sidebar.querySelector('.logout-button'),
     menuButton: topbar.querySelector('.menu-toggle'),
   });
+
+  // Firebase is optional: it only loads when the deployment is configured.
+  initFirebase()
+    .then((state) => {
+      if (state.enabled) logEvent('app_open', { page: active });
+    })
+    .catch(() => { /* analytics is never allowed to break the console */ });
+
   return { user, root };
 }

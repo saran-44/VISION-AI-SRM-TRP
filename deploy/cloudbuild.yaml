@@ -1,0 +1,75 @@
+# Google Cloud Build pipeline for the SRM TRP Transport backend.
+#
+#   gcloud builds submit --config deploy/cloudbuild.yaml
+#
+# The image is pushed to Cloud Run. The frontend is deployed separately with
+# the Firebase CLI (see docs/FIREBASE.md).
+
+substitutions:
+  _REGION: asia-south1
+  _REPOSITORY: srm-trp
+  _SERVICE: srm-trp-transport
+  _FIREBASE_PROJECT: srmtrpai
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+  timeout: 1800s
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$COMMIT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:latest
+
+steps:
+  # 1. Build the container image.
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - deploy/Dockerfile
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$COMMIT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:latest
+      - .
+
+  # 2. Push both tags.
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}
+
+  # 3. Deploy to Cloud Run. Secrets come from Secret Manager.
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$COMMIT_SHA
+      - --region
+      - ${_REGION}
+      - --platform
+      - managed
+      - --allow-unauthenticated
+      - --port
+      - "8080"
+      - --cpu
+      - "1"
+      - --memory
+      - 2Gi
+      - --timeout
+      - "300"
+      - --min-instances
+      - "0"
+      - --max-instances
+      - "4"
+      - --set-env-vars
+      - ENVIRONMENT=production,MONGO_DB_NAME=srmtrpai,APP_TIMEZONE=Asia/Kolkata,FIREBASE_PROJECT_ID=srmtrpai,FIREBASE_AUTH_DOMAIN=srmtrpai.firebaseapp.com,FIREBASE_STORAGE_BUCKET=srmtrpai.firebasestorage.app,FIREBASE_MESSAGING_SENDER_ID=734375891811,FIREBASE_APP_ID=1:734375891811:web:6851938bef332bc0e53956,FIREBASE_MEASUREMENT_ID=G-7MXBNH3N7D
+      - --set-secrets
+      - MONGO_URI=mongo-uri:latest,JWT_SECRET=jwt-secret:latest,DEVICE_API_KEYS=device-keys:latest,FIREBASE_API_KEY=firebase-api-key:latest

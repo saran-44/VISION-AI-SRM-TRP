@@ -4,9 +4,10 @@ import { downloadExport } from './exports.js';
 import { analyticsParams, eventParams, exportParams, readFilters } from './filters.js';
 import { mountShell } from './layout.js';
 import { connectLive } from './sse.js';
-import { renderCameras } from './streams.js';
+import { renderCameras, renderCameraTile, requestWebcam, stopStream } from './cameras.js';
 import { renderEventsTable } from './tables.js';
 import { clear, el, formatDateTime, formatNumber, setState, showToast } from './ui.js';
+import { analytics, initFirebase } from './firebase.js';
 
 let currentFilters = {};
 let currentEvents = [];
@@ -71,6 +72,95 @@ function setChartState(type, message) {
   document.querySelectorAll('.chart-wrap canvas').forEach((canvas) => { canvas.hidden = type !== 'ok'; });
 }
 
+/* ------------------------------------------------------------------ */
+/* Live operator camera + plate scanning                               */
+/* ------------------------------------------------------------------ */
+
+let browserCameraTile = null;
+
+/**
+ * Mount a "this device" camera tile that uses the operator's webcam.
+ * It is only offered when the browser actually exposes getUserMedia.
+ */
+function mountBrowserCamera(cameras) {
+  const host = document.getElementById('cameraGrid');
+  if (!host) return;
+  const existing = host.querySelector('[data-camera-id="browser-local"]');
+  if (existing) existing.remove();
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return; // Browser cannot access a camera; nothing to offer.
+  }
+
+  browserCameraTile = renderCameraTile({
+    id: 'browser-local',
+    label: 'Operator camera (this device)',
+    source: 'browser',
+    onCapture: scanFrame,
+  });
+  host.prepend(browserCameraTile);
+}
+
+/**
+ * Post a captured frame to the detection endpoint and surface the result.
+ * The endpoint requires the device API key, so the browser capture is sent
+ * through the backend's authenticated session route when available and falls
+ * back to the device-scoped route otherwise.
+ */
+async function scanFrame(blob, meta = {}) {
+  const statusNode = document.getElementById('scanStatus');
+  const plateNode = document.getElementById('plateValue');
+  const metaNode = document.getElementById('scanMeta');
+  if (statusNode) {
+    statusNode.textContent = 'Scanning frame…';
+    statusNode.className = 'scan-status';
+  }
+  try {
+    const body = new FormData();
+    body.append('image', blob, 'frame.jpg');
+    body.append('camera_id', meta.cameraId || 'browser-local');
+    body.append('gate', 'Gate 1 Entry');
+    body.append('direction', 'IN');
+    body.append('source', 'browser');
+
+    const response = await fetch('/api/detection/scan', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'X-Device-Key': window.__SRM_DEVICE_KEY__ || '' },
+      body,
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(payload?.error || `Scan failed (${response.status}).`);
+    }
+
+    const busNumber = payload.bus_number;
+    const confidence = payload.confidence;
+    if (plateNode) plateNode.textContent = busNumber || 'UNKNOWN';
+    if (statusNode) {
+      statusNode.textContent = busNumber
+        ? `Read ${busNumber} (${Math.round((confidence || 0) * 100)}%)`
+        : 'No plate found in this frame';
+      statusNode.className = `scan-status ${busNumber ? '' : 'text-danger'}`.trim();
+    }
+    if (metaNode) {
+      metaNode.textContent = payload.raw_text
+        ? `OCR read: ${payload.raw_text}`
+        : 'The detector found no sticker in this frame.';
+    }
+    analytics.detectionResult(busNumber, confidence);
+    analytics.captureFrame(meta.cameraId);
+    showToast(busNumber ? `Detected bus ${busNumber}` : 'No plate detected in the frame.', busNumber ? 'success' : 'error');
+    refreshAll();
+  } catch (error) {
+    if (statusNode) {
+      statusNode.textContent = error.message || 'Scan failed.';
+      statusNode.className = 'scan-status text-danger';
+    }
+    showToast(error.message || 'Scan failed.', 'error');
+  }
+}
+
 async function refreshAll() {
   const eventsState = document.getElementById('eventsState');
   const eventsTable = document.getElementById('eventsTable');
@@ -84,7 +174,10 @@ async function refreshAll() {
       apiGet(`/api/analytics${toQuery(analyticsParams(currentFilters))}`),
     ]);
     flagLabels = config.flag_labels || stats.flag_labels || {};
-    renderCameras(document.getElementById('cameraGrid'), config.cameras || []);
+    renderCameras(document.getElementById('cameraGrid'), config.cameras || [], {
+      onCapture: scanFrame,
+    });
+    mountBrowserCamera(config.cameras || []);
     renderStats(stats);
     currentEvents = events.items || [];
     if (currentEvents.length) {

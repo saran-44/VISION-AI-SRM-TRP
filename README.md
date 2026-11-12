@@ -6,9 +6,10 @@ the campus right now, who entered today, which vehicles looked suspicious, and
 a searchable history of drivers, buses and changes.
 
 > **Status:** the application is fully implemented and tested in this repository.
-> Two things are still missing from *this* repo and must be supplied by the
-> operator: the OCR/detection service (it lives in a separate GitHub repository
-> whose URL has not been provided yet) and the real camera stream URLs. See
+> The bus-sticker detector (`best.pt` + `backend/vision.py`), the browser
+> webcam and the NVR/DVR camera hooks are all integrated. Two things must
+> still be supplied by the operator: the **real camera stream URLs** and the
+> **Firebase API key** (both are read from the environment). See
 > [Not included](#not-included) and `TRANSPORT_PROJECT_STATUS.md`.
 
 ---
@@ -165,8 +166,48 @@ can be removed with `db.buses.deleteMany({demo: true})` and friends.
 
 ## Detection / OCR integration
 
-The OCR/ANPR service is **not** part of this repository. It posts normalized
-events to this API:
+The bus-sticker detector **is** part of this repository. `best.pt` (Ultralytics
+YOLOv10n, classes `red circle` and `sticker`) is loaded by `backend/vision.py`,
+which crops each detected sticker, runs OCR over the crop and normalises the
+result into a registration number.
+
+```bash
+.venv/bin/pip install -r backend/requirements.txt
+.venv/bin/pip install -r backend/requirements-vision.txt
+```
+
+> On a CPU-only host, install Torch from the CPU index — the default PyPI
+> wheel is the ~3 GB CUDA build:
+>
+> ```bash
+> pip install torch==2.9.1 torchvision==0.24.1 \
+>     --index-url https://download.pytorch.org/whl/cpu
+> ```
+
+Scan a frame (device key **or** an administrator session):
+
+```http
+POST /api/detection/scan
+X-Device-Key: <device key>
+Content-Type: multipart/form-data
+
+image=@frame.jpg
+```
+
+```json
+{
+  "detection": {
+    "candidates": [{"bus_number": "TN12AB1234", "raw_text": "TN 12 AB 1234",
+                    "confidence": 0.94, "bbox": [412, 288, 596, 352]}],
+    "model": "best.pt", "inference_ms": 118
+  },
+  "bus_number": "TN12AB1234", "confidence": 0.94
+}
+```
+
+`GET /api/detection/status` reports whether the stack can run right now.
+
+A detection is a *reading*; to record a *movement*, post it as an event:
 
 ```http
 POST /api/events
@@ -187,7 +228,9 @@ python -m backend.detection_client \
   --camera-id gate-1-entry --confidence 0.96
 ```
 
-The full contract, flag rules and wiring instructions are in
+The model provenance (verified against the public GitHub source), the full
+contract, the flag rules and the OCR engine options are in
+[`docs/DETECTION.md`](docs/DETECTION.md) and
 [`docs/EVENT_CONTRACT.md`](docs/EVENT_CONTRACT.md).
 
 **Flag rules** (computed server-side, shown with their reason in the UI):
@@ -201,6 +244,32 @@ The full contract, flag rules and wiring instructions are in
 “Currently inside” is derived from the latest event per bus: a bus whose most
 recent event is `IN` is inside.
 
+## Cameras
+
+Three sources are supported, all from `frontend/js/cameras.js`:
+
+| Source | How it reaches the browser |
+| --- | --- |
+| **Operator webcam** | `getUserMedia` — works today, no hardware needed. A **Scan plate** button posts the frame to the detection API. |
+| **HLS** | An NVR/DVR or a MediaMTX/FFmpeg gateway, played with the vendored `hls.js`. |
+| **MJPEG** | An NVR/DVR endpoint, or the backend proxy at `GET /api/stream/<camera_id>`. |
+
+> **Raw RTSP cannot be loaded by a browser.** An RTSP camera must be bridged
+> by a gateway/transcoder (MediaMTX, FFmpeg, or the NVR's own HLS output) and
+> then consumed as HLS or MJPEG. See [`docs/CAMERAS.md`](docs/CAMERAS.md).
+
+The browser camera API requires a **secure context** (`https://` or
+`http://localhost`).
+
+## Firebase
+
+Firebase Hosting serves the static console and rewrites `/api/**` to the
+backend; Analytics is optional. The web configuration is read from the
+environment by the backend and served at `GET /api/config/firebase`, so the
+API key is never committed. The console works fully without Firebase.
+
+See [`docs/FIREBASE.md`](docs/FIREBASE.md).
+
 ## API reference
 
 All endpoints are same-origin JSON APIs. Authentication is a short-lived JWT in
@@ -213,6 +282,10 @@ an HttpOnly, SameSite=Lax cookie (`transport_token`).
 | `GET` | `/api/auth/me` | session | Current user |
 | `POST` | `/api/auth/logout` | session | Sign out (audited) |
 | `GET` | `/api/config` | head_admin | Camera tiles, flag labels, thresholds |
+| `GET` | `/api/config/firebase` | – | Public Firebase web configuration (empty when unconfigured) |
+| `GET` | `/api/detection/status` | head_admin | Detector/OCR availability and model classes |
+| `POST` | `/api/detection/scan` | device key or head_admin | Detect a sticker in an image and read its number |
+| `GET` | `/api/stream/<camera_id>` | head_admin | MJPEG proxy for a configured camera |
 | `GET` | `/api/stats` | head_admin | Live counters, inside list, flagged counts |
 | `GET` | `/api/analytics` | head_admin | Hourly / gate / bus series |
 | `GET` | `/api/events` | head_admin | Event list with filters + pagination |
@@ -287,26 +360,32 @@ data.
 
 ## Not included
 
-- **The OCR / detection service.** It lives in a separate GitHub repository
-  whose URL has not been provided. This repository defines the event contract
-  and ships a client; it does not contain any detector code.
-- **Official SRM TRP logo artwork.** The repository ships a locally drawn SVG
-  wordmark (`frontend/assets/logo.svg`). Replace it with the approved official
-  asset when available — do not commit personal photographs.
+- **The Firebase API key.** It is read from the environment
+  (`FIREBASE_API_KEY`) and deliberately not committed. See
+  [`docs/FIREBASE.md`](docs/FIREBASE.md).
 - **Real camera streams.** Tiles show “Demo footage” until `CAMERA_STREAM_URLS`
   is configured with HLS or MJPEG URLs.
+- **Real bus/driver register data.** Only demo data is seeded; the register
+  contains personal data and is never committed.
+- **The upstream model's licence.** `best.pt` is AGPL-3.0 (Ultralytics) and the
+  public source repository declares no licence. Obtain a written position
+  before a public or commercial deployment, or re-train an equivalent model
+  on a dataset you are licensed to use. See
+  [`docs/DETECTION.md`](docs/DETECTION.md).
 
 ## Repository layout
 
 ```
-backend/            Flask API, auth, validation, services, seed + device client
-  tests/            pytest suite (auth, validation, event ingestion, exports)
+backend/            Flask API, auth, validation, services, vision, seed + device client
+  tests/            pytest suite (auth, validation, events, detection, exports)
 frontend/           Static frontend (no build step)
-  assets/           styles.css, login.css, logo.svg, favicon.svg
-  js/               ES modules (api, ui, layout, charts, tables, streams, pages)
+  assets/           styles.css, theme.css, login.css, the official crest + wordmark
+  js/               ES modules (api, ui, layout, cameras, firebase, charts, tables, pages)
   pages/            dashboard, logs, analytics, drivers, buses, driver-details, audit, manage
-  vendor/           Chart.js, hls.js, SheetJS (+ licences)
-docs/               architecture, event contract, privacy note
+  vendor/           Chart.js, hls.js, SheetJS, Firebase SDK (+ licences)
+deploy/             Dockerfile and Cloud Build pipeline
+docs/               upgrade specification, detection, cameras, Firebase, architecture,
+                    event contract, privacy note
 scripts/            frontend checks and secret scanner
 .github/workflows/  CI
 ```

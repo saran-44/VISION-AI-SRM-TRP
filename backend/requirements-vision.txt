@@ -1,0 +1,27 @@
+# Vision extras for bus sticker detection.
+#
+# These are the exact versions verified against best.pt
+# (Ultralytics YOLOv10n, ultralytics 8.4.20) in this repository.
+#
+# IMPORTANT — CPU-only hosts:
+#   The default torch wheel on PyPI is the CUDA build and pulls ~3 GB of
+#   NVIDIA runtime libraries. Prefer the CPU index on small servers:
+#
+#     pip install torch==2.9.1 torchvision==0.24.1 \
+#         --index-url https://download.pytorch.org/whl/cpu
+#
+# opencv-python-headless is used deliberately: the full opencv-python wheel
+# needs libGL.so.1, which is missing on minimal server images and breaks
+# `import cv2`.
+
+torch==2.9.1
+torchvision==0.24.1
+ultralytics==8.4.20
+opencv-python-headless==4.10.0.84
+Pillow>=10.0.0
+
+# OCR. RapidOCR is the default: it is ONNX-based, bundles its own models and
+# needs no system packages. Tesseract and EasyOCR remain supported fallbacks
+# (see docs/DETECTION.md).
+rapidocr-onnxruntime==1.4.4
+pytesseract>=0.3.10

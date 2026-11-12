@@ -58,6 +58,19 @@ videos/
 photos/
 uploads/
 
+# The official SRM TRP crest and wordmark are branding assets, not captured
+# media, and must be tracked.
+!frontend/assets/logo-emblem.png
+!frontend/assets/logo-wordmark.png
+!frontend/assets/favicon.png
+
+# --- Firebase ---------------------------------------------------------------
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+.firebaserc.local
+
 # --- Editors / OS ----------------------------------------------------------
 .vscode/
 .idea/
