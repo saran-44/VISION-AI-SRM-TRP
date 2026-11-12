@@ -26,8 +26,12 @@
     --brand-ivory: #fbf8ef;
 
     /* --- light golden glass surfaces ------------------------------------ */
-    --app-bg: linear-gradient(160deg, #fdfaf1 0%, #f7f1e0 42%, #eef1fa 100%);
+    --app-bg: #f8f4e9;
     --app-bg-flat: #f8f4e9;
+    --app-bg-gradient: linear-gradient(160deg, #fdfaf1 0%, #f7f1e0 42%, #eef1fa 100%);
+    --aurora-gold: rgba(248, 232, 64, 0.26);
+    --aurora-navy: rgba(40, 48, 96, 0.16);
+    --aurora-amber: rgba(212, 160, 23, 0.16);
     --sidebar-bg: rgba(255, 255, 255, 0.62);
     --card-bg: rgba(255, 255, 255, 0.72);
     --card-bg-solid: #fffdf7;
@@ -54,8 +58,12 @@
 
 /* --- midnight (dark) alternative: deep navy with the same gold accents --- */
 body.dark-theme {
-    --app-bg: linear-gradient(160deg, #12162e 0%, #1b2044 45%, #232a52 100%);
+    --app-bg: #1b2044;
     --app-bg-flat: #1b2044;
+    --app-bg-gradient: linear-gradient(160deg, #12162e 0%, #1b2044 45%, #232a52 100%);
+    --aurora-gold: rgba(248, 232, 64, 0.12);
+    --aurora-navy: rgba(40, 48, 96, 0.5);
+    --aurora-amber: rgba(212, 160, 23, 0.08);
     --sidebar-bg: rgba(24, 29, 60, 0.66);
     --card-bg: rgba(30, 36, 74, 0.68);
     --card-bg-solid: #1e244a;
@@ -79,28 +87,40 @@ body.dark-theme {
     --gold-sheen: linear-gradient(135deg, rgba(248, 232, 64, 0.18), rgba(212, 160, 23, 0.05));
 }
 
-/* --- page background: soft golden aurora behind the glass --------------- */
+/* --- page background: soft golden aurora behind the glass ---------------
+   The aurora is painted as extra background layers on <body> itself.
+   A separate pseudo-element with a negative z-index would be painted behind
+   the solid background of .app-container and would never be visible, and the
+   layer order here keeps the aurora above the base gradient but below all
+   content.
+   ------------------------------------------------------------------------ */
 body {
-    background: var(--app-bg);
+    background-color: var(--app-bg);
+    background-image:
+        radial-gradient(900px 520px at 8% -8%, var(--aurora-gold), transparent 62%),
+        radial-gradient(760px 460px at 96% 4%, var(--aurora-navy), transparent 60%),
+        radial-gradient(700px 500px at 50% 108%, var(--aurora-amber), transparent 62%),
+        var(--app-bg-gradient);
     background-attachment: fixed;
+    background-size: cover;
+    background-repeat: no-repeat;
 }
 
-body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    z-index: -1;
-    pointer-events: none;
-    background:
-        radial-gradient(900px 520px at 8% -8%, rgba(248, 232, 64, 0.26), transparent 62%),
-        radial-gradient(760px 460px at 96% 4%, rgba(40, 48, 96, 0.16), transparent 60%),
-        radial-gradient(700px 500px at 50% 108%, rgba(212, 160, 23, 0.16), transparent 62%);
+/* The shell must not paint over the aurora. */
+.app-container {
+    background-color: transparent;
 }
 
-body.dark-theme::before {
-    background:
-        radial-gradient(900px 520px at 8% -8%, rgba(248, 232, 64, 0.12), transparent 62%),
-        radial-gradient(760px 460px at 96% 4%, rgba(40, 48, 96, 0.5), transparent 60%);
+/* The scrolling content area and the mobile search sheet are surfaces that
+   would otherwise hide the aurora with a flat fill. */
+.main-content {
+    background-color: transparent;
+}
+
+@media (max-width: 900px) {
+    .search-bar {
+        background-color: transparent;
+    }
 }
 
 /* --- glass surfaces ----------------------------------------------------- */
@@ -431,6 +451,13 @@ body.dark-theme .modal-content {
     border: 1px solid var(--card-border);
 }
 
+/* Nested panels keep the glass treatment rather than a flat fill. */
+.driver-card,
+.bus-details-list {
+    background-color: var(--card-bg);
+    border: 1px solid var(--card-border);
+}
+
 .result-item:hover {
     border-color: var(--primary);
     background: var(--primary-light);
@@ -457,16 +484,22 @@ body.dark-theme .profile-avatar {
 
 /* --- login screen -------------------------------------------------------- */
 body.login-page {
-    background:
+    background-color: var(--app-bg);
+    background-image:
         radial-gradient(900px 520px at 12% -10%, rgba(248, 232, 64, 0.34), transparent 60%),
         radial-gradient(760px 460px at 92% 6%, rgba(40, 48, 96, 0.2), transparent 58%),
         linear-gradient(160deg, #fdfaf1 0%, #f4eddc 50%, #e9edfa 100%);
+    background-attachment: fixed;
+    background-size: cover;
 }
 
 body.login-page.dark-theme {
-    background:
+    background-color: var(--app-bg);
+    background-image:
         radial-gradient(900px 520px at 12% -10%, rgba(248, 232, 64, 0.14), transparent 60%),
         linear-gradient(160deg, #12162e 0%, #1b2044 60%, #232a52 100%);
+    background-attachment: fixed;
+    background-size: cover;
 }
 
 .login-container {
@@ -566,8 +599,9 @@ body.dark-theme .login-container {
 
 /* --- print --------------------------------------------------------------- */
 @media print {
-    body::before {
-        display: none;
+    body {
+        background: #ffffff;
+        background-image: none;
     }
 
     .sidebar,
