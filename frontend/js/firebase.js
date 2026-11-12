@@ -21,6 +21,7 @@ const SCRIPTS = {
 };
 
 let loadPromise = null;
+let configPromise = null;
 let state = {
   enabled: false,
   analytics: false,
@@ -81,6 +82,29 @@ export function isFirebaseEnabled() {
 }
 
 /**
+ * Fetch the deployment's public Firebase configuration.
+ *
+ * The result is cached: `initFirebase` may run several times on one page
+ * (the sign-in flow asks for it on every attempt) and the configuration
+ * cannot change while the page is open. A failed request is not cached, so a
+ * later call can still retry.
+ */
+async function fetchConfig() {
+  if (!configPromise) {
+    configPromise = fetch('/api/config/firebase', { credentials: 'same-origin' })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Configuration request failed (${response.status}).`);
+        return response.json();
+      })
+      .catch((error) => {
+        configPromise = null;
+        throw error;
+      });
+  }
+  return configPromise;
+}
+
+/**
  * Initialise Firebase. Safe to call on every page; it only performs work once.
  *
  * @param {object} [options]
@@ -89,11 +113,8 @@ export function isFirebaseEnabled() {
  * @returns {Promise<object>} the current state
  */
 export async function initFirebase(options = {}) {
-  if (state.app) return state;
   try {
-    const response = await fetch('/api/config/firebase', { credentials: 'same-origin' });
-    if (!response.ok) throw new Error(`Configuration request failed (${response.status}).`);
-    const payload = await response.json();
+    const payload = await fetchConfig();
     const config = payload?.config || {};
     state.projectId = payload?.projectId || config.projectId || null;
 
@@ -107,9 +128,11 @@ export async function initFirebase(options = {}) {
     const wantsAnalytics = options.analytics === undefined ? payload?.analytics : options.analytics;
     const wantsAuth = Boolean(options.auth);
     const extras = [];
-    if (wantsAuth) extras.push('auth');
-    if (wantsAnalytics) extras.push('analytics');
-    await loadSdk(extras);
+    // The console pages start Firebase for analytics only, so the Auth bundle
+    // is loaded later — when the sign-in page needs it, or when signing out.
+    if (wantsAuth && !state.authInstance) extras.push('auth');
+    if (wantsAnalytics && !state.analyticsInstance) extras.push('analytics');
+    if (extras.length) await loadSdk(extras);
 
     if (!window.firebase) throw new Error('The Firebase SDK did not initialise.');
 
@@ -119,7 +142,7 @@ export async function initFirebase(options = {}) {
     state.app = window.firebase.apps[0] || null;
     state.enabled = true;
 
-    if (wantsAuth && window.firebase.auth) {
+    if (wantsAuth && !state.authInstance && window.firebase.auth) {
       try {
         state.authInstance = window.firebase.auth();
         state.auth = true;
@@ -129,7 +152,7 @@ export async function initFirebase(options = {}) {
       }
     }
 
-    if (wantsAnalytics && window.firebase.analytics) {
+    if (wantsAnalytics && !state.analyticsInstance && window.firebase.analytics) {
       try {
         state.analyticsInstance = window.firebase.analytics();
         state.analytics = true;
@@ -145,6 +168,26 @@ export async function initFirebase(options = {}) {
     state.auth = false;
     state.error = error?.message || 'Firebase initialisation failed.';
     return state;
+  }
+}
+
+/**
+ * End the Firebase session, if there is one.
+ *
+ * The console pages initialise Firebase for analytics only, so the Auth
+ * bundle is loaded on demand here. Failures are swallowed deliberately: the
+ * application session is cleared by the caller either way.
+ *
+ * @returns {Promise<boolean>} true when a Firebase session was ended
+ */
+export async function signOutFirebase() {
+  try {
+    const current = await initFirebase({ auth: true, analytics: false });
+    if (!current.authInstance) return false;
+    await current.authInstance.signOut();
+    return true;
+  } catch (_error) {
+    return false;
   }
 }
 

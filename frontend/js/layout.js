@@ -1,6 +1,6 @@
 import { apiGet, apiPost, toQuery } from './api.js';
 import { actionButton, clear, el, icon, iconButton, initials, setState, showToast } from './ui.js';
-import { initFirebase, logEvent } from './firebase.js';
+import { initFirebase, logEvent, signOutFirebase } from './firebase.js';
 
 const NAV = {
   head_admin: [
@@ -249,6 +249,9 @@ function wireShell({ sidebar, topbar, theme, searchInput, searchBar, overlay, se
   });
 
   logoutButton.addEventListener('click', async () => {
+    // End the Firebase session as well, so the browser keeps no signed-in
+    // identity that the server has already rejected.
+    await signOutFirebase();
     try {
       await apiPost('/api/auth/logout', {}, { skipAuthRedirect: true });
     } catch (_error) {
