@@ -140,7 +140,7 @@ function rtspNotice(url, stateHost) {
     el('span', {
       class: 'muted',
       text: 'Bridge this camera through MediaMTX or FFmpeg to HLS/MJPEG, then point the stream URL at the gateway.',
-      style: 'color:#cbd5e1;font-size:.72rem;font-weight:500;max-width:32ch;text-align:center;line-height:1.4;',
+      style: 'color:#d9cdf3;font-size:.72rem;font-weight:500;max-width:32ch;text-align:center;line-height:1.4;',
     }),
     el('code', {
       class: 'mono',

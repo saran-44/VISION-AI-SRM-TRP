@@ -5,10 +5,13 @@ const charts = new Map();
 function palette() {
   const styles = getComputedStyle(document.body);
   return {
-    primary: styles.getPropertyValue('--primary').trim() || '#2563eb',
-    primaryLight: styles.getPropertyValue('--primary-light').trim() || 'rgba(37,99,235,.18)',
-    muted: styles.getPropertyValue('--text-muted').trim() || '#64748b',
-    border: styles.getPropertyValue('--border').trim() || '#e2e8f0',
+    primary: styles.getPropertyValue('--primary').trim() || '#5b21b6',
+    primaryLight: styles.getPropertyValue('--primary-light').trim() || 'rgba(91,33,182,.18)',
+    muted: styles.getPropertyValue('--text-muted').trim() || '#6e6488',
+    border: styles.getPropertyValue('--border').trim() || '#ece2f9',
+    // Gold accent for bar series; the line series keeps the purple primary.
+    accent: styles.getPropertyValue('--accent').trim() || '#c9a227',
+    accentLight: styles.getPropertyValue('--accent-light').trim() || 'rgba(201,162,39,.18)',
   };
 }
 
@@ -50,8 +53,9 @@ function draw(canvasId, labels, values, label, emptyMessage) {
       datasets: [{
         label,
         data: values,
-        borderColor: colors.primary,
-        backgroundColor: type === 'line' ? colors.primaryLight : colors.primary,
+        borderColor: type === 'line' ? colors.primary : colors.accent,
+        backgroundColor: type === 'line' ? colors.primaryLight : colors.accent,
+        hoverBackgroundColor: colors.accent,
         fill: type === 'line',
         tension: .35,
         borderRadius: type === 'bar' ? 6 : 0,
