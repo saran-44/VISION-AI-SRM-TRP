@@ -164,7 +164,7 @@ def test_firebase_login_auto_provisions_an_approved_password_user(firebase_clien
     assert payload["provider"] == PROVIDER_PASSWORD
     assert payload["user"]["role"] == "transport_office"
     # The session cookie was issued.
-    assert "transport_token" in response.headers.get("Set-Cookie", "")
+    assert "__session" in response.headers.get("Set-Cookie", "")
 
 
 @pytest.mark.parametrize("approval", [None, False, True, "true", 1, "other@example.invalid"])
@@ -184,7 +184,7 @@ def test_firebase_login_denies_self_registered_password_users(
     )
     assert response.status_code == 403
     assert "not authorised" in response.get_json()["error"]
-    assert "transport_token" not in response.headers.get("Set-Cookie", "")
+    assert "__session" not in response.headers.get("Set-Cookie", "")
     assert db.users.find_one({"email": email}) is None
 
 
@@ -218,7 +218,7 @@ def test_firebase_login_rejects_unverified_listed_users_before_uid_binding(
     )
     assert response.status_code == 403
     assert "Verify your email" in response.get_json()["error"]
-    assert "transport_token" not in response.headers.get("Set-Cookie", "")
+    assert "__session" not in response.headers.get("Set-Cookie", "")
     assert db.users.find_one({"email": HEAD_ADMIN_EMAIL}).get("firebase_uid") is None
 
 

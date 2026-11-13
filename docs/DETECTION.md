@@ -5,7 +5,7 @@ works, and the HTTP contract the console uses.
 
 ---
 
-## 1. Model provenance (verified)
+## 1. Model investigation (exact provenance unverified)
 
 | Property | Value |
 | --- | --- |
@@ -15,11 +15,11 @@ works, and the HTTP contract the console uses.
 | Saved by | `ultralytics 8.4.20` |
 | Classes | `{0: 'red circle', 1: 'sticker'}` (`nc=2`) |
 | Inference size | 640 px |
-| Checkpoint license | **AGPL-3.0** (Ultralytics / `THU-MIG/yolov10`) |
+| Checkpoint metadata | Identifies an Ultralytics AGPL-3.0 licence; actual model and dataset rights require review |
 
-### Verified training source
+### Related notebook
 
-The model was traced to a public GitHub repository during the upgrade:
+A related public GitHub repository was found during the upgrade:
 
 **`814725105014-debug/SRM-TRP-TRANSPORT-AI`** — <https://github.com/814725105014-debug/SRM-TRP-TRANSPORT-AI>
 
@@ -64,21 +64,19 @@ url = "https://github.com/jameslahm/yolov10/releases/download/v1.0/yolov10n.pt"
 
 ### Important consequences
 
-1. **There is no hosted inference API.** The source project is a Colab
-   notebook, not a server. It exposes no endpoint, no request/response schema
-   and no licence that would allow its code to be vendored. The integration in
-   this repository therefore **re-implements the notebook's pipeline locally**
-   in `backend/vision.py` rather than calling a third-party service.
-2. **`data.yaml` and `license_data.zip` are not committed** to the source
-   repository. The class names `red circle` and `sticker` are therefore known
-   only from the checkpoint itself, and the training dataset cannot be
-   re-derived from that repository.
-3. **Licensing.** The checkpoint inherits Ultralytics' **AGPL-3.0**. The source
-   repository declares no licence. Before any public or commercial
-   deployment, get a written position from the model owner, or re-train an
-   equivalent model on a dataset you are licensed to use and replace
-   `best.pt`. AGPL-3.0 requires that users interacting with the software over
-   a network are offered the corresponding source.
+1. **No hosted inference API was found in that repository.** It is a Colab
+   notebook, not a server with an endpoint contract. This project implements
+   its own detection/OCR integration in `backend/vision.py` rather than
+   inventing a third-party API.
+2. **`data.yaml`, `license_data.zip`, and the trained weights are not committed**
+   there. A similar architecture or filename does not prove the supplied
+   checkpoint was produced by this notebook. Its exact provenance and dataset
+   remain unverified.
+3. **Licensing.** The checkpoint metadata identifies an Ultralytics AGPL-3.0
+   licence, while the related notebook repository declares no licence. Model,
+   dataset and software rights require separate review. Obtain written rights
+   and qualified licence advice, or replace the model and dependencies with
+   appropriately licensed alternatives before production or distribution.
 4. A second repository, `814725105014-debug/SRM-TRP-TRANSPORT-AI-NEW`, exists
    but is **empty** (GitHub returns `409 Git Repository is empty`).
 
@@ -87,8 +85,8 @@ url = "https://github.com/jameslahm/yolov10/releases/download/v1.0/yolov10n.pt"
 `hemanathanmd01/Clg-bus-project` is an earlier prototype of the same college
 transport project. It contains **no model weights** (only `app.py`, HTML,
 CSV logs, a PDF, sample videos and images), declares **no licence**, and its
-code embeds credentials. It is **not** the source of `best.pt` and none of its
-code was copied here.
+code embeds credentials. No checkpoint was found there, and none of its code
+was copied here for the detector integration.
 
 ---
 

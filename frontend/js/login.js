@@ -1,6 +1,6 @@
 import { apiPost } from './api.js';
 import { el, icon, setBusy } from './ui.js';
-import { AuthError, authConfig, signInWithGoogle, signInWithPassword } from './auth.js';
+import { AuthError, authConfig, finishGoogleRedirect, signInWithGoogle, signInWithPassword } from './auth.js';
 
 const form = document.getElementById('loginForm');
 const emailInput = document.getElementById('email');
@@ -127,5 +127,16 @@ if (googleButton) {
 
   if (!legacyAllowed && !firebaseOn) {
     showError('No sign-in method is enabled on this deployment.');
+  }
+
+  // A popup-blocked fallback navigates back here. Firebase must consume its
+  // redirect result and exchange the returned ID token for the portal cookie.
+  if (firebaseOn && googleAllowed) {
+    try {
+      const result = await finishGoogleRedirect();
+      if (result) goToApp(result.user?.role);
+    } catch (error) {
+      showError(error instanceof AuthError ? error.message : (error.message || 'Google sign-in failed.'));
+    }
   }
 })();

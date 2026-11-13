@@ -1,188 +1,158 @@
-# Firebase — Hosting, Analytics and Configuration
+# Firebase: browser configuration, authentication and Hosting
 
-This project uses the Firebase project **`srmtrpai`** for static hosting of the
-console and for optional Google Analytics. The Flask backend is **not** hosted
-on Firebase Hosting — it runs on a container/VM — and the two are connected
-through the `/api/**` rewrite in `firebase.json` and the `CORS_ALLOWED_ORIGINS`
-setting on the backend.
+This document describes the checked-in integration. For the complete, ordered
+Windows installation, project setup, Atlas networking, private administrator
+onboarding, Cloud Run/Hosting deploy and verification instructions, use
+**[DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md)**. The architecture and upgrade
+context are in [UPGRADE_SPECIFICATION.md](UPGRADE_SPECIFICATION.md), and the
+access model is in [AUTHENTICATION.md](AUTHENTICATION.md).
 
----
+> The supplied project and app identifiers below have **not** been verified
+> against the live Firebase project from this workspace. Confirm them in
+> Firebase Console → Project settings → General → Your apps, or with
+> `firebase apps:sdkconfig`, before deploying. No live Firebase sign-in,
+> Cloud Run deployment, Atlas connection, or Hosting rewrite has been tested
+> by the author of these changes.
 
-## 1. Project facts
+## 1. Project configuration
 
-| Item | Value |
+| Item | Value currently expected by the repository |
 | --- | --- |
-| Firebase project id | `srmtrpai` |
-| Auth domain | `srmtrpai.firebaseapp.com` |
+| Firebase / Google Cloud project ID | `srmtrpai` |
+| Web app ID | `1:734375891811:web:6851938bef332bc0e53956` |
+| Messaging sender ID | `734375891811` |
+| Firebase auth domain | `srmtrpai.firebaseapp.com` |
 | Storage bucket | `srmtrpai.firebasestorage.app` |
-| Messaging sender id | `734375891811` |
-| Web app id | `1:734375891811:web:6851938bef332bc0e53956` |
-| Analytics measurement id | `G-7MXBNH3N7D` |
+| Measurement ID | `G-7MXBNH3N7D` |
+| Web API key | Provided at runtime, not committed |
 
-> **Authentication** is covered separately in
-> [`docs/AUTHENTICATION.md`](AUTHENTICATION.md) — the sign-in model, the
-> access list, the Firebase console setup, and why Supabase is not needed.
+Firebase web API keys are **public project identifiers**, not a substitute for
+security rules or authentication. The backend publishes the configured browser
+values at `/api/config/firebase`; the key will be visible to the browser.
+Externalizing it avoids a hard-coded deployment value and supports rotation;
+it does not make the key secret. Restrict API usage appropriately without
+breaking Firebase Auth and the verification helper.
 
-> **The API key is deliberately not committed.** Firebase web API keys are
-> public identifiers (they identify the project, they do not authorise access
-> to data — access is governed by Firestore/Storage security rules), but
-> keeping them out of Git makes rotation a configuration change rather than a
-> code change, and stops the repository from carrying deployment identifiers.
-> The key is read from the environment at runtime.
+`backend/config.py` builds the configuration from environment variables.
+Cloud Run's checked-in build settings provide the identifiers and load
+`FIREBASE_API_KEY` from Secret Manager. The endpoint returns `enabled: true`
+when a project ID and app ID are configured; the browser **also requires an
+API key** to initialize. Analytics is optional. Firebase Authentication is a
+required login dependency in the provided production build because legacy
+password login is disabled.
 
----
+Do not assume the default Hosting site has the same ID as the project. New
+Firebase projects can have no default site until it is created. Inspect
+`firebase hosting:sites:list --project=srmtrpai --json` for `DEFAULT_SITE`
+and compare its `defaultUrl` and the web app's actual `authDomain`. If there
+is no default site, follow the conditional creation steps in the Windows
+runbook; if the existing site or app config differs, review and update the
+Cloud Build settings and Firebase authorized domains before deploying.
+See [Firebase's default-site documentation](https://firebase.google.com/docs/hosting/default-site).
 
-## 2. Where the configuration lives
+## 2. Authentication and onboarding
 
-| Where | What |
-| --- | --- |
-| `.env` (local, git-ignored) | `FIREBASE_API_KEY`, `FIREBASE_PROJECT_ID`, … |
-| The host's secret store (production) | The same variables |
-| `GET /api/config/firebase` | The public subset the browser receives |
+1. Enable **Email/Password** in Firebase Authentication; enable **Google** if
+   its login button will be used. Add the actual deployment domains under
+   Authentication → Settings → Authorized domains.
+2. Privately create or recover the administrator's Firebase account. Use a
+   **new** strong password; never repeat a password that was shared in chat.
+3. Verify mailbox ownership. The portal does not currently offer a
+   verification/reset button. The checked-in helper can privately send a
+   Firebase verification email and check the result:
 
-`backend/config.py` reads the variables, and `backend/app.py` exposes them at
-`/api/config/firebase`:
+   ```bash
+   # Set FIREBASE_WEB_API_KEY and FIREBASE_USER_PASSWORD via hidden prompts;
+   # exact Windows commands and the account-ownership checks are in the runbook.
+   python scripts/send_firebase_verification.py 814725105014@trp.srmtrichy.edu.in
+   python scripts/send_firebase_verification.py 814725105014@trp.srmtrichy.edu.in --check
+   ```
 
-```json
-{
-  "config": {
-    "apiKey": "…",
-    "authDomain": "srmtrpai.firebaseapp.com",
-    "projectId": "srmtrpai",
-    "storageBucket": "srmtrpai.firebasestorage.app",
-    "messagingSenderId": "734375891811",
-    "appId": "1:734375891811:web:6851938bef332bc0e53956",
-    "measurementId": "G-7MXBNH3N7D"
-  },
-  "projectId": "srmtrpai",
-  "enabled": true,
-  "analytics": true
-}
-```
+   Open the link before `--check`; clear the password from the shell afterward.
+   Never put credentials in command arguments or chat. A command-line Firebase
+   REST request can fail with browser-referrer-only API-key restrictions.
+4. Review the existing MongoDB users/UID bindings and add the verified account
+   to the intended `srmtrpai` database as `head_admin`, as described in the
+   runbook. A Firebase user alone does not grant portal access.
 
-When the variables are absent the endpoint returns `"enabled": false` and the
-frontend never downloads the Firebase SDK. **The console works fully without
-Firebase** — it is an optional enhancement, not a dependency.
+The checked-in Cloud Build settings enable both `password` and `google.com`,
+set `FIREBASE_AUTO_PROVISION=false`, and set
+`LEGACY_PASSWORD_LOGIN_ENABLED=false`. A successful login requires a valid
+Firebase ID token, a **verified email**, and an active backend access-list
+entry with a compatible Firebase UID. Arbitrary Google or self-registered
+password users are denied. The authenticated browser exchanges the Firebase
+ID token for a short-lived application session; the Firebase SDK manages its
+own browser authentication state until sign-out. There is no Supabase identity
+system.
 
----
+Google sign-in primarily uses a popup. The code also consumes a redirect
+result if a blocked popup triggers the redirect fallback. With a `web.app`
+origin and the default `firebaseapp.com` auth domain, modern browsers can block
+cross-origin storage needed by redirect sign-in. Test the actual browsers and
+configure a same-origin auth domain/authorized OAuth redirect URI as described
+in [Firebase's redirect best practices](https://firebase.google.com/docs/auth/web/redirect-best-practices),
+or allow the popup. Do not claim redirect works until it is tested live.
 
-## 3. Frontend integration
+## 3. Browser SDK
 
-The SDK is vendored under `frontend/vendor/firebase/` (the `compat` UMD
-builds of `firebase/app`, `firebase/auth`, `firebase/analytics` and
-`firebase/firestore` from `firebase@11.10.0`, Apache-2.0) and loaded
-**lazily** by `frontend/js/firebase.js`:
+The compat SDK bundles from `firebase@11.10.0` are vendored in
+`frontend/vendor/firebase/` with their licence and provenance. The loader in
+`frontend/js/firebase.js`:
 
-1. `initFirebase()` fetches `/api/config/firebase`.
-2. If `enabled` is false it returns immediately — nothing is downloaded.
-3. Otherwise it injects the `<script>` tags for the vendored bundles. The
-   `app` bundle is always loaded first, because the `auth` and `analytics`
-   bundles depend on it.
-4. `window.firebase.initializeApp(config)` is called once.
-5. Analytics is started only when a `measurementId` is present.
-6. The Authentication bundle is loaded only when a page actually needs to
-   sign somebody in.
+- fetches and caches `/api/config/firebase`;
+- loads the app bundle first and Auth, Analytics, and Firestore separately on
+  demand, including when Analytics was loaded before Auth;
+- shares concurrent script loads and permits a retry after a bundle fails;
+- keeps Analytics best-effort and ends the Firebase session on sign-out.
 
-Events recorded: `app_open`, `login`, `logout`, `screen_view`,
-`capture_frame`, `detection_result`, `export_data`.
+`scripts/check_firebase_loader.mjs` and `scripts/check_auth_flow.mjs` exercise
+these paths with browser/Firebase mocks. They are **not** live integration
+or OAuth tests.
 
-Nothing in the console throws if Firebase is unavailable — every Firebase call
-is wrapped so an outage can never break the transport UI.
+## 4. Hosting → Cloud Run
 
----
+`firebase.json` publishes `frontend/` but **excludes `frontend/pages/`**.
+Firebase Hosting gives static files priority over rewrites, so publishing the
+page templates would bypass Flask's page-role checks. The login page, assets,
+JavaScript and vendor libraries are static. Every unmatched path, including
+`/api/**` and `/dashboard`, is rewritten using `run.serviceId` to Cloud Run
+service `srm-trp-transport` in `asia-south1`; this is not an SPA fallback.
+Flask serves protected templates only after checking the session and role.
 
-## 4. Firebase CLI
+The browser uses same-origin relative API URLs. Firebase Hosting forwards only
+the reserved `__session` cookie to a dynamic backend; the app uses that name
+for its `HttpOnly`, `SameSite=Lax`, production-`Secure` session cookie. Users
+of the former cookie must sign in again. Renaming a cookie alone does not
+invalidate copied JWTs: rotate `JWT_SECRET` and retire old reachable revisions
+when responding to a compromise.
 
-> Deploying from Windows with Git Bash? Follow
-> [`docs/DEPLOY_WINDOWS.md`](DEPLOY_WINDOWS.md) — it covers the whole chain
-> (toolchain install → login → Cloud Run → Hosting) with Windows-specific
-> notes.
+Firebase Hosting and the backend both allow `camera=(self)` through
+`Permissions-Policy`. HTTPS and browser camera permission are also required.
+`/assets/**` and `/vendor/**` have a one-year immutable cache header; rename or
+version asset URLs when changing them to avoid stale browser content. The
+backend marks API and HTML responses `no-store`.
 
-```bash
-# One-time setup
-npm install -g firebase-tools
-firebase login
+Firebase Hosting currently limits backend requests to **60 seconds**, even
+though Cloud Run is configured for 300 seconds. A cold start waiting on NAT or
+Atlas can time out at the Hosting edge before the backend becomes ready;
+retry after inspecting service health. Long-running detection and camera/SSE
+streams may be interrupted and require explicit production testing or another
+architecture. See [Firebase's serverless limits](https://firebase.google.com/docs/hosting/serverless-overview).
 
-# Point the CLI at the project (the repo already contains .firebaserc)
-firebase use --add          # choose "srmtrpai"
+The local Hosting emulator can check basic rewrites, but it does not prove a
+real Cloud Run proxy or deployment upload exclusions. Test an actual deployment
+with an authorized and unauthorized account before production.
 
-# Preview locally
-firebase emulators:start --only hosting
+## 5. Deploy and production gates
 
-# Deploy the static console
-firebase deploy --only hosting
-```
+The Windows runbook creates a dedicated build and runtime identity, four
+Secret Manager values, an Atlas-scoped database user, and Direct VPC egress
+with a static Cloud NAT IP **before** the first Cloud Run startup. It then
+submits `deploy/cloudbuild.yaml` and deploys Hosting. It also covers costs,
+IAM, tool installation, safe Git updates, rollback and verification.
 
-`firebase.json` publishes the `frontend/` directory:
-
-- `/api/**` is rewritten to the Cloud Run / Cloud Functions service
-  `srm-trp-transport` in `asia-south1`.
-- Everything else falls back to `/index.html` for client-side routing.
-- `/assets/**` and `/vendor/**` get a one-year immutable cache header.
-- `/api/**` is explicitly `no-store`.
-- A `Permissions-Policy` header allows `camera=(self)` (needed for the
-  operator webcam) and denies microphone and geolocation.
-
-> If the backend is hosted somewhere other than a Google Cloud service in
-> `asia-south1`, update the `run` block in `firebase.json`, or replace the
-> `/api/**` rewrite with a `redirect`/proxy and point the frontend at the
-> backend origin directly through `CORS_ALLOWED_ORIGINS`.
-
----
-
-## 5. Connecting the frontend to the backend
-
-The console calls the API on the **same origin** (`/api/...`), which
-Firebase Hosting rewrites to the backend service. Two consequences:
-
-1. The session cookie is `SameSite=Lax` and works because the browser sees a
-   single origin.
-2. `CORS_ALLOWED_ORIGINS` on the backend is only needed if you *also* serve the
-   frontend from somewhere else (for example the Flask server itself during
-   development). Set it to the Firebase Hosting URL:
-
-```bash
-export CORS_ALLOWED_ORIGINS="https://srmtrpai.web.app,https://srmtrpai.firebaseapp.com"
-```
-
----
-
-## 6. Deploying the backend
-
-The Flask backend runs on a container or VM. A minimal `Dockerfile` and a
-`cloudbuild.yaml` are provided under `deploy/`.
-
-### Cloud Run
-
-```bash
-gcloud run deploy srm-trp-transport \
-  --image REGION-docker.pkg.dev/PROJECT/REPO/srm-trp-transport:latest \
-  --region asia-south1 \
-  --platform managed \
-  --allow-unauthenticated \
-  --set-env-vars "ENVIRONMENT=production,MONGO_DB_NAME=srmtrpai" \
-  --set-secrets "MONGO_URI=mongo-uri:latest,JWT_SECRET=jwt-secret:latest,DEVICE_API_KEYS=device-keys:latest,FIREBASE_API_KEY=firebase-api-key:latest" \
-  --set-env-vars "FIREBASE_PROJECT_ID=srmtrpai,FIREBASE_AUTH_DOMAIN=srmtrpai.firebaseapp.com,FIREBASE_APP_ID=1:734375891811:web:6851938bef332bc0e53956,FIREBASE_MEASUREMENT_ID=G-7MXBNH3N7D"
-```
-
-### Any Docker host
-
-```bash
-docker build -f deploy/Dockerfile -t srm-trp-transport:latest .
-docker run -d --name srm-trp -p 8080:8080 --env-file .env.production srm-trp-transport:latest
-```
-
----
-
-## 7. Before going live — checklist
-
-- [ ] Rotate the compromised MongoDB credential that was previously committed
-      to Git history, and purge the old credential from history.
-- [ ] Set a strong `JWT_SECRET` (32+ characters).
-- [ ] Set `COOKIE_SECURE=true` (the default when `ENVIRONMENT=production`).
-- [ ] Set `DEVICE_API_KEYS` to the real detector keys.
-- [ ] Put the API key in the host's secret store, not in the repo.
-- [ ] Restrict the MongoDB network access rules.
-- [ ] Confirm the analytics events arrive in the Firebase console.
-- [ ] Verify the operator webcam works over HTTPS (the camera API requires a
-      secure context).
+Before production, verify both leaked Atlas credentials are revoked, review
+previously provisioned Firebase/MongoDB accounts and sessions, rotate the JWT
+key, coordinate a sensitive Git-history purge **after** credential rotation,
+and resolve the provenance/licence of `best.pt`. Do not rely on a mock test,
+an ignore file, or a normal new Git commit as proof those tasks are complete.

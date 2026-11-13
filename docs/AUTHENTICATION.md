@@ -5,7 +5,10 @@ access is restricted to specific email addresses, and exactly what to click in
 the Firebase console.
 
 > **Recommendation: stay with Firebase. Do not add Supabase.** See
-> [§7](#7-why-not-supabase) for the reasoning.
+> [§7](#7-why-not-supabase) for the reasoning. For the exact initial-admin
+> account, private email-verification helper and ordered Windows deployment,
+> follow [DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md). The live Firebase project and
+> Atlas connection have not been verified from this workspace.
 
 ---
 
@@ -83,7 +86,14 @@ administrator may instead mark it verified using the
 that specific Firebase account**; an attacker may have registered the email
 first. Do not assume there is a verification checkbox in the console. An
 unverified address cannot sign in to the portal, even if it appears on the
-access list.
+access list. The portal has no built-in verification or reset button;
+[DEPLOY_WINDOWS.md §7](DEPLOY_WINDOWS.md#7-verify-the-firebase-email-and-seed-the-administrator)
+explains how to send and check a verification email privately with
+`scripts/send_firebase_verification.py`.
+
+For an existing email, independently verify mailbox ownership and control of
+the specific Firebase account/UID before recovery or granting `head_admin`.
+Do not reuse any password previously shared in chat.
 
 Add every authorized user to MongoDB with `backend.manage_access`, or use the
 optional admin approval claim described in [§4](#4-the-access-list) for
@@ -93,13 +103,10 @@ password accounts. Google users always need an access-list entry.
 
 **Authentication → Settings → Authorised domains**
 
-Add only the domains the portal is served from:
-
-```
-srmtrpai.web.app
-srmtrpai.firebaseapp.com
-localhost
-```
+Add only the domains the portal is actually served from. For the expected
+`srmtrpai` default site these may include `srmtrpai.web.app` and
+`srmtrpai.firebaseapp.com`; verify the real site first. Add `localhost` only
+when required for local development.
 
 These domains control the Firebase web OAuth/redirect flow; they are **not**
 an access list and do not prevent password sign-up through the Firebase API.
@@ -168,9 +175,15 @@ python -m backend.manage_access set-role principal@srmtrp.edu.in head_admin
 python -m backend.manage_access deactivate transport.office@srmtrp.edu.in
 python -m backend.manage_access activate transport.office@srmtrp.edu.in
 
-# let a deleted-and-recreated Firebase account take over an email
+# after verifying the replacement account and UID, allow it to bind
 python -m backend.manage_access unlink transport.office@srmtrp.edu.in
 ```
+
+> **Existing entries:** `add` changes the role and reactivates an existing
+> record by default; `set-role` also reactivates it. Review the Firebase UID,
+> account ownership and authorization before either operation or `unlink`.
+> Unlinking allows a different verified Firebase identity with that email to
+> bind; it must not be used to bypass an unexplained UID mismatch.
 
 > **Which database it touches.** `MONGO_DB_NAME` decides the database; if it
 > is not set, the name is taken from the path of `MONGO_URI`, falling back to
@@ -256,7 +269,8 @@ After a successful exchange the backend issues its own session:
 
 - **HS256 JWT**, signed with `JWT_SECRET`, valid for `JWT_TTL_MINUTES`
   (default 15 minutes).
-- **HttpOnly**, `SameSite=Lax`, `Secure` in production.
+- Named `__session`, **HttpOnly**, `SameSite=Lax`, `Secure` in production.
+  Firebase Hosting forwards this reserved name to Cloud Run.
 - Contains the email and the role, so the role cannot be changed by the
   browser.
 - The browser obtains a Firebase ID token and sends it for exchange. The
@@ -267,15 +281,11 @@ Signing out clears the cookie and records the event in the audit log.
 
 ### The break-glass path
 
-The original MongoDB password login still works and is handy while you are
-setting Firebase up:
-
-```bash
-LEGACY_PASSWORD_LOGIN_ENABLED=false   # turn it off once Firebase is working
-```
-
-When it is disabled, `POST /api/auth/login` returns `403` and the login page
-drops the local-account section.
+The original MongoDB password login can be enabled for controlled local
+setups, but the checked-in Cloud Build deployment explicitly sets
+`LEGACY_PASSWORD_LOGIN_ENABLED=false`. When disabled, `POST /api/auth/login`
+returns `403` and the login page drops the local-account section. Do not
+enable a production break-glass path without a reviewed security plan.
 
 ---
 
@@ -283,13 +293,13 @@ drops the local-account section.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `FIREBASE_PROJECT_ID` | `srmtrpai` | The Firebase project. Required for sign-in. |
-| `FIREBASE_APP_ID` | *(supplied)* | Required — without it the configuration is treated as absent. |
-| `FIREBASE_API_KEY` | *(secret)* | The web API key. Never commit it. |
-| `FIREBASE_AUTH_DOMAIN` | `srmtrpai.firebaseapp.com` | Auth domain. |
-| `FIREBASE_STORAGE_BUCKET` | `srmtrpai.firebasestorage.app` | Storage bucket. |
-| `FIREBASE_MESSAGING_SENDER_ID` | `734375891811` | Messaging sender id. |
-| `FIREBASE_MEASUREMENT_ID` | `G-7MXBNH3N7D` | Analytics measurement id. |
+| `FIREBASE_PROJECT_ID` | empty | Firebase project ID; `srmtrpai` in the checked-in build. |
+| `FIREBASE_APP_ID` | empty | Web app ID; configuration is absent without it. |
+| `FIREBASE_API_KEY` | empty | Public Firebase web API key, externalized from the repository and sent to the browser. |
+| `FIREBASE_AUTH_DOMAIN` | empty | Auth domain; confirm the actual value in Firebase. |
+| `FIREBASE_STORAGE_BUCKET` | empty | Firebase storage bucket, if applicable. |
+| `FIREBASE_MESSAGING_SENDER_ID` | empty | Messaging sender ID. |
+| `FIREBASE_MEASUREMENT_ID` | empty | Analytics measurement ID, if enabled. |
 | `FIREBASE_AUTH_ENABLED` | `true` | Master switch for Firebase sign-in. Only effective when a project id is set. |
 | `FIREBASE_ALLOWED_PROVIDERS` | `password,google.com` | Which providers are accepted. |
 | `FIREBASE_AUTO_PROVISION` | `true` | Auto-create an access record only for a verified password account with the admin-set approval claim. |
@@ -344,6 +354,10 @@ curl -s http://localhost:5000/api/auth/config | jq
 }
 ```
 
+This example shows the application defaults; the checked-in Cloud Build
+production settings instead set `auto_provision` and `legacy_password_login`
+to `false`. Refer to the Windows runbook for live, hosted checks.
+
 ### 8.2 Browser
 
 1. Open the portal. The **"Sign in with Google"** button appears below the
@@ -386,7 +400,7 @@ python -m backend.manage_access list    # who has access
 | "This email address is not authorised" | No active access entry or approved password auto-provisioning | Add the verified email to the access list, or follow the approval-claim steps above. |
 | "Verify your email address before signing in" | Firebase did not assert `email_verified: true` | Complete email verification; then sign in again for a fresh token. |
 | "This account has been deactivated" | The record exists but `active` is false | `python -m backend.manage_access activate <email>` |
-| "This email is already bound to a different Firebase account" | The Firebase user was deleted and re-created | `python -m backend.manage_access unlink <email>` |
+| "This email is already bound to a different Firebase account" | The Firebase UID differs from the bound identity | Investigate and independently verify account ownership and the replacement UID before using `unlink`. |
 | "The authentication service is temporarily unavailable." | Google’s key endpoint could not be reached | Check the server's outbound internet access |
 | The Google button does not appear | `google.com` is not in `FIREBASE_ALLOWED_PROVIDERS`, or Firebase is off | Check `/api/auth/config` and the environment |
 

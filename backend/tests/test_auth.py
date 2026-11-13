@@ -21,7 +21,7 @@ def test_login_succeeds_and_sets_httponly_cookie(client, users):
     assert payload["user"]["role"] == "head_admin"
     assert "password" not in str(payload["user"]).lower()
     cookie_header = response.headers.get("Set-Cookie", "")
-    assert "transport_token=" in cookie_header
+    assert "__session=" in cookie_header
     assert "HttpOnly" in cookie_header
     assert "SameSite=Lax" in cookie_header
 
