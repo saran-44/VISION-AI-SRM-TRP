@@ -137,6 +137,9 @@ class Config:
     firebase_auto_provision: bool = True
     firebase_default_role: str = "transport_office"
     legacy_password_login_enabled: bool = True
+    event_retention_days: int = 0
+    audit_retention_days: int = 0
+    audit_detection_scans: bool = True
 
     @classmethod
     def from_env(cls, overrides: dict | None = None) -> "Config":
@@ -184,6 +187,9 @@ class Config:
             firebase_default_role=os.getenv("FIREBASE_DEFAULT_ROLE", "transport_office").strip()
             or "transport_office",
             legacy_password_login_enabled=_bool("LEGACY_PASSWORD_LOGIN_ENABLED", True),
+            event_retention_days=_int("EVENT_RETENTION_DAYS", 0),
+            audit_retention_days=_int("AUDIT_RETENTION_DAYS", 0),
+            audit_detection_scans=_bool("AUDIT_DETECTION_SCANS", True),
         )
         if overrides:
             cfg = replace(cfg, **overrides)
@@ -226,6 +232,10 @@ class Config:
             ZoneInfo(self.app_timezone)
         except (ZoneInfoNotFoundError, ValueError):
             raise RuntimeError(f"Unknown APP_TIMEZONE: {self.app_timezone}") from None
+        if self.event_retention_days < 0:
+            raise RuntimeError("EVENT_RETENTION_DAYS must be non-negative")
+        if self.audit_retention_days < 0:
+            raise RuntimeError("AUDIT_RETENTION_DAYS must be non-negative")
         known_providers = {"password", "google.com"}
         unknown = set(self.firebase_allowed_providers) - known_providers
         if unknown:

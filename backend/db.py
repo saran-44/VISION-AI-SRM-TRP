@@ -18,7 +18,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import (
-    JSON, Boolean, Column, DateTime, Float, Integer, MetaData, String, Table,
+    JSON, Boolean, Column, DateTime, Float, Index, Integer, MetaData, String, Table,
     Text, and_, create_engine, delete, func, insert, or_, select, update,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -81,6 +81,8 @@ audit_logs = Table(
     Column("collection", Text), Column("record_id", Text), Column("before", json_type),
     Column("after", json_type), Column("ip", Text), Column("user_agent", Text),
 )
+Index("users_firebase_uid", users.c.firebase_uid)
+Index("audit_collection_action_timestamp", audit_logs.c.collection, audit_logs.c.action, audit_logs.c.timestamp.desc())
 TABLES = {table.name: table for table in (users, buses, drivers, events, audit_logs)}
 
 # IDs remain 24 hexadecimal characters, preserving URLs and allowing a future
@@ -119,9 +121,18 @@ def create_database_engine(url: str):
         raise RuntimeError("DATABASE_URL must use PostgreSQL or the isolated preview database")
     normalized = "postgresql+psycopg://" + url.split("://", 1)[1]
     # No prepared statements/session state: compatible with Supabase transaction
-    # pooling. Bound connection counts also protect small Supabase instances.
-    return create_engine(normalized, connect_args={"connect_timeout": 5, "prepare_threshold": None},
-                         pool_size=2, max_overflow=0, pool_pre_ping=True, hide_parameters=True)
+    # pooling. Bound connection counts also protect small Supabase instances
+    # while allowing concurrent threads to run exports/SSE without queue stalls.
+    return create_engine(
+        normalized,
+        connect_args={"connect_timeout": 5, "prepare_threshold": None},
+        pool_size=4,
+        max_overflow=2,
+        pool_timeout=10,
+        pool_recycle=300,
+        pool_pre_ping=True,
+        hide_parameters=True,
+    )
 
 
 def initialize_preview(engine) -> None:

@@ -117,10 +117,53 @@ def test_scan_is_recorded_in_the_audit_log(client, users, db):
         data={"image": (io.BytesIO(_png_bytes()), "frame.jpg")},
         content_type="multipart/form-data",
     )
-    actions = [entry.get("action") for entry in db.audit_logs.find({})]
+    entries = list(db.audit_logs.find({}))
+    actions = [entry.get("action") for entry in entries]
     # The attempt is always audited, whether the vision stack was available
     # (detection_scan) or not (detection_scan_failed).
     assert "detection_scan" in actions or "detection_scan_failed" in actions
+    assert entries[-1]["actor"] == "head.admin@example.invalid"
+
+
+def test_detection_scan_by_head_admin_audits_admin_email_and_compact_payload(client, users, db, monkeypatch):
+    from backend import app as app_module
+    from backend.vision import DetectionResult, PlateCandidate
+
+    monkeypatch.setattr(app_module, "decode_image", lambda _src: object())
+    monkeypatch.setattr(
+        app_module,
+        "detect",
+        lambda _img: DetectionResult(
+            candidates=[
+                PlateCandidate(
+                    bus_number="TN12AB1234",
+                    confidence=0.92,
+                    raw_text="TN 12 AB 1234",
+                    bbox=[10, 20, 100, 50],
+                )
+            ],
+            model="best.pt",
+            inference_ms=42,
+            frame_width=640,
+            frame_height=480,
+        ),
+    )
+
+    login_head_admin(client, users)
+    response = client.post(
+        "/api/detection/scan",
+        data={"image": (io.BytesIO(_png_bytes()), "frame.jpg"), "source": "browser"},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 200
+    entry = db.audit_logs.find_one({"action": "detection_scan"})
+    assert entry is not None
+    assert entry["actor"] == "head.admin@example.invalid"
+    assert entry["role"] == "head_admin"
+    assert entry["after"]["candidate_count"] == 1
+    assert entry["after"]["inference_ms"] == 42
+    assert "detection" not in entry["after"]
+    assert "candidates" not in entry["after"]
 
 
 # --------------------------------------------------------- firebase config

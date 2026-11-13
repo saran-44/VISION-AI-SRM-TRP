@@ -112,3 +112,40 @@ def test_firebase_project_id_retained_with_warning_when_app_id_missing(monkeypat
     assert config.firebase_project_id == "vision-ai-srmtrp"
     assert config.firebase_auth_enabled is True
     assert "FIREBASE_APP_ID" in caplog.text
+
+
+def test_retention_defaults_disabled(monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    monkeypatch.setenv("JWT_SECRET", "a-very-long-secret-value-for-testing-1234")
+    monkeypatch.delenv("EVENT_RETENTION_DAYS", raising=False)
+    monkeypatch.delenv("AUDIT_RETENTION_DAYS", raising=False)
+    config = Config.from_env()
+    assert config.event_retention_days == 0
+    assert config.audit_retention_days == 0
+
+    cloudbuild = (Path(__file__).resolve().parents[2] / "deploy" / "cloudbuild.yaml").read_text()
+    assert "EVENT_RETENTION_DAYS" not in cloudbuild
+    assert "AUDIT_RETENTION_DAYS" not in cloudbuild
+
+    with pytest.raises(RuntimeError, match="EVENT_RETENTION_DAYS"):
+        build_config(event_retention_days=-1).validate()
+
+
+def test_indexes_for_firebase_uid_and_audit_logs_defined(db):
+    from pathlib import Path
+
+    inspector = inspect(db.engine)
+    schema = "transport_portal" if db.engine.dialect.name == "postgresql" else None
+    user_indexes = {idx["name"] for idx in inspector.get_indexes("users", schema=schema)}
+    audit_indexes = {idx["name"] for idx in inspector.get_indexes("audit_logs", schema=schema)}
+    assert "users_firebase_uid" in user_indexes
+    assert "audit_collection_action_timestamp" in audit_indexes
+
+    root = Path(__file__).resolve().parents[2]
+    initial_sql = (root / "backend" / "sql" / "001_initial.sql").read_text()
+    hardening_sql = (root / "backend" / "sql" / "002_backend_hardening.sql").read_text()
+    for sql_text in (initial_sql, hardening_sql):
+        assert "users_firebase_uid" in sql_text
+        assert "audit_collection_action_timestamp" in sql_text

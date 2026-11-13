@@ -580,9 +580,10 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             # The detector is unavailable on this host (no model, no OCR
             # engine). Record the attempt so the gap is visible in the audit
             # trail, then tell the caller.
+            actor = getattr(g, "current_user", None) or {"email": "device-client", "role": "device"}
             record_audit(
                 db,
-                {"email": "device-client", "role": "device"},
+                actor,
                 "detection_scan_failed",
                 "events",
                 None,
@@ -592,9 +593,10 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             return jsonify({"error": str(exc)}), 503
         except Exception as exc:  # pragma: no cover - defensive
             current_app.logger.exception("Detection failed")
+            actor = getattr(g, "current_user", None) or {"email": "device-client", "role": "device"}
             record_audit(
                 db,
-                {"email": "device-client", "role": "device"},
+                actor,
                 "detection_scan_failed",
                 "events",
                 None,
@@ -611,15 +613,25 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             "raw_text": candidate.raw_text if candidate else None,
             "source": payload.get("source", "device"),
         }
-        record_audit(
-            db,
-            {"email": "device-client", "role": "device"},
-            "detection_scan",
-            "events",
-            None,
-            after=response,
-            flask_request=request,
-        )
+        if config.audit_detection_scans:
+            actor = getattr(g, "current_user", None) or {"email": "device-client", "role": "device"}
+            audit_summary = {
+                "bus_number": response["bus_number"],
+                "confidence": response["confidence"],
+                "raw_text": response["raw_text"],
+                "candidate_count": len(result.candidates),
+                "inference_ms": result.inference_ms,
+                "source": response["source"],
+            }
+            record_audit(
+                db,
+                actor,
+                "detection_scan",
+                "events",
+                None,
+                after=audit_summary,
+                flask_request=request,
+            )
         return jsonify(response)
 
     @app.get("/api/export/events.csv")

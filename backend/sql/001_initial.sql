@@ -85,6 +85,8 @@ CREATE INDEX events_flagged_timestamp ON transport_portal.events (flagged, times
 CREATE INDEX events_reasons ON transport_portal.events USING gin (flag_reasons);
 CREATE INDEX audit_timestamp ON transport_portal.audit_logs (timestamp DESC);
 CREATE INDEX audit_actor ON transport_portal.audit_logs (actor, timestamp DESC);
+CREATE INDEX users_firebase_uid ON transport_portal.users (firebase_uid) WHERE firebase_uid IS NOT NULL;
+CREATE INDEX audit_collection_action_timestamp ON transport_portal.audit_logs (collection, action, timestamp DESC);
 -- Supabase may set table default privileges for its API roles. Deny those
 -- roles explicitly as well as PUBLIC; the Flask database login is granted
 -- only the privileges it needs by scripts/configure_supabase.py.
