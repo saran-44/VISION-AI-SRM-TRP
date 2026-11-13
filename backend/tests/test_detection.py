@@ -730,3 +730,87 @@ def test_ocr_auto_skips_easyocr_unless_explicitly_enabled(monkeypatch):
     monkeypatch.setenv("VISION_ALLOW_EASYOCR_AUTO", "true")
     assert vision.read_text(object(), engine_name="auto") == "BUS-001"
     assert tried == ["rapidocr", "tesseract", "easyocr"]
+
+
+def test_scan_with_record_event_requires_device_key(client, users):
+    login_head_admin(client, users)
+    b64 = base64.b64encode(_png_bytes()).decode("ascii")
+    response = client.post(
+        "/api/detection/scan",
+        json={
+            "image": b64,
+            "record_event": True,
+            "direction": "IN",
+            "gate": "Gate 1",
+            "camera_id": "cam-1",
+        },
+    )
+    assert response.status_code == 403
+
+
+def test_scan_with_record_event_ingests_for_device_key_and_handles_missing_plate(client, db, users, monkeypatch):
+    from backend import app as app_module
+    from backend.vision import DetectionResult, PlateCandidate
+
+    login_transport_office(client, users)
+    client.post("/api/buses", json={"bus_number": "BUS-001", "capacity": 40})
+
+    monkeypatch.setattr(app_module, "decode_image", lambda *_a, **_kw: object())
+    monkeypatch.setattr(
+        app_module,
+        "detect",
+        lambda _img: DetectionResult(candidates=[PlateCandidate(bus_number="BUS 001", confidence=0.91)]),
+    )
+    b64 = base64.b64encode(_png_bytes()).decode("ascii")
+
+    # Without record_event: events table remains empty.
+    scan_only = client.post(
+        "/api/detection/scan",
+        headers={"X-Device-Key": DEVICE_KEY},
+        json={"image": b64},
+    )
+    assert scan_only.status_code == 200
+    assert "event" not in scan_only.get_json()
+    assert db.events.count_documents({}) == 0
+
+    # With record_event=true and missing gate metadata: 400.
+    bad_meta = client.post(
+        "/api/detection/scan",
+        headers={"X-Device-Key": DEVICE_KEY},
+        json={"image": b64, "record_event": True},
+    )
+    assert bad_meta.status_code == 400
+
+    # With record_event=true and full gate metadata: creates canonicalized event + bus_state.
+    recorded = client.post(
+        "/api/detection/scan",
+        headers={"X-Device-Key": DEVICE_KEY, "X-Idempotency-Key": "scan-evt-1"},
+        json={
+            "image": b64,
+            "record_event": True,
+            "direction": "IN",
+            "gate": "Gate 1",
+            "camera_id": "cam-1",
+        },
+    )
+    assert recorded.status_code == 200
+    body = recorded.get_json()
+    assert body["event"]["bus_number"] == "BUS-001"
+    assert db.events.count_documents({}) == 1
+
+    # No plate read -> returns event=None cleanly.
+    monkeypatch.setattr(app_module, "detect", lambda _img: DetectionResult(candidates=[]))
+    no_plate = client.post(
+        "/api/detection/scan",
+        headers={"X-Device-Key": DEVICE_KEY},
+        json={
+            "image": b64,
+            "record_event": True,
+            "direction": "IN",
+            "gate": "Gate 1",
+            "camera_id": "cam-1",
+        },
+    )
+    assert no_plate.status_code == 200
+    assert no_plate.get_json()["event"] is None
+    assert db.events.count_documents({}) == 1

@@ -801,6 +801,24 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         if not image_source:
             return jsonify({"error": "No image was supplied"}), 400
 
+        raw_record = payload.get("record_event")
+        if isinstance(raw_record, bool):
+            wants_record = raw_record
+        elif isinstance(raw_record, str):
+            wants_record = raw_record.strip().lower() in {"1", "true", "yes", "on"}
+        else:
+            wants_record = False
+
+        if wants_record and not getattr(g, "device_authenticated", False):
+            return jsonify({"error": "Only device API keys may record events"}), 403
+
+        raw_idem = request.headers.get("X-Idempotency-Key")
+        idem_key: str | None = None
+        if wants_record and raw_idem is not None:
+            idem_key = raw_idem.strip() or None
+            if idem_key and (len(idem_key) > 128 or any(ord(ch) < 32 for ch in idem_key)):
+                return jsonify({"error": "Invalid X-Idempotency-Key header"}), 400
+
         actor = getattr(g, "current_user", None) or {"email": "device-client", "role": "device"}
         try:
             if (
@@ -880,6 +898,49 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             "raw_text": candidate.raw_text if candidate else None,
             "source": payload.get("source", "device"),
         }
+        if wants_record:
+            if candidate and candidate.bus_number:
+                try:
+                    event_input = EventCreate.model_validate({
+                        "bus_number": candidate.bus_number,
+                        "direction": payload.get("direction"),
+                        "gate": payload.get("gate"),
+                        "camera_id": payload.get("camera_id"),
+                        "confidence": (
+                            candidate.confidence
+                            if candidate.confidence is not None
+                            else 0.0
+                        ),
+                        "timestamp": payload.get("timestamp") or naive_now(),
+                    })
+                except ValidationError as exc:
+                    return (
+                        jsonify({"error": "Validation failed", "details": validation_details(exc)}),
+                        400,
+                    )
+                recorded_event, created = ingest_event_with_status(
+                    db,
+                    event_input,
+                    config,
+                    source="device",
+                    idempotency_key=idem_key,
+                )
+                response["event"] = recorded_event
+                if not created:
+                    response["deduplicated"] = True
+                else:
+                    record_audit(
+                        db,
+                        {"email": "device-client", "role": "device"},
+                        "event_ingested",
+                        "events",
+                        recorded_event.get("id"),
+                        after=recorded_event,
+                        flask_request=request,
+                    )
+            else:
+                response["event"] = None
+
         if config.audit_detection_scans:
             actor = getattr(g, "current_user", None) or {"email": "device-client", "role": "device"}
             audit_summary = {
