@@ -140,6 +140,8 @@ class Config:
     event_retention_days: int = 0
     audit_retention_days: int = 0
     audit_detection_scans: bool = True
+    sse_max_connections: int = 4
+    sse_max_seconds: int = 50
 
     @classmethod
     def from_env(cls, overrides: dict | None = None) -> "Config":
@@ -190,6 +192,8 @@ class Config:
             event_retention_days=_int("EVENT_RETENTION_DAYS", 0),
             audit_retention_days=_int("AUDIT_RETENTION_DAYS", 0),
             audit_detection_scans=_bool("AUDIT_DETECTION_SCANS", True),
+            sse_max_connections=_int("SSE_MAX_CONNECTIONS", 4),
+            sse_max_seconds=_int("SSE_MAX_SECONDS", 50),
         )
         if overrides:
             cfg = replace(cfg, **overrides)
@@ -236,6 +240,10 @@ class Config:
             raise RuntimeError("EVENT_RETENTION_DAYS must be non-negative")
         if self.audit_retention_days < 0:
             raise RuntimeError("AUDIT_RETENTION_DAYS must be non-negative")
+        if not 1 <= self.sse_max_connections <= 50:
+            raise RuntimeError("SSE_MAX_CONNECTIONS must be between 1 and 50")
+        if not 5 <= self.sse_max_seconds <= 290:
+            raise RuntimeError("SSE_MAX_SECONDS must be between 5 and 290")
         known_providers = {"password", "google.com"}
         unknown = set(self.firebase_allowed_providers) - known_providers
         if unknown:

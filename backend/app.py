@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import threading
 import time
 import urllib.request
 from datetime import date, datetime
@@ -96,6 +97,8 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
 
     limiter = Limiter(key_func=get_remote_address, app=app)
     app.extensions["limiter"] = limiter
+    sse_semaphore = threading.BoundedSemaphore(config.sse_max_connections)
+    app.extensions["sse_semaphore"] = sse_semaphore
 
     CORS(
         app,
@@ -662,22 +665,52 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
     @app.get("/api/stream")
     @require_roles("head_admin")
     def stream():
+        if not sse_semaphore.acquire(blocking=False):
+            return (
+                jsonify({"error": "Live stream capacity reached; falling back to polling."}),
+                503,
+                {"Retry-After": "10"},
+            )
+        released = False
+        release_lock = threading.Lock()
+
+        def release_once() -> None:
+            nonlocal released
+            with release_lock:
+                if released:
+                    return
+                released = True
+            sse_semaphore.release()
+
         def generate():
-            yield "retry: 5000\n\n"
-            while True:
-                recent = db.events.find({}, {"_id": 0}).sort(event_sort()).limit(8)
-                payload = {
-                    "type": "tick",
-                    "generated_at": iso_utc(naive_now()),
-                    "stats": compute_stats(db, config),
-                    "recent_events": serialize_many(recent),
-                }
-                yield "data: " + json.dumps(payload, default=str) + "\n\n"
-                time.sleep(10)
+            deadline = time.monotonic() + config.sse_max_seconds
+            try:
+                yield "retry: 5000\n\n"
+                while time.monotonic() < deadline:
+                    try:
+                        recent = db.events.find({}).sort(event_sort()).limit(8)
+                        payload = {
+                            "type": "tick",
+                            "generated_at": iso_utc(naive_now()),
+                            "stats": compute_stats(db, config),
+                            "recent_events": serialize_many(recent),
+                        }
+                        yield "data: " + json.dumps(payload, default=str) + "\n\n"
+                    except SQLAlchemyError:
+                        current_app.logger.warning("SSE stats tick failed due to database error")
+                        yield 'event: error\ndata: {"error": "temporarily unavailable"}\n\n'
+                        break
+                    for _ in range(10):
+                        if time.monotonic() >= deadline:
+                            break
+                        time.sleep(1)
+            finally:
+                release_once()
 
         response = Response(stream_with_context(generate()), mimetype="text/event-stream")
         response.headers["Cache-Control"] = "no-cache"
         response.headers["X-Accel-Buffering"] = "no"
+        response.call_on_close(release_once)
         return response
 
     # ----------------------------------------------------------------- drivers

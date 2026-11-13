@@ -204,3 +204,95 @@ def test_update_without_fields_is_rejected(client, db, users):
     login_transport_office(client, users)
     response = client.put("/api/buses/" + "0" * 24, json={})
     assert response.status_code in (400, 404)
+
+
+def test_sse_stream_returns_initial_tick_with_id_and_closes_at_max_seconds(db, monkeypatch):
+    import json as json_module
+    from backend.app import create_app
+    from backend.auth import hash_password
+    from backend.tests.conftest import HEAD_ADMIN_EMAIL, HEAD_ADMIN_PASSWORD, build_config
+
+    now_clock = [0.0]
+    monkeypatch.setattr("backend.app.time.monotonic", lambda: now_clock[0])
+
+    def fake_sleep(seconds):
+        now_clock[0] += seconds
+
+    monkeypatch.setattr("backend.app.time.sleep", fake_sleep)
+    app = create_app(build_config(sse_max_connections=2, sse_max_seconds=5), database_engine=db.engine)
+    app.config.update(TESTING=True)
+    db.users.insert_one({
+        "email": HEAD_ADMIN_EMAIL,
+        "password_hash": hash_password(HEAD_ADMIN_PASSWORD),
+        "role": "head_admin",
+        "active": True,
+        "created_at": naive_now(),
+    })
+    client = app.test_client()
+    assert client.post("/api/auth/login", json={"email": HEAD_ADMIN_EMAIL, "password": HEAD_ADMIN_PASSWORD}).status_code == 200
+    assert client.post("/api/events", headers={"X-Device-Key": DEVICE_KEY}, json=event_payload()).status_code == 201
+
+    response = client.get("/api/stream")
+    assert response.status_code == 200
+    assert response.mimetype == "text/event-stream"
+    body = response.get_data(as_text=True)
+    data_lines = [line[6:] for line in body.splitlines() if line.startswith("data: ")]
+    assert len(data_lines) == 1
+    tick = json_module.loads(data_lines[0])
+    assert tick["type"] == "tick"
+    assert tick["recent_events"]
+    assert "id" in tick["recent_events"][0]
+
+
+def test_sse_stream_rejects_excess_concurrent_connections_with_503_and_releases_slot(db):
+    from backend.app import create_app
+    from backend.auth import hash_password
+    from backend.tests.conftest import HEAD_ADMIN_EMAIL, HEAD_ADMIN_PASSWORD, build_config
+
+    app = create_app(build_config(sse_max_connections=1, sse_max_seconds=5), database_engine=db.engine)
+    app.config.update(TESTING=True)
+    db.users.insert_one({
+        "email": HEAD_ADMIN_EMAIL,
+        "password_hash": hash_password(HEAD_ADMIN_PASSWORD),
+        "role": "head_admin",
+        "active": True,
+        "created_at": naive_now(),
+    })
+    client = app.test_client()
+    assert client.post("/api/auth/login", json={"email": HEAD_ADMIN_EMAIL, "password": HEAD_ADMIN_PASSWORD}).status_code == 200
+
+    sem = app.extensions["sse_semaphore"]
+    assert sem.acquire(blocking=False) is True
+    try:
+        rejected = client.get("/api/stream")
+        assert rejected.status_code == 503
+        assert rejected.headers["Retry-After"] == "10"
+    finally:
+        sem.release()
+
+
+def test_sse_slot_released_when_response_closed_before_iteration(db):
+    from backend.app import create_app
+    from backend.auth import hash_password
+    from backend.tests.conftest import HEAD_ADMIN_EMAIL, HEAD_ADMIN_PASSWORD, build_config
+
+    app = create_app(build_config(sse_max_connections=1, sse_max_seconds=50), database_engine=db.engine)
+    app.config.update(TESTING=True)
+    db.users.insert_one({
+        "email": HEAD_ADMIN_EMAIL,
+        "password_hash": hash_password(HEAD_ADMIN_PASSWORD),
+        "role": "head_admin",
+        "active": True,
+        "created_at": naive_now(),
+    })
+    client = app.test_client()
+    assert client.post("/api/auth/login", json={"email": HEAD_ADMIN_EMAIL, "password": HEAD_ADMIN_PASSWORD}).status_code == 200
+
+    response = client.get("/api/stream", buffered=False)
+    assert response.status_code == 200
+    # Close without iterating the generator — call_on_close must free the slot.
+    response.close()
+
+    sem = app.extensions["sse_semaphore"]
+    assert sem.acquire(blocking=False) is True
+    sem.release()
