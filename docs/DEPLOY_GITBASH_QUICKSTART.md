@@ -10,6 +10,11 @@ of this repository on:
 | Database | **Supabase PostgreSQL** | Private `transport_portal` schema |
 | Sign-in | **Firebase Authentication** | Email/password + Google |
 
+> **No billing card?** Cloud Run requires billing to be enabled even inside the
+> free tier. Use [`DEPLOY_RENDER_FREE.md`](DEPLOY_RENDER_FREE.md) instead: one
+> free Render Docker service serves both the API and the frontend, Supabase
+> stays the database, Firebase stays the sign-in provider.
+
 > **Supabase cannot run this backend.** Supabase hosts PostgreSQL, Storage, Auth
 > and Deno-based Edge Functions — it does not run Flask/gunicorn or a Python
 > `Dockerfile`. This repository keeps Flask on Cloud Run (a Google service next

@@ -344,6 +344,12 @@ complete security audit.
 
 ## Deployment
 
+**No billing account?** The [free deployment guide](docs/DEPLOY_RENDER_FREE.md)
+runs the whole portal — Flask API and frontend — on a **single free Render
+service** with Supabase as the database and Firebase for sign-in. No card, no
+Cloud Run, no Hosting rewrite. The trade-offs are a sleeping instance, 512 MB
+of RAM (so no torch/OCR detector) and one application instance.
+
 Fast path on a fresh Git Bash install: the
 [Git Bash quickstart](docs/DEPLOY_GITBASH_QUICKSTART.md) walks through Supabase
 migration, CA/TLS, `configure_supabase.py`, Secret Manager, a quick Cloud Build
