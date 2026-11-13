@@ -128,6 +128,19 @@ export async function signInWithGoogle() {
   }
 }
 
+/** Complete a Google redirect on return to the login page, if one was started. */
+export async function finishGoogleRedirect() {
+  const auth = await getAuth();
+  try {
+    const credential = await auth.getRedirectResult();
+    if (!credential?.user) return null;
+    return await exchangeToken(await credential.user.getIdToken());
+  } catch (error) {
+    if (error instanceof AuthError) throw error;
+    throw friendlyError(error);
+  }
+}
+
 /** Sign out of Firebase and clear the application session cookie. */
 export async function signOut() {
   // The Firebase session is ended first so the browser does not keep a

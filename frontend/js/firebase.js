@@ -20,7 +20,10 @@ const SCRIPTS = {
   firestore: 'firebase-firestore-compat.js',
 };
 
-let loadPromise = null;
+// Cache each bundle separately: a dashboard may start Analytics first and
+// request Auth only later when the user signs out. One global promise would
+// incorrectly treat that later bundle as already loaded.
+const scriptPromises = new Map();
 let configPromise = null;
 let state = {
   enabled: false,
@@ -35,42 +38,44 @@ let state = {
 };
 
 function loadScript(name) {
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[data-firebase="${name}"]`);
-    if (existing) {
-      if (existing.dataset.loaded === 'true') {
-        resolve();
-        return;
-      }
-      existing.addEventListener('load', () => resolve());
-      existing.addEventListener('error', () => reject(new Error(`Failed to load ${name}`)));
+  if (scriptPromises.has(name)) return scriptPromises.get(name);
+
+  const promise = new Promise((resolve, reject) => {
+    let script = document.querySelector(`script[data-firebase="${name}"]`);
+    if (script?.dataset.loaded === 'true') {
+      resolve();
       return;
     }
-    const script = document.createElement('script');
-    script.src = `${SDK_BASE}${SCRIPTS[name]}`;
-    script.async = true;
-    script.dataset.firebase = name;
+    const isNew = !script;
+    if (isNew) {
+      script = document.createElement('script');
+      script.src = `${SDK_BASE}${SCRIPTS[name]}`;
+      script.async = true;
+      script.dataset.firebase = name;
+    }
     script.addEventListener('load', () => {
       script.dataset.loaded = 'true';
       resolve();
     });
-    script.addEventListener('error', () => reject(new Error(`Failed to load ${name}`)));
-    document.head.append(script);
+    script.addEventListener('error', () => {
+      // An errored element cannot emit another load event; remove it so a
+      // later attempt can actually download the bundle again.
+      script.remove();
+      reject(new Error(`Failed to load ${name}`));
+    });
+    if (isNew) document.head.append(script);
+  }).catch((error) => {
+    scriptPromises.delete(name);
+    throw error;
   });
+  scriptPromises.set(name, promise);
+  return promise;
 }
 
 async function loadSdk(needs) {
-  if (!loadPromise) {
-    loadPromise = (async () => {
-      await loadScript('app');
-      const tasks = needs.map((name) => loadScript(name));
-      await Promise.all(tasks);
-    })().catch((error) => {
-      loadPromise = null;
-      throw error;
-    });
-  }
-  return loadPromise;
+  // The compat extras depend on app, but can be loaded in parallel afterward.
+  await loadScript('app');
+  await Promise.all(needs.map((name) => loadScript(name)));
 }
 
 export function firebaseState() {
@@ -132,7 +137,7 @@ export async function initFirebase(options = {}) {
     // is loaded later — when the sign-in page needs it, or when signing out.
     if (wantsAuth && !state.authInstance) extras.push('auth');
     if (wantsAnalytics && !state.analyticsInstance) extras.push('analytics');
-    if (extras.length) await loadSdk(extras);
+    await loadSdk(extras);
 
     if (!window.firebase) throw new Error('The Firebase SDK did not initialise.');
 
@@ -141,26 +146,27 @@ export async function initFirebase(options = {}) {
     }
     state.app = window.firebase.apps[0] || null;
     state.enabled = true;
+    state.error = null;
 
-    if (wantsAuth && !state.authInstance && window.firebase.auth) {
+    if (wantsAuth && !state.authInstance) {
       try {
+        if (typeof window.firebase.auth !== 'function') throw new Error('Auth bundle unavailable');
         state.authInstance = window.firebase.auth();
-        state.auth = true;
       } catch (error) {
-        state.auth = false;
         state.error = `Authentication unavailable: ${error?.message || 'unknown error'}`;
       }
     }
+    state.auth = Boolean(state.authInstance);
 
-    if (wantsAnalytics && !state.analyticsInstance && window.firebase.analytics) {
+    if (wantsAnalytics && !state.analyticsInstance) {
       try {
+        if (typeof window.firebase.analytics !== 'function') throw new Error('Analytics bundle unavailable');
         state.analyticsInstance = window.firebase.analytics();
-        state.analytics = true;
       } catch (error) {
-        state.analytics = false;
         state.error = `Analytics unavailable: ${error?.message || 'unknown error'}`;
       }
     }
+    state.analytics = Boolean(state.analyticsInstance);
     return state;
   } catch (error) {
     state.enabled = false;

@@ -1,21 +1,29 @@
 # SRM TRP Transport — Upgrade Status Report
 
 **Repository:** `saran-44/frontend` (imported from `hemanathanmd01/Clg-bus-project`)
-**Branch:** `arena/1c01d46f-frontend` (based on `main` @ `82f40e6`)
-**Report date:** 2026-11-12
+**Original report date:** 2026-11-12
 **Specification:** [`docs/UPGRADE_SPECIFICATION.md`](docs/UPGRADE_SPECIFICATION.md)
+
+> **Deployment update:** The current code includes Firebase Hosting/Cloud Run
+> routing and `__session` cookie fixes, verified-email/access-list checks,
+> restrictive Cloud Build settings, Direct VPC/NAT startup safeguards and an
+> administrator email-verification helper. Follow
+> [`docs/DEPLOY_WINDOWS.md`](docs/DEPLOY_WINDOWS.md) for the ordered setup.
+> The live project, account, Atlas, Hosting and Cloud Run deployment have not
+> been validated. Credential rotation, sensitive-history cleanup, account and
+> session review, and model/data licence review remain production blockers.
+> The rest of this report is historical; older test counts and earlier-round
+> feature descriptions below do not represent a live production verification.
 
 > **Update — round 2 (detection, cameras, Firebase, golden glass theme).**
 > The two items that were *PARTIAL* in the first round are now **DONE**:
 >
-> - **Detection is integrated.** The `best.pt` source repository was located
->   and verified on GitHub
->   ([`814725105014-debug/SRM-TRP-TRANSPORT-AI`](https://github.com/814725105014-debug/SRM-TRP-TRANSPORT-AI),
->   1 commit, no licence, weights not committed). Because that project is a
->   Colab notebook with **no service API**, the pipeline was re-implemented
->   locally in `backend/vision.py` and exposed at `POST /api/detection/scan`.
->   Provenance and licence details are in
->   [`docs/DETECTION.md`](docs/DETECTION.md).
+> - **Detection is integrated in code.** A related notebook was located on
+>   GitHub ([`814725105014-debug/SRM-TRP-TRANSPORT-AI`](https://github.com/814725105014-debug/SRM-TRP-TRANSPORT-AI)),
+>   but it does not contain the weights or a service API. Exact checkpoint
+>   provenance and rights remain unverified. This project implements its own
+>   local integration in `backend/vision.py` and exposes
+>   `POST /api/detection/scan`. See [`docs/DETECTION.md`](docs/DETECTION.md).
 > - **Cameras are integrated.** The browser webcam works today via
 >   `getUserMedia`; NVR/DVR feeds are supported through HLS and MJPEG; raw
 >   RTSP is documented as requiring a gateway/transcoder and is never loaded
@@ -50,7 +58,7 @@ the real camera stream URLs, the Firebase API key, and a licence position on
 | 2 | Real auth (Mongo users, Argon2, short-lived JWT, roles, page protection, logout, audit) | **DONE** | Enforced server-side on every page and endpoint |
 | 3 | REST API (login, driver/bus CRUD, events, stats, CSV + Excel export) | **DONE** | All routes implemented and exercised by tests and a live smoke test |
 | 4 | Live data (SSE + polling fallback, "Currently Inside", flag rules with reasons) | **DONE** | Rules: unregistered plate, low OCR confidence, long overstay |
-| 5 | Detection integration (event contract + device client) | **DONE** | **Round 2:** `backend/vision.py` runs `best.pt` (YOLOv10n) + OCR and serves `POST /api/detection/scan`. Source repository verified. |
+| 5 | Detection integration (event contract + device client) | **DONE in code** | `backend/vision.py` runs `best.pt` + OCR and serves `POST /api/detection/scan`. A related notebook was found; exact checkpoint provenance is unverified. |
 | 6 | Dashboard (no hard-coded numbers, camera tiles, charts, filters, API search, states, a11y, mobile) | **DONE** | **Round 2:** browser-webcam tile with a working "Scan plate" action. |
 | 7 | Data & privacy (remove personal data/CSVs/videos/photos/PDF, seed script, privacy note) | **DONE** | Removed from the working tree and git-ignored; the old files remain in Git history |
 | 8 | Structure (`/backend` + `/frontend`, ES modules, shared layout, pinned deps incl. SheetJS) | **DONE** | 19 ES modules, one shared layout, 4 vendored libraries pinned with licences |
@@ -159,10 +167,10 @@ Done:
 
 Not done (blocked on the operator):
 
-- The **URL of the GitHub repository that holds the OCR/detection code was
-  requested but never supplied**, so the detector could not be integrated,
-  adapted or run against real code. No detector code is included, and none was
-  invented.
+- **Historical first-round note:** No detector repository had yet been
+  identified at that point. A related notebook was later found and a local
+  detection integration was added; the exact checkpoint provenance remains
+  unverified. See the deployment update above.
 
 ### 6. Dashboard — DONE
 
@@ -254,7 +262,7 @@ Live HTTP smoke test against a running instance (Flask dev server on
 | Request | Result |
 | --- | --- |
 | `GET /` | 200, login page |
-| `POST /api/auth/login` (valid) | 200 + `Set-Cookie: transport_token=…; HttpOnly; SameSite=Lax` |
+| `POST /api/auth/login` (valid) | 200 + `Set-Cookie: __session=…; HttpOnly; SameSite=Lax` |
 | `POST /api/auth/login` (wrong password) | 401 `Invalid email or password` |
 | `POST /api/events` (no / wrong device key) | 401 `Invalid device API key` |
 | `POST /api/events` (valid key) | 201, event stored with `flag_reasons: ["unregistered_plate"]` |
@@ -281,9 +289,10 @@ on the first push of this branch.
    contained a MongoDB connection string with an embedded password. It is
    removed from the working tree, but it is still present in this repository's
    **Git history** (the upstream commit and the import commit). Treat the
-   credential as compromised: change the database password, update `MONGO_URI`,
-   then purge the history (for example `git filter-repo --path app.py`) and
-   force-push — or ask the repository owner to do it.
+   credential as compromised. Rotate/revoke both exposed credentials and verify
+   old access is disabled, then coordinate sensitive-history cleanup with the
+   repository owner and GitHub Support; see the Windows runbook. A normal
+   commit does not erase history, PR references, forks or caches.
 2. **Purge the other personal/operational data from history** as well
    (photographs, `cam1.mp4`, the CSVs, the PDF, `logo.png`). They are removed
    from the working tree but still exist in earlier commits.
@@ -292,9 +301,9 @@ on the first push of this branch.
    [`814725105014-debug/SRM-TRP-TRANSPORT-AI`](https://github.com/814725105014-debug/SRM-TRP-TRANSPORT-AI).
    It is a Colab notebook with no service API and no licence, so the pipeline
    was re-implemented locally in `backend/vision.py`. **Remaining action:** get
-   a written licence position on `best.pt` (AGPL-3.0) from the model owner,
-   **or** re-train an equivalent model on a dataset you may use and replace
-   `best.pt`. See `docs/DETECTION.md`.
+   written model/dataset rights and a qualified software-licence review, or
+   replace the model and dependencies with appropriately licensed alternatives.
+   Exact checkpoint provenance remains unverified. See `docs/DETECTION.md`.
 4. **Provision the secrets** in your platform's secret manager (never in the
    repository): `MONGO_URI` (least-privilege user), `JWT_SECRET` (≥ 32 random
    characters), `DEVICE_API_KEYS` (one per camera group), `CORS_ALLOWED_ORIGINS`,

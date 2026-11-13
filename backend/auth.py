@@ -13,7 +13,9 @@ from flask import current_app, g, jsonify, make_response, redirect, request
 from .config import Config
 from .db import public_doc
 
-COOKIE_NAME = "transport_token"
+# Firebase Hosting forwards only the __session cookie to Cloud Run. Direct
+# deployments use the same host-only, HttpOnly cookie for consistency.
+COOKIE_NAME = "__session"
 AUDIENCE = "transport-ui"
 ISSUER = "srm-trp-transport"
 

@@ -32,7 +32,7 @@ from .auth import (
     verify_password,
 )
 from .config import Config
-from .db import get_database, iso_utc, public_doc, utc_naive
+from .db import get_database_for_startup, iso_utc, public_doc, utc_naive
 from .schemas import (
     AnalyticsFilter,
     BusCreate,
@@ -86,7 +86,7 @@ def create_app(config: Config | None = None, mongo_client=None) -> Flask:
         SECRET_KEY=os.urandom(32).hex(),
     )
     app.json.sort_keys = False
-    db = get_database(config, mongo_client)
+    db = get_database_for_startup(config, mongo_client)
     app.extensions["transport_db"] = db
 
     limiter = Limiter(key_func=get_remote_address, app=app)
@@ -106,7 +106,9 @@ def create_app(config: Config | None = None, mongo_client=None) -> Flask:
     def security_headers(response: Response) -> Response:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        # The operator console captures still frames using the browser camera.
+        # Keep this consistent with Firebase Hosting for dynamic Cloud Run pages.
+        response.headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()"
         csp = (
             "default-src 'self'; "
             "script-src 'self'; "

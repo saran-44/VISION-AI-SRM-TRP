@@ -46,4 +46,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD curl -fsS http://localhost:8080/api/health || exit 1
 
 CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "2", "--threads", "4", \
-     "--timeout", "120", "--access-logfile", "-", "backend.app:create_app()"]
+     "--timeout", "180", "--access-logfile", "-", "backend.app:create_app()"]

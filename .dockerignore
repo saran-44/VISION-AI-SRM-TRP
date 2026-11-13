@@ -1,0 +1,27 @@
+# Protect local Docker builds as well as the Cloud Build upload. This is not
+# a substitute for inspecting the build context before submitting it.
+.git/
+.firebase/
+.venv/
+venv/
+node_modules/
+**/__pycache__/
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.json
+**/*.jsonl
+**/*.csv
+**/*.xlsx
+**/*.xls
+**/*.pdf
+**/*.dump
+**/data/
+**/datasets/
+**/media/
+**/photos/
+**/videos/
+**/uploads/
+backend/tests/

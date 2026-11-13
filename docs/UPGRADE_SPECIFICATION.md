@@ -6,16 +6,17 @@
 > implementation plan followed, and the remaining work continued **without
 > reconstructing context**.
 >
-> It records: the system as it was, every requirement that drove the upgrade,
-> the verified provenance of the AI model, the architecture that was built, the
-> exact API contracts, the deployment topology, the security posture, the
-> outstanding work, and the exact Git/Git Bash command sequence.
+> It records the requirements, model investigation and limits on provenance,
+> implementation, API contracts, deployment topology and outstanding risks.
+> The companion [Windows runbook](DEPLOY_WINDOWS.md) contains the detailed,
+> ordered operational commands; import both files for the complete context.
 >
 > **Repository:** `https://github.com/saran-44/frontend`
-> **Branch of record:** `arena/1c01d46f-frontend`
-> **Base commit:** `82f40e6d1c0619532db3431cb00c687cb1926251` (merged `main`)
-> **Document version:** 2.0 — covers the detection, camera, Firebase and
-> golden-glass-glass theme upgrade.
+>
+> **Document version:** 3.0 — detection, cameras, golden-glass theme,
+> Firebase authentication, Hosting and first-deployment safeguards. Verify the
+> current Git branch and commit locally rather than relying on a dated branch
+> name in a document. No live cloud deployment is claimed.
 
 ---
 
@@ -25,7 +26,7 @@
 2. [The original request](#2-the-original-request)
 3. [Constraints, corrections and non-negotiables](#3-constraints-corrections-and-non-negotiables)
 4. [System architecture](#4-system-architecture)
-5. [The AI model — verified provenance](#5-the-ai-model--verified-provenance)
+5. [The AI model — provenance investigation](#5-the-ai-model--provenance-investigation)
 6. [Upgrade component A — detection backend](#6-upgrade-component-a--detection-backend)
 7. [Upgrade component B — cameras](#7-upgrade-component-b--cameras)
 8. [Upgrade component C — golden glass light theme](#8-upgrade-component-c--golden-glass-light-theme)
@@ -61,11 +62,12 @@ This upgrade adds four capabilities on top of the existing platform:
 | D | **Firebase** (`srmtrpai`) for Hosting and Analytics | `firebase.json`, `.firebaserc`, `frontend/js/firebase.js`, `/api/config/firebase` |
 | E | **Firebase Authentication** — email/password + Google sign-in, restricted to an authorised email list | `backend/firebase_auth.py`, `backend/access.py`, `backend/manage_access.py`, `POST /api/auth/firebase` |
 
-**What was explicitly *not* done, and why.** The upstream model project is a
-Colab notebook with no service API, no licence and no committed weights. Rather
-than fabricate a third-party endpoint or vendor unlicensed code, this upgrade
-**re-implements the notebook's own pipeline locally** in `backend/vision.py`
-and documents the provenance honestly. See [§5](#5-the-ai-model--verified-provenance).
+**What was explicitly *not* done, and why.** A related GitHub project is a
+Colab notebook with no service API, no licence and no committed weights. The
+exact origin of the supplied checkpoint cannot be established from that
+repository alone. Rather than invent a third-party endpoint, the upgrade
+implements a local detection/OCR integration in `backend/vision.py`.
+See [§5](#5-the-ai-model--provenance-investigation).
 
 ---
 
@@ -113,10 +115,10 @@ These are standing instructions. They continue to apply to any follow-up work.
 | 3 | Use **Firebase CLI** with the user-created Firebase project; the user delegated architecture and connection choices ("connect as what you want"). | `firebase.json` + `.firebaserc` target `srmtrpai`; the frontend reads its config from the backend. |
 | 4 | Use the **attached official college logo**. | `frontend/assets/logo-emblem.png` (crest) and `logo-wordmark.png` (wordmark), cropped from the supplied 1638×474 PNG. |
 | 5 | Use a **glass UI with golden accents** and the **best light-theme treatment**. | `frontend/assets/theme.css`; light is now the *default* theme (dark remains as an alternative). |
-| 6 | Provide **full Git Bash commands and deployment instructions** because the user performs the remote connection/deployment. | [§16](#16-git-and-git-bash-command-reference). |
-| 7 | **Search GitHub for the `best.pt` backend.** No repository or API may be fabricated if none is verified. | Search performed; the source was found and verified ([§5](#5-the-ai-model--verified-provenance)). |
-| 8 | **Never commit real credentials, real driver/bus registers, or personal media.** | The Firebase API key lives in the environment, not in Git. The secret scanner (`scripts/scan_secrets.py`) runs in CI. |
-| 9 | **The earlier leaked MongoDB credential must be rotated and sensitive Git history purged** before production use. | Still outstanding — see [§19](#19-outstanding-work-and-known-risks). **This is a blocker for production.** |
+| 6 | Provide **full Git Bash commands and deployment instructions** because the user performs the remote connection/deployment. | [Windows runbook](DEPLOY_WINDOWS.md). |
+| 7 | **Search GitHub for the `best.pt` backend.** No repository or API may be fabricated if none is verified. | A related notebook was found; the exact checkpoint provenance remains unverified ([§5](#5-the-ai-model--provenance-investigation)). |
+| 8 | **Never commit real credentials, real driver/bus registers, or personal media.** | `.env` and personal-data patterns are ignored; the selective CI scanner is not a full history audit. Existing sensitive history still requires cleanup. |
+| 9 | **Rotate exposed MongoDB credentials and purge sensitive Git history** before production use. | Still outstanding — see [§19](#19-outstanding-work-and-known-risks). **This is a production blocker.** |
 
 ---
 
@@ -200,12 +202,13 @@ These are standing instructions. They continue to apply to any follow-up work.
   global search and logout, and redirects users who lack the required role.
 - **8 authenticated pages:** dashboard, logs, analytics, drivers, buses,
   driver-details, audit, manage.
-- **Vendored dependencies** with licences, so the console has no runtime CDN
-  dependency and works on a campus network without internet access.
+- **Vendored JavaScript dependencies** with licences. Google Fonts and
+  Boxicons styles still use external CDNs, and the configured Firebase/Atlas
+  topology requires network access; offline operation is not guaranteed.
 
 ---
 
-## 5. The AI model — verified provenance
+## 5. The AI model — provenance investigation
 
 ### 5.1 The checkpoint
 
@@ -217,7 +220,7 @@ These are standing instructions. They continue to apply to any follow-up work.
 | Saved by | `ultralytics 8.4.20` |
 | Classes | `{0: 'red circle', 1: 'sticker'}` — `nc=2` |
 | Inference size | 640 px |
-| Checkpoint license | **AGPL-3.0** |
+| Checkpoint metadata | Identifies an AGPL-3.0 Ultralytics license; rights for the actual model and dataset still require review |
 
 Measured checkpoint metrics:
 
@@ -229,16 +232,15 @@ Measured checkpoint metrics:
 | mAP@50-95 | 0.30302 |
 | Fitness | 0.30302 |
 
-> These numbers are modest. The model finds a *sticker* reliably enough for a
-> first deployment, but recall of 0.54 means roughly half of the stickers are
-> missed. Treat a `null` detection as "not found yet", never as "no bus".
-> Re-training is a recommended follow-up ([§18](#18-outstanding-work-and-known-risks)).
+> These are checkpoint-reported validation metrics, not measured production
+> performance; the validation set and real camera conditions need independent
+> review. A `null` detection means "not found", not "no bus". Real-world
+> validation and model/data rights are required before production.
 
-### 5.2 The source repository — found and verified
+### 5.2 The related notebook repository — found, exact weights unverified
 
 The user's instruction was to *search GitHub* for the backend/model
-repository, and to **not fabricate one** if none could be verified. The search
-succeeded.
+repository, and to **not fabricate one** if none could be verified. A related notebook was found; exact checkpoint provenance remains unverified.
 
 **`814725105014-debug/SRM-TRP-TRANSPORT-AI`**
 → <https://github.com/814725105014-debug/SRM-TRP-TRANSPORT-AI>
@@ -283,29 +285,27 @@ url = "https://github.com/jameslahm/yolov10/releases/download/v1.0/yolov10n.pt"
       model=runs/detect/train/weights/best.pt source=video.mp4
 ```
 
-This matches our checkpoint exactly: YOLOv10n, trained for 100 epochs at batch
-16 on a TRP dataset (`license_data.zip`, a Roboflow export), producing
-`runs/detect/train/weights/best.pt`.
+The notebook describes a similar YOLOv10n training workflow and produces a
+file called `best.pt`, but the weights and training data are not published
+there. Matching architecture, settings or filename does **not** establish that
+the supplied checkpoint was produced by this exact run. Obtain provenance
+and permission from the model owner before production or distribution.
 
 ### 5.3 Consequences — and why the backend is local
 
-1. **There is no hosted inference API.** The source project is a Colab
-   notebook, not a server. It exposes no endpoint, no request/response schema
-   and no licence permitting its code to be vendored. The integration here
-   therefore **re-implements the notebook's pipeline locally** in
-   `backend/vision.py` — the same four stages the notebook performs
-   (detect → crop → OCR → log), with the same model, the same confidence
-   semantics and a proper HTTP contract.
+1. **No hosted inference API was found in that repository.** It contains a
+   Colab notebook, not a server or an endpoint contract. This project implements
+   its own detection → crop → OCR → logging integration in `backend/vision.py`;
+   it does not call an invented third-party API.
 2. **`data.yaml` and `license_data.zip` are not committed.** The class names
-   `red circle` and `sticker` are known only from the checkpoint itself, and
-   the training dataset cannot be re-derived from that repository.
-3. **Licensing.** The checkpoint inherits Ultralytics' **AGPL-3.0**
-   (`THU-MIG/yolov10` and `ultralytics/ultralytics` are both AGPL-3.0); the
-   source repository declares no licence. Before any public or commercial
-   deployment, obtain a written position from the model owner, **or** re-train
-   an equivalent model on a dataset you are licensed to use and replace
-   `best.pt`. AGPL-3.0 obliges you to offer the corresponding source to users
-   who interact with the software over a network.
+   `red circle` and `sticker` are known from the supplied checkpoint; the
+   dataset and identity of the exact training run remain unverified.
+3. **Licensing.** Checkpoint metadata identifies an Ultralytics AGPL-3.0
+   license, while the related notebook repository declares no license. Model,
+   dataset and software rights must be established separately. Obtain written
+   permission and a qualified licence review, or replace the model and its
+   dependencies with appropriately licensed alternatives. Do not assume
+   retraining alone resolves all software-licence obligations.
 4. `814725105014-debug/SRM-TRP-TRANSPORT-AI-NEW` also exists but is **empty**
    (GitHub returns `409 Git Repository is empty`).
 
@@ -325,19 +325,13 @@ This matches our checkpoint exactly: YOLOv10n, trained for 100 epochs at batch
 
 ### 5.5 If the user supplies a different backend
 
-The user said: *"the user will provide/insert backend details if a correct
-public repository cannot be identified."* A correct public repository **was**
-identified ([§5.2](#52-the-source-repository--found-and-verified)), so the
-"insert backend details" path is **not** currently needed. If the user
-nonetheless supplies a hosted endpoint, the integration seam is narrow and
-documented:
-
-- Implement the same interface as `backend/vision.py`:
-  `load_model()`, `detect(image) -> DetectionResult`, `read_text(image)`,
-  `normalize_plate(text)`, `vision_status()`.
-- Or point `VISION_MODEL_PATH` at a remote-capable loader.
-- The HTTP contract in [§11](#11-api-reference) does **not** change, so the
-  frontend needs no modification.
+A related notebook was identified ([§5.2](#52-the-related-notebook-repository--found-exact-weights-unverified)),
+not a verified hosted backend or the exact published weights. If the user
+provides a different service or authoritative provenance, validate it before
+changing the integration. A remote endpoint would require new, reviewed
+backend adapter code; `VISION_MODEL_PATH` currently names a local model file,
+not a ready-made remote loader. Preserve the detection API contract or update
+the frontend deliberately if that contract changes.
 
 ---
 
@@ -635,35 +629,42 @@ Analytics events: app_open · login · logout · screen_view ·
 
 **Why the config is served from the backend rather than hard-coded:**
 
-1. The API key never enters Git, so it can be rotated without a code change.
-2. The repository carries no deployment identifiers.
-3. The console **works fully without Firebase** — when the configuration is
-   absent, `/api/config/firebase` returns `{"enabled": false}` and the SDK is
-   never downloaded. Firebase is an enhancement, not a dependency.
+1. The API key is externalized, so it can be rotated without a code change.
+   It is a public Firebase web identifier and is sent to browsers; it is not a
+   secret authorization mechanism.
+2. App, project and measurement identifiers are present in the deployment
+   configuration and must be verified against the real Firebase web app.
+3. Analytics is optional. Local deployments can use legacy password sign-in,
+   but the checked-in production build disables legacy login and therefore
+   depends on Firebase Authentication. The browser also needs an API key.
 
 ### 9.3 The vendored SDK
 
 `frontend/vendor/firebase/` holds the *compat* (UMD) builds of `firebase/app`,
-`firebase/analytics` and `firebase/firestore` from `firebase@11.10.0`
-(Apache-2.0), with the licence and a `README.md` documenting provenance and
-how to regenerate them. The compat builds work with a plain `<script>` tag,
-which suits the project's no-build-step frontend.
+`firebase/auth`, `firebase/analytics` and `firebase/firestore` from
+`firebase@11.10.0` (Apache-2.0), with the licence and provenance. The app
+bundle loads first, then extras are shared per bundle and loaded on demand;
+a failed bundle can be retried. Analytics-first pages can load Auth later for
+sign-out. The Google popup redirect fallback consumes its return result, but
+must be tested with the actual domains and browser storage restrictions.
 
 ### 9.4 Hosting configuration
 
 `firebase.json`:
 
-- `public: "frontend"`.
-- `/api/**` → rewritten to the Cloud Run service `srm-trp-transport` in
-  `asia-south1`.
-- Everything else → `/index.html` (SPA fallback), with `cleanUrls: true`.
-- `/assets/**` and `/vendor/**` → one-year immutable cache.
-- `/api/**` → `no-store`.
-- Security headers on everything, including
-  `Permissions-Policy: camera=(self), microphone=(), geolocation=()` — note
-  `camera=(self)` is what keeps the operator webcam working.
+- `public: "frontend"`; protected `frontend/pages/` templates are excluded
+  from Hosting uploads because static files are served before rewrites.
+- All unmatched paths (including `/api/**` and `/dashboard`) → Cloud Run
+  `run.serviceId: srm-trp-transport` in `asia-south1`. Flask handles protected
+  page routes; this is **not** an `/index.html` SPA fallback.
+- `/assets/**` and `/vendor/**` → one-year immutable cache. The backend sends
+  `no-store` on dynamic HTML and API responses.
+- Hosting and Flask both allow `camera=(self)` through Permissions-Policy.
+- Firebase Hosting forwards the reserved `__session` cookie to Cloud Run.
 
-`.firebaserc` selects `srmtrpai` as the default project.
+`.firebaserc` selects `srmtrpai` as the default project. Confirm the actual
+Firebase default site and auth domain before deployment; a default site may
+need on-demand creation and its ID need not equal the project ID.
 
 ---
 
@@ -708,15 +709,18 @@ email before an access-list entry can be used or a UID bound.
 ### 10.3 The session
 
 The Firebase ID token is exchanged for the application's own session: an
-HS256 JWT in an HttpOnly, `SameSite=Lax`, `Secure`-in-production cookie,
-valid for `JWT_TTL_MINUTES`. The Firebase token is used once and discarded —
-it is never stored and never reachable from JavaScript.
+HS256 JWT in the `__session` HttpOnly, `SameSite=Lax`,
+`Secure`-in-production cookie, valid for `JWT_TTL_MINUTES`. The backend does
+not persist the exchanged Firebase token. The Firebase SDK manages its own
+browser authentication state, accessible to the browser until sign-out.
 
 ### 10.4 Verification order
 
 `POST /api/auth/firebase` checks, in order: token shape → RS256 signature →
-audience → issuer → expiry → allowed provider → access list → Firebase UID
-binding. Only then is the session cookie issued.
+audience → issuer → expiry → allowed provider → **verified email** → active
+access entry (or approved password auto-provisioning, if enabled) → Firebase
+UID binding. Only then is the session cookie issued. The production build
+requires explicit access entries and disables auto-provisioning.
 
 ### 10.5 The access-list CLI
 
@@ -745,11 +749,11 @@ See [`docs/AUTHENTICATION.md` §7](AUTHENTICATION.md#7-why-not-supabase).
 The console calls the API on the **same origin** (`/api/...`), which Firebase
 Hosting rewrites to the backend. The browser therefore sees a single origin:
 
-- The `SameSite=Lax` session cookie works unchanged.
-- No CORS pre-flight is needed in the hosted topology.
-- `CORS_ALLOWED_ORIGINS` is only required if the frontend is *also* served
-  from another origin (e.g. directly from Flask during development). Set it to
-  `https://srmtrpai.web.app,https://srmtrpai.firebaseapp.com`.
+- The `__session` cookie is forwarded by Hosting to Cloud Run.
+- No CORS pre-flight is needed in the same-origin hosted topology.
+- `CORS_ALLOWED_ORIGINS` is only needed when a different origin directly
+  calls the backend; this frontend currently uses relative URLs, so such a
+  topology also needs a reviewed reverse proxy or client changes.
 
 The backend serves the frontend itself when it is not behind Firebase
 Hosting, so the same codebase runs in both topologies:
@@ -758,8 +762,8 @@ Hosting, so the same codebase runs in both topologies:
 # single-origin (Flask serves the console)
 .venv/bin/gunicorn --bind 0.0.0.0:8080 "backend.app:create_app()"
 
-# split-origin (Firebase Hosting + Cloud Run) — see firebase.json
-firebase deploy --only hosting
+# Same browser origin via Firebase Hosting + Cloud Run — see the runbook.
+firebase deploy --only hosting --project=srmtrpai
 ```
 
 ---
@@ -909,83 +913,72 @@ non-MJPEG camera (with a message pointing at the HLS/MJPEG gateway URL).
 | `VISION_OCR_ENGINE` | `auto` | `auto` \| `rapidocr` \| `tesseract` \| `easyocr` \| `none`. |
 | `VISION_MAX_CROPS` | `8` | Maximum sticker crops OCR'd per frame. |
 | `FIREBASE_API_KEY` | empty | Firebase web API key. |
-| `FIREBASE_AUTH_DOMAIN` | `srmtrpai.firebaseapp.com` | Auth domain. |
-| `FIREBASE_PROJECT_ID` | `srmtrpai` | Project id. |
-| `FIREBASE_STORAGE_BUCKET` | `srmtrpai.firebasestorage.app` | Storage bucket. |
-| `FIREBASE_MESSAGING_SENDER_ID` | `734375891811` | Messaging sender id. |
-| `FIREBASE_APP_ID` | `1:734375891811:web:6851938bef332bc0e53956` | Web app id. |
-| `FIREBASE_MEASUREMENT_ID` | `G-7MXBNH3N7D` | Analytics measurement id. |
+| `FIREBASE_AUTH_DOMAIN` | empty | Auth domain; confirm against the actual Firebase app/site. |
+| `FIREBASE_PROJECT_ID` | empty | Project ID; `srmtrpai` in the checked-in build. |
+| `FIREBASE_STORAGE_BUCKET` | empty | Storage bucket. |
+| `FIREBASE_MESSAGING_SENDER_ID` | empty | Messaging sender ID. |
+| `FIREBASE_APP_ID` | empty | Web app ID; required for the browser configuration. |
+| `FIREBASE_MEASUREMENT_ID` | empty | Analytics measurement ID. |
 | `FIREBASE_AUTH_ENABLED` | `true` | Master switch for Firebase sign-in (effective only when a project id is set). |
 | `FIREBASE_ALLOWED_PROVIDERS` | `password,google.com` | Which Firebase providers are accepted. |
 | `FIREBASE_AUTO_PROVISION` | `true` | Auto-create the access record only for a verified password identity with the administrator-set approval claim. |
 | `FIREBASE_DEFAULT_ROLE` | `transport_office` | The role given to an auto-provisioned account. |
 | `LEGACY_PASSWORD_LOGIN_ENABLED` | `true` | Keep the local MongoDB password login as a break-glass path. |
 
-`.env.example` documents all of them.
+`.env.example` documents all of them. The checked-in Cloud Build settings
+explicitly set `FIREBASE_AUTO_PROVISION=false` and
+`LEGACY_PASSWORD_LOGIN_ENABLED=false`, overriding the application defaults.
 
 ---
 
 ## 14. Deployment
 
-### 13.1 Topology
+### 14.1 Topology
 
-```
-                 ┌──────────────────────────────────────┐
-   Browser ─────▶│  Firebase Hosting  (srmtrpai)        │
-                 │  static console + /api/** rewrite    │
-                 └──────────────────┬───────────────────┘
-                                    │ HTTPS
-                                    ▼
-                 ┌──────────────────────────────────────┐
-                 │  Cloud Run / Docker  (Flask backend)  │
-                 │  + best.pt + vision extras            │
-                 └──────────────────┬───────────────────┘
-                                    │
-                                    ▼
-                                 MongoDB
+```text
+Browser → Firebase Hosting (static login/assets; unmatched paths → Cloud Run)
+                                      ↓
+         Cloud Run srm-trp-transport, asia-south1 (Flask + best.pt)
+                                      ↓ all outbound traffic
+         Direct VPC → Cloud NAT with reserved public IP → MongoDB Atlas
 ```
 
-### 13.2 Backend — Cloud Run
+`frontend/pages/` is not uploaded to Hosting; Flask enforces page roles. The
+session cookie is `__session`, the cookie Hosting forwards. The service also
+needs outbound HTTPS for Firebase's public signing keys. The static NAT IP and
+the operator workstation IP must both be allowed by Atlas before deploying.
 
-```bash
-gcloud run deploy srm-trp-transport \
-  --image REGION-docker.pkg.dev/PROJECT/REPO/srm-trp-transport:latest \
-  --region asia-south1 --platform managed --allow-unauthenticated \
-  --set-env-vars "ENVIRONMENT=production,MONGO_DB_NAME=srmtrpai,APP_TIMEZONE=Asia/Kolkata,FIREBASE_PROJECT_ID=srmtrpai,FIREBASE_AUTH_DOMAIN=srmtrpai.firebaseapp.com,FIREBASE_STORAGE_BUCKET=srmtrpai.firebasestorage.app,FIREBASE_MESSAGING_SENDER_ID=734375891811,FIREBASE_APP_ID=1:734375891811:web:6851938bef332bc0e53956,FIREBASE_MEASUREMENT_ID=G-7MXBNH3N7D" \
-  --set-secrets "MONGO_URI=mongo-uri:latest,JWT_SECRET=jwt-secret:latest,DEVICE_API_KEYS=device-keys:latest,FIREBASE_API_KEY=firebase-api-key:latest"
-```
+### 14.2 Ordered first deployment
 
-### 13.3 Backend — plain Docker
+Use the complete **[Windows Git Bash runbook](DEPLOY_WINDOWS.md)**. It covers
+safe updating of the existing clone, installation before login, actual Firebase
+app/default-site discovery, Firebase account creation and verified-email
+onboarding, Atlas credential rotation and scoped access, IAM, Direct VPC,
+Cloud NAT, Secret Manager, Cloud Build, Hosting, live verification and
+rollback. These operations have not been performed from this workspace and may
+incur charges. Do not run a shortened `gcloud run deploy` command that omits
+networking or the restrictive authentication settings.
 
-```bash
-docker build -f deploy/Dockerfile -t srm-trp-transport:latest .
-docker run -d --name srm-trp -p 8080:8080 \
-  --env-file .env.production srm-trp-transport:latest
-```
+The checked-in `deploy/cloudbuild.yaml` builds and pushes the container with
+`BUILD_ID`, then deploys using dedicated build/runtime service accounts,
+all-traffic Direct VPC egress, a startup probe, explicit Firebase providers,
+disabled self-provisioning and disabled local-password login. Confirm the real
+project and web app settings and inspect `gcloud meta list-files-for-upload`
+before submitting it. The 120-second MongoDB retry window is a target: SRV/TXT
+DNS during client construction is separately timed and can exceed it under
+resolver/OS delays. The live deployment must be tested.
 
-`deploy/Dockerfile` installs the base requirements, then the vision extras
-from the CPU index, copies `backend/`, `frontend/` and `best.pt`, exposes
-`8080`, and adds a `HEALTHCHECK` against `/api/health`. Build with
-`--build-arg INSTALL_VISION=0` to skip the ~2 GB of ML dependencies when
-detection runs elsewhere.
+### 14.3 Other hosts and platform limits
 
-`deploy/cloudbuild.yaml` builds, pushes and deploys to Cloud Run in one
-pipeline.
+`deploy/Dockerfile` bundles `backend/`, `frontend/`, `best.pt` and the optional
+vision dependencies. A different Docker host needs its own TLS, secrets,
+network access, identity and proxy configuration. Do not publish protected
+page templates as static assets.
 
-### 13.4 Frontend — Firebase Hosting
-
-```bash
-npm install -g firebase-tools
-firebase login
-firebase use --add          # choose srmtrpai
-firebase deploy --only hosting
-```
-
-### 13.5 If the backend is not on Cloud Run
-
-Update the `run` block in `firebase.json`, or delete the `/api/**` rewrite and
-serve the API from the backend origin directly, adding that origin to
-`CORS_ALLOWED_ORIGINS` and pointing the frontend's `api.js` base URL at it.
+Firebase Hosting limits dynamic requests to 60 seconds even if Cloud Run's
+request timeout is longer. Cold starts can exceed the edge timeout; real
+camera/SSE streams and detection operations must be tested for interruption
+or moved to an appropriate streaming/processing architecture.
 
 ---
 
@@ -1013,13 +1006,14 @@ serve the API from the backend origin directly, adding that origin to
 .venv/bin/python -m pytest backend/tests -q
 ```
 
-**115 tests pass** (60 pre-existing + 18 detection + 37 authentication).
+Run the suite on the checked-out revision; mock-based tests do not verify live cloud services.
 
 ### 15.2 Frontend
 
 ```bash
 node scripts/check_frontend.mjs
-# → Frontend checks passed: 20 modules, 9 pages, all references resolve.
+node scripts/check_auth_flow.mjs
+node scripts/check_firebase_loader.mjs
 ```
 
 ### 15.3 Secrets
@@ -1050,116 +1044,30 @@ curl -s -X POST http://localhost:5000/api/detection/scan \
 
 ## 17. Git and Git Bash command reference
 
-> These are **Git Bash** commands (Windows). They work identically in a POSIX
-> shell. The user performs the remote connection and deployment themselves.
+The complete, ordered commands are in **[DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md)**.
+Do not clone on top of an existing `~/frontend`, overwrite `.env`, or run a
+hard reset to repair it. Inspect `git status` and back up or commit valuable
+work before switching to the local `main` and using `git pull --ff-only`.
+Wait until the Hosting/network fixes are actually merged before pulling and
+deploying them. Install Node, Firebase CLI, Google Cloud CLI and Python
+requirements before the login and deployment steps.
 
-### 16.1 Clone and configure
+### 17.1 Credential rotation and history purge
 
-```bash
-git clone https://github.com/saran-44/frontend.git
-cd frontend
+Rotate **both** exposed Atlas credentials first and verify the old passwords
+no longer work. Reset the password shared in chat if it was configured. Then
+coordinate a sensitive-history rewrite with the repository owner, all
+collaborators and GitHub Support, following
+[GitHub's sensitive-data removal guidance](https://docs.github.com/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository).
+The original credential was found in historical `app.py`; removing only an
+untracked `.env` would not fix that exposure. A mirror force-push or hard
+reset is destructive and is deliberately **not** a copy-paste recovery step.
+A rewrite also does not erase forks, PR references or caches automatically.
 
-git config user.name  "Your Name"
-git config user.email "you@example.com"
-
-# Never commit credentials
-cp .env.example .env
-```
-
-### 16.2 Create the upgrade branch
-
-```bash
-git fetch origin
-git checkout -b feature/arena-upgrade origin/main
-```
-
-### 16.3 Stage, commit and push
-
-```bash
-git status
-git add -A
-git status --short          # review before committing
-
-git commit -m "feat: integrate sticker detection, camera access, Firebase and golden glass theme"
-
-git push -u origin feature/arena-upgrade
-```
-
-### 16.4 Open the pull request
-
-```bash
-gh pr create \
-  --base main \
-  --head feature/arena-upgrade \
-  --title "feat: sticker detection, NVR/DVR camera support, Firebase and golden glass theme" \
-  --body-file docs/UPGRADE_SPECIFICATION.md
-```
-
-Or from the GitHub UI: **Pull requests → New pull request**.
-
-### 16.5 Review and merge
-
-```bash
-gh pr checks --watch        # wait for CI
-gh pr view --web            # open in the browser
-gh pr merge <PR_NUMBER> --squash --delete-branch
-```
-
-Replace `<PR_NUMBER>` with the real number from `gh pr create`. The merge
-command must be the last command in the chain so its exit code is meaningful.
-
-### 16.6 Deploy
-
-> The complete Windows/Git Bash sequence — toolchain install, log in, one-time
-> Google Cloud setup, the Firebase console steps, deploy, verify and rollback —
-> is in **`docs/DEPLOY_WINDOWS.md`**.
-
-```bash
-# --- frontend (Firebase Hosting) ---
-npm install -g firebase-tools
-firebase login
-firebase use --add          # choose srmtrpai
-firebase deploy --only hosting
-
-# --- backend (Cloud Run) ---
-gcloud auth login
-gcloud config set project YOUR_GCP_PROJECT
-gcloud builds submit --config deploy/cloudbuild.yaml
-
-# --- or backend on a plain Docker host ---
-docker build -f deploy/Dockerfile -t srm-trp-transport:latest .
-docker run -d --name srm-trp -p 8080:8080 \
-  --env-file .env.production srm-trp-transport:latest
-```
-
-### 16.7 Verify
-
-```bash
-curl -s https://srm-trp-transport-xxxxx-asia-south1.a.run.app/api/health
-curl -s https://srmtrpai.web.app/api/config/firebase
-```
-
-### 16.8 Secret rotation and history purge (production blocker)
-
-```bash
-# 1. Rotate the credential in the database provider first.
-# 2. Purge the old value from the history (install git-filter-repo first).
-pip install git-filter-repo
-git filter-repo --path .env --invert-paths       # if .env was ever committed
-git push --force --mirror https://github.com/saran-44/frontend.git
-# 3. Ask every collaborator to re-clone.
-```
-
-> **Do not run the purge until the credential has been rotated.** Purging
-> history does not invalidate a leaked credential.
-
-### 16.9 Recovery
-
-```bash
-git reflog                              # find the lost commit
-git reset --hard <sha>
-git push --force-with-lease origin feature/arena-upgrade
-```
+Review existing Firebase users, MongoDB access entries and UID bindings, and
+rotate the JWT signing key/retire old reachable revisions to invalidate old
+sessions. Resolve the model licence and test real Firebase/Atlas/Hosting
+connections before production. None of these operations has been verified.
 
 ---
 
@@ -1167,7 +1075,7 @@ git push --force-with-lease origin feature/arena-upgrade
 
 ```
 frontend/                         repository root
-├── best.pt                       YOLOv10n checkpoint (AGPL-3.0) — tracked
+├── best.pt                       YOLOv10n checkpoint — provenance/licence pending
 ├── firebase.json                 Firebase Hosting config
 ├── .firebaserc                   default project: srmtrpai
 ├── .env.example                  every environment variable, documented
@@ -1244,8 +1152,8 @@ frontend/                         repository root
 
 | # | Item | Why it blocks | Action |
 | --- | --- | --- | --- |
-| 1 | **Rotate the leaked MongoDB credential and purge Git history** | The credential is in the repository's history. Anyone who clones it has the credential. | Rotate in the provider first, then purge ([§16.8](#168-secret-rotation-and-history-purge-production-blocker)), then force-push and ask collaborators to re-clone. |
-| 2 | **Resolve the AGPL-3.0 / no-licence position on `best.pt`** | AGPL-3.0 obliges you to offer the corresponding source to network users. The upstream repository declares no licence. | Get written permission from the model owner, **or** re-train an equivalent model on a dataset you are licensed to use and replace `best.pt`. |
+| 1 | **Rotate exposed MongoDB credentials and purge sensitive history** | An earlier credential and personal data remain in Git history. | Rotate and verify both credentials first; coordinate the history rewrite and cleanup with the repository owner and GitHub Support. |
+| 2 | **Resolve model and software licensing** | Checkpoint metadata cites AGPL-3.0; the related notebook declares no license and exact model/data provenance is unverified. | Obtain written rights and qualified licence review, or replace the model and dependencies with appropriately licensed alternatives. |
 | 3 | **TLS in front of the app** | The browser camera API requires a secure context. | Terminate TLS at Cloud Run / a load balancer / a reverse proxy. |
 
 #### Item 1 in detail — the leaked credential
@@ -1255,7 +1163,7 @@ Git history. A replacement credential or a different cluster does not by
 itself prove that the old database user was disabled. An Atlas administrator
 must verify that the old credential has been revoked or rotated, then purge
 the sensitive history as described in
-[§16.8](#168-secret-rotation-and-history-purge-production-blocker).
+[§17.1](#171-credential-rotation-and-history-purge).
 
 Treat any credential shared in chat, logs or other unintended places as
 exposed and rotate it separately. Store replacements in a secrets vault or
@@ -1265,7 +1173,7 @@ Secret Manager rather than committing them or sharing them in chat.
 
 | # | Item | Detail |
 | --- | --- | --- |
-| 4 | **Re-train the model** | Recall is 0.544 and mAP@50-95 is 0.303 — roughly half of all stickers are missed. A better dataset and more epochs would materially improve detection. |
+| 4 | **Validate or re-train the model** | Checkpoint-reported recall is 0.544 and mAP@50-95 is 0.303 on an unverified validation set. Measure real-world performance and resolve data/software rights. |
 | 5 | **Edge detection agent** | Run detection on the camera host (or an edge box) and push events with `X-Device-Key`. Avoids streaming video to the browser entirely. |
 | 6 | **Firestore rules** | If Firestore is adopted, publish explicit security rules; the repo has none today. |
 | 7 | **Rate-limit the detection endpoint** | `POST /api/detection/scan` is CPU-heavy; rate-limit it per device key. |
@@ -1283,16 +1191,17 @@ Secret Manager rather than committing them or sharing them in chat.
   red-circle sticker class. OCR reads whatever text is inside the detected
   box. If the sticker design changes, detection quality degrades before OCR
   quality does.
-- **Analytics are optional and best-effort.** If the Firebase SDK fails to
-  load, the console logs a state error and continues — no user-visible
-  breakage.
+- **Analytics are optional and best-effort.** Firebase Authentication is not
+  optional for the checked-in production build; an SDK or Auth outage can
+  prevent sign-in or Firebase sign-out and must be tested live.
 
 ---
 
 ## 20. Appendix — verified environment facts
 
-Everything in this appendix was executed and observed in the working
-environment, not inferred.
+These are historical observations from an earlier test environment, not a
+current production readiness assessment. Timings, package versions and test
+counts vary by machine and revision; no live cloud integration was verified.
 
 | Fact | Value |
 | --- | --- |
@@ -1310,7 +1219,7 @@ environment, not inferred.
 | ultralytics / opencv | 8.4.20 / 4.10.0.84 |
 | Backend tests | **115 passed** |
 | Frontend check | 20 modules, 9 pages, all references resolve |
-| Source repository | `814725105014-debug/SRM-TRP-TRANSPORT-AI` — 1 commit, **no licence**, weights not committed |
+| Related notebook | `814725105014-debug/SRM-TRP-TRANSPORT-AI` — 1 commit, **no licence**, weights not committed; exact checkpoint provenance unverified |
 | Rejected repository | `hemanathanmd01/Clg-bus-project` — no weights, no licence, credential-bearing |
 | Empty sibling repo | `814725105014-debug/SRM-TRP-TRANSPORT-AI-NEW` — `409 Git Repository is empty` |
 

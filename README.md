@@ -228,7 +228,8 @@ python -m backend.detection_client \
   --camera-id gate-1-entry --confidence 0.96
 ```
 
-The model provenance (verified against the public GitHub source), the full
+The model investigation (a related public notebook was found, but the exact
+checkpoint provenance remains unverified), the full
 contract, the flag rules and the OCR engine options are in
 [`docs/DETECTION.md`](docs/DETECTION.md) and
 [`docs/EVENT_CONTRACT.md`](docs/EVENT_CONTRACT.md).
@@ -263,10 +264,12 @@ The browser camera API requires a **secure context** (`https://` or
 
 ## Firebase
 
-Firebase Hosting serves the static console and rewrites `/api/**` to the
-backend; Analytics is optional. The web configuration is read from the
-environment by the backend and served at `GET /api/config/firebase`, so the
-API key is never committed. The console works fully without Firebase.
+Firebase Hosting serves the static login/assets and rewrites unmatched paths,
+including protected pages and `/api/**`, to Cloud Run. Protected templates are
+not uploaded to Hosting. Analytics is optional; the production build requires
+Firebase Authentication and an active MongoDB access entry. The browser's
+Firebase configuration is served by `GET /api/config/firebase`; the public web
+API key is externalized from the repository.
 
 See [`docs/FIREBASE.md`](docs/FIREBASE.md).
 
@@ -306,7 +309,7 @@ behind **not** adding Supabase are in
 ## API reference
 
 All endpoints are same-origin JSON APIs. Authentication is a short-lived JWT in
-an HttpOnly, SameSite=Lax cookie (`transport_token`).
+an HttpOnly, SameSite=Lax cookie (`__session`, the name Firebase Hosting forwards).
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
@@ -337,14 +340,17 @@ an HttpOnly, SameSite=Lax cookie (`transport_token`).
 ## Tests and CI
 
 ```bash
-python -m pytest              # 60 backend tests (auth, roles, validation, ingestion, exports, audit)
-node scripts/check_frontend.mjs  # frontend imports, assets and element references
-python scripts/scan_secrets.py   # fails if a credential pattern is committed
+python -m pytest                    # backend tests (mock database, no live cloud)
+node scripts/check_frontend.mjs      # imports, assets and element references
+node scripts/check_auth_flow.mjs     # mocked sign-out and Google redirect
+node scripts/check_firebase_loader.mjs  # lazy SDK loading and retry
+python scripts/scan_secrets.py       # selective high-confidence pattern scan
 ```
 
 The test suite uses `mongomock://`, so no database or secrets are required.
-GitHub Actions (`.github/workflows/ci.yml`) runs all three checks on every push
-and pull request.
+GitHub Actions (`.github/workflows/ci.yml`) runs these checks on pushes and
+pull requests. The selective secret scan skips documents, tests and Git
+history; passing it is not proof that the repository or history is clean.
 
 ## Deployment
 
@@ -356,13 +362,15 @@ and pull request.
 1. **Provision MongoDB** — a dedicated database with a least-privilege user.
    Indexes are created automatically on startup.
 2. **Set the environment** — at minimum `ENVIRONMENT=production`, `MONGO_URI`,
-   `JWT_SECRET` (≥ 32 chars), `DEVICE_API_KEYS`, `CORS_ALLOWED_ORIGINS` and
-   `COOKIE_SECURE=true`. Keep them in your platform's secret manager, never in
-   the repository.
+   `JWT_SECRET` (≥ 32 chars), `DEVICE_API_KEYS`, `COOKIE_SECURE=true` and the
+   verified Firebase configuration. Configure `CORS_ALLOWED_ORIGINS` only for
+   explicit cross-origin callers. Use your platform's secret manager and never
+   commit credentials. The runbook configures restrictive Firebase defaults
+   and static Cloud NAT egress before the first Cloud Run deployment.
 3. **Serve with a WSGI server** behind TLS:
 
    ```bash
-   gunicorn --workers 3 --bind 0.0.0.0:8000 --timeout 120 backend.wsgi:app
+   gunicorn --workers 3 --bind 0.0.0.0:8000 --timeout 180 backend.wsgi:app
    ```
 
    Use a shared `RATELIMIT_STORAGE_URI` (for example Redis) when running more
@@ -380,9 +388,10 @@ and pull request.
 
 ## Security notes
 
-- No credentials are stored in the repository. `MONGO_URI`, `JWT_SECRET`,
-  `DEVICE_API_KEYS` and the CORS allowlist are read from the environment;
-  `.env` is git-ignored and `.env.example` contains placeholders only.
+- `MONGO_URI`, `JWT_SECRET` and `DEVICE_API_KEYS` are read from the
+  environment; `.env` is git-ignored and `.env.example` contains placeholders.
+  An earlier credential remains in Git history: rotate exposed credentials,
+  verify revocation and coordinate a sensitive-history purge before production.
 - Passwords are hashed with **Argon2id**; access tokens are short-lived HS256
   JWTs delivered in an HttpOnly cookie.
 - Every request body and query string is validated with pydantic; unknown
@@ -407,10 +416,10 @@ data.
   is configured with HLS or MJPEG URLs.
 - **Real bus/driver register data.** Only demo data is seeded; the register
   contains personal data and is never committed.
-- **The upstream model's licence.** `best.pt` is AGPL-3.0 (Ultralytics) and the
-  public source repository declares no licence. Obtain a written position
-  before a public or commercial deployment, or re-train an equivalent model
-  on a dataset you are licensed to use. See
+- **Confirmed model provenance and rights.** Checkpoint metadata cites an
+  Ultralytics AGPL-3.0 licence; the related notebook declares no licence and
+  does not publish the weights. Obtain written model/dataset rights and a
+  software-licence review before production or distribution. See
   [`docs/DETECTION.md`](docs/DETECTION.md).
 
 ## Repository layout

@@ -1,0 +1,17 @@
+# Cloud Build needs only these inputs. Inspect `gcloud meta list-files-for-upload`
+# before submitting: ignore rules are a safeguard, not a credential scanner.
+/*
+!/backend/
+!/frontend/
+!/deploy/
+!/best.pt
+!/.dockerignore
+
+# Also honour the project's local secret, personal-data and virtualenv rules.
+#!include:.gitignore
+
+# Tests are not needed in the production container; JSON credentials are
+# never needed as build inputs. The build uses service identities, not keys.
+/backend/tests/
+**/*.json
+**/*.jsonl
