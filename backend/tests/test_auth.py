@@ -203,6 +203,23 @@ def test_csrf_allows_same_origin_and_public_origin_and_blocks_cross_site(db, use
     assert res_non_browser.status_code == 201
 
 
+def test_public_user_omits_internal_fields_such_as_firebase_uid_and_demo_user(client, db, users):
+    db.users.update_one(
+        {"_id": db.users.find_one({"email": HEAD_ADMIN_EMAIL})["_id"]},
+        {"$set": {"firebase_uid": "secret-firebase-uid", "demo_user": True}},
+    )
+    login_head_admin(client, users)
+    me_res = client.get("/api/auth/me")
+    assert me_res.status_code == 200
+    user = me_res.get_json()["user"]
+    assert user["email"] == HEAD_ADMIN_EMAIL
+    assert user["role"] == "head_admin"
+    assert "firebase_uid" not in user
+    assert "demo_user" not in user
+    assert "password_hash" not in user
+    assert set(user) <= {"id", "email", "role", "active", "auth_provider", "created_at", "last_sign_in_at"}
+
+
 def test_security_headers_are_present(client, users):
     response = client.get("/api/health")
     assert response.headers["X-Content-Type-Options"] == "nosniff"

@@ -276,9 +276,9 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         return [public_doc(doc) for doc in docs]
 
     def paginated(collection, query: dict, search: SearchFilter, sort: list[tuple[str, int]]):
-        total = collection.count_documents(query)
         skip = (search.page - 1) * search.page_size
-        docs = collection.find(query).sort(sort).skip(skip).limit(search.page_size)
+        docs = list(collection.find(query).sort(sort).skip(skip).limit(search.page_size))
+        total = len(docs) if skip == 0 and len(docs) < search.page_size else collection.count_documents(query)
         return {
             "items": serialize_many(docs),
             "page": search.page,
@@ -546,8 +546,12 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         from .services import build_event_query
 
         query = build_event_query(event_filter, config)
-        total = db.events.count_documents(query)
-        docs = db.events.find(query).sort(event_sort()).skip(skip).limit(event_filter.page_size)
+        docs = list(db.events.find(query).sort(event_sort()).skip(skip).limit(event_filter.page_size))
+        total = (
+            len(docs)
+            if skip == 0 and len(docs) < event_filter.page_size
+            else db.events.count_documents(query)
+        )
         return jsonify(
             {
                 "items": serialize_many(docs),

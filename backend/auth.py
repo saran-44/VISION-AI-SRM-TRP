@@ -42,13 +42,22 @@ def verify_password(password_hash: str | None, password: str) -> bool:
         return False
 
 
+PUBLIC_USER_FIELDS = (
+    "id",
+    "email",
+    "role",
+    "active",
+    "auth_provider",
+    "created_at",
+    "last_sign_in_at",
+)
+
+
 def public_user(doc: dict | None) -> dict | None:
     result = public_doc(doc)
     if result is None:
         return None
-    for key in ("password_hash", "_id"):
-        result.pop(key, None)
-    return result
+    return {key: result[key] for key in PUBLIC_USER_FIELDS if key in result}
 
 
 def create_access_token(config: Config, user: dict) -> tuple[str, datetime]:
