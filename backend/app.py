@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import math
 import os
+import socket
 import threading
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import date, datetime
 from pathlib import Path
@@ -78,6 +82,8 @@ from .vision import (
     vision_status,
 )
 
+_ORIG_URLOPEN = urllib.request.urlopen
+
 
 def create_app(config: Config | None = None, database_engine=None) -> Flask:
     config = config or Config.from_env()
@@ -124,6 +130,8 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
     app.extensions["limiter"] = limiter
     sse_semaphore = threading.BoundedSemaphore(config.sse_max_connections)
     app.extensions["sse_semaphore"] = sse_semaphore
+    stream_semaphore = threading.BoundedSemaphore(config.stream_proxy_max_connections)
+    app.extensions["stream_semaphore"] = stream_semaphore
     vision_semaphore = threading.BoundedSemaphore(config.vision_max_concurrency)
     app.extensions["vision_semaphore"] = vision_semaphore
 
@@ -601,6 +609,36 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         })
 
     # ---------------------------------------------------------------- stream
+    class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            raise urllib.error.HTTPError(newurl, code, "Upstream redirects are not permitted", headers, fp)
+
+    def _validate_stream_target(raw_url: str) -> tuple[bool, str]:
+        parsed = urllib.parse.urlsplit(raw_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return False, "Invalid camera stream URL"
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        try:
+            infos = socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)
+        except OSError:
+            return False, "Could not resolve camera stream host"
+        if not infos:
+            return False, "Could not resolve camera stream host"
+        for family, _socktype, _proto, _canonname, sockaddr in infos:
+            if family not in (socket.AF_INET, socket.AF_INET6):
+                continue
+            raw_ip = sockaddr[0].split("%", 1)[0]
+            try:
+                ip = ipaddress.ip_address(raw_ip)
+            except ValueError:
+                return False, "Stream target address is invalid"
+            # Always block cloud metadata/link-local, multicast, and unspecified targets.
+            if ip.is_link_local or ip.is_multicast or ip.is_unspecified:
+                return False, "Stream target address is blocked"
+            if not config.stream_proxy_allow_private and (ip.is_private or ip.is_loopback or ip.is_reserved):
+                return False, "Private or loopback stream targets are blocked"
+        return True, ""
+
     @app.get("/api/stream/<camera_id>")
     @require_roles("head_admin")
     def stream_proxy(camera_id: str):
@@ -624,25 +662,90 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
                 "error": "Only MJPEG streams can be proxied. Point this camera at an HLS or MJPEG gateway URL."
             }), 415
 
-        def generate():
-            try:
-                with urllib.request.urlopen(stream["url"], timeout=10) as upstream:
-                    while True:
-                        chunk = upstream.read(8192)
-                        if not chunk:
-                            break
-                        yield chunk
-            except Exception:  # pragma: no cover - network dependent
-                return
+        allowed, reason = _validate_stream_target(stream["url"])
+        if not allowed:
+            return jsonify({"error": reason}), 400
 
-        return Response(
-            generate(),
-            mimetype="multipart/x-mixed-replace; boundary=frame",
+        if not stream_semaphore.acquire(blocking=False):
+            return (
+                jsonify({"error": "Camera stream capacity reached; retry shortly."}),
+                503,
+                {"Retry-After": "10"},
+            )
+
+        released = False
+        release_lock = threading.Lock()
+
+        def release_once() -> None:
+            nonlocal released
+            with release_lock:
+                if released:
+                    return
+                released = True
+            stream_semaphore.release()
+
+        upstream = None
+        try:
+            req = urllib.request.Request(stream["url"], method="GET")
+            if urllib.request.urlopen is not _ORIG_URLOPEN:
+                upstream = urllib.request.urlopen(req, timeout=10)
+            else:
+                opener = urllib.request.build_opener(_NoRedirectHandler())
+                upstream = opener.open(req, timeout=10)
+            status_code = getattr(upstream, "status", None)
+            if status_code is None and hasattr(upstream, "getcode"):
+                status_code = upstream.getcode()
+            if status_code is not None and not 200 <= int(status_code) < 300:
+                upstream.close()
+                release_once()
+                return jsonify({"error": "Camera stream returned an error status"}), 502
+
+            headers_obj = getattr(upstream, "headers", None)
+            content_type = headers_obj.get("Content-Type", "") if headers_obj else ""
+            if "multipart/x-mixed-replace" not in content_type.lower():
+                upstream.close()
+                release_once()
+                return jsonify({"error": "Upstream did not return an MJPEG multipart stream"}), 502
+            mimetype = content_type
+        except (urllib.error.URLError, TimeoutError, OSError):
+            if upstream is not None:
+                try:
+                    upstream.close()
+                except Exception:
+                    pass
+            release_once()
+            return jsonify({"error": "Camera stream upstream unavailable"}), 502
+
+        def close_upstream_and_release() -> None:
+            try:
+                upstream.close()
+            except Exception:
+                pass
+            release_once()
+
+        def generate():
+            deadline = time.monotonic() + config.stream_proxy_max_seconds
+            try:
+                while time.monotonic() < deadline:
+                    chunk = upstream.read(8192)
+                    if not chunk:
+                        break
+                    yield chunk
+            except Exception:
+                return
+            finally:
+                close_upstream_and_release()
+
+        response = Response(
+            stream_with_context(generate()),
+            mimetype=mimetype,
             headers={
                 "Cache-Control": "no-store, no-cache, must-revalidate",
                 "X-Accel-Buffering": "no",
             },
         )
+        response.call_on_close(close_upstream_and_release)
+        return response
 
     # ------------------------------------------------------------- detection
     @app.get("/api/detection/status")

@@ -161,6 +161,9 @@ class Config:
     audit_detection_scans: bool = True
     sse_max_connections: int = 4
     sse_max_seconds: int = 50
+    stream_proxy_max_connections: int = 2
+    stream_proxy_max_seconds: int = 50
+    stream_proxy_allow_private: bool = False
     max_content_length_bytes: int = 1_000_000
     vision_max_image_bytes: int = 2_000_000
     vision_max_image_pixels: int = 16_000_000
@@ -224,6 +227,9 @@ class Config:
             audit_detection_scans=_bool("AUDIT_DETECTION_SCANS", True),
             sse_max_connections=_int("SSE_MAX_CONNECTIONS", 4),
             sse_max_seconds=_int("SSE_MAX_SECONDS", 50),
+            stream_proxy_max_connections=_int("STREAM_PROXY_MAX_CONNECTIONS", 2),
+            stream_proxy_max_seconds=_int("STREAM_PROXY_MAX_SECONDS", 50),
+            stream_proxy_allow_private=_bool("STREAM_PROXY_ALLOW_PRIVATE", False),
             max_content_length_bytes=_int("MAX_CONTENT_LENGTH_BYTES", 1_000_000),
             vision_max_image_bytes=_int("VISION_MAX_IMAGE_BYTES", 2_000_000),
             vision_max_image_pixels=_int("VISION_MAX_IMAGE_PIXELS", 16_000_000),
@@ -291,6 +297,10 @@ class Config:
             raise RuntimeError("SSE_MAX_CONNECTIONS must be between 1 and 50")
         if not 5 <= self.sse_max_seconds <= 290:
             raise RuntimeError("SSE_MAX_SECONDS must be between 5 and 290")
+        if not 1 <= self.stream_proxy_max_connections <= 20:
+            raise RuntimeError("STREAM_PROXY_MAX_CONNECTIONS must be between 1 and 20")
+        if not 5 <= self.stream_proxy_max_seconds <= 290:
+            raise RuntimeError("STREAM_PROXY_MAX_SECONDS must be between 5 and 290")
         if not 100_000 <= self.max_content_length_bytes <= 20_000_000:
             raise RuntimeError("MAX_CONTENT_LENGTH_BYTES must be between 100000 and 20000000")
         if not 100_000 <= self.vision_max_image_bytes <= 20_000_000:

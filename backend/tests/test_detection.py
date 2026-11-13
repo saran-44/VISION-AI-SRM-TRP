@@ -494,3 +494,148 @@ def test_buses_plate_key_maintained_on_create_update_and_indexed(client, db, use
     schema = "transport_portal" if db.engine.dialect.name == "postgresql" else None
     bus_indexes = {idx["name"] for idx in inspector.get_indexes("buses", schema=schema)}
     assert "buses_plate_key" in bus_indexes
+
+
+def _stream_app_and_client(db, users, *, url: str, allow_private: bool = False, max_connections: int = 2):
+    from backend.app import create_app
+    from backend.tests.conftest import HEAD_ADMIN_EMAIL, HEAD_ADMIN_PASSWORD, build_config
+
+    cfg = build_config(
+        camera_streams={"cam-1": {"type": "mjpeg", "url": url, "label": "Cam 1"}},
+        stream_proxy_allow_private=allow_private,
+        stream_proxy_max_connections=max_connections,
+        stream_proxy_max_seconds=10,
+    )
+    app = create_app(cfg, database_engine=db.engine)
+    app.config.update(TESTING=True)
+    client = app.test_client()
+    login(client, HEAD_ADMIN_EMAIL, HEAD_ADMIN_PASSWORD)
+    return app, client
+
+
+def test_stream_proxy_blocks_metadata_and_private_ips(db, users, monkeypatch):
+    import socket
+
+    # Metadata 169.254.169.254 is ALWAYS blocked even when private LAN is allowed.
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_a, **_kw: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", 80))],
+    )
+    _, client_priv = _stream_app_and_client(db, users, url="http://metadata.example/live", allow_private=True)
+    assert client_priv.get("/api/stream/cam-1").status_code == 400
+
+    # RFC1918 10.0.0.5 is blocked when stream_proxy_allow_private=False.
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_a, **_kw: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 80))],
+    )
+    _, client_pub = _stream_app_and_client(db, users, url="http://cam.local/live", allow_private=False)
+    assert client_pub.get("/api/stream/cam-1").status_code == 400
+
+
+def test_stream_proxy_probes_upstream_forwards_boundary_and_returns_502_on_error(db, users, monkeypatch):
+    import socket
+    import urllib.error
+    import urllib.request
+
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_a, **_kw: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))],
+    )
+    _, client = _stream_app_and_client(db, users, url="http://camera.example.edu/mjpeg")
+
+    # 1. Connection failure -> 502
+    def fail_open(*_a, **_kw):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fail_open)
+    assert client.get("/api/stream/cam-1").status_code == 502
+
+    # 2. Wrong Content-Type -> 502
+    class HtmlUpstream:
+        status = 200
+        headers = {"Content-Type": "text/html"}
+
+        def read(self, _n):
+            return b"<html>nope</html>"
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_kw: HtmlUpstream())
+    assert client.get("/api/stream/cam-1").status_code == 502
+
+    # 3. Valid MJPEG boundary forwarded cleanly
+    class MjpegUpstream:
+        status = 200
+        headers = {"Content-Type": "multipart/x-mixed-replace; boundary=myboundary"}
+
+        def __init__(self):
+            self._chunks = [b"--myboundary\r\nContent-Type: image/jpeg\r\n\r\nJPG", b""]
+
+        def read(self, _n):
+            return self._chunks.pop(0) if self._chunks else b""
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_kw: MjpegUpstream())
+    ok = client.get("/api/stream/cam-1")
+    assert ok.status_code == 200
+    assert "boundary=myboundary" in ok.content_type
+    assert b"--myboundary" in ok.data
+
+
+def test_stream_proxy_enforces_concurrency_cap_and_releases_once_on_close(db, users, monkeypatch):
+    import socket
+    import urllib.request
+
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_a, **_kw: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))],
+    )
+    closed_count = [0]
+
+    class FakeStream:
+        status = 200
+        headers = {"Content-Type": "multipart/x-mixed-replace; boundary=frame"}
+
+        def read(self, _n):
+            return b"--frame\r\n"
+
+        def close(self):
+            closed_count[0] += 1
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_kw: FakeStream())
+    _, client = _stream_app_and_client(
+        db, users, url="http://camera.example.edu/mjpeg", max_connections=1
+    )
+
+    first = client.get("/api/stream/cam-1", buffered=False)
+    assert first.status_code == 200
+    rejected = client.get("/api/stream/cam-1")
+    assert rejected.status_code == 503
+    assert rejected.headers.get("Retry-After") == "10"
+
+    # Closing unconsumed response triggers call_on_close(release_once) cleanly.
+    first.close()
+    assert closed_count[0] >= 1
+
+    second = client.get("/api/stream/cam-1", buffered=False)
+    assert second.status_code == 200
+    second.close()
+
+
+def test_cameras_js_configures_mjpeg_refresh_and_cleanup():
+    from pathlib import Path
+
+    cameras_js = (
+        Path(__file__).resolve().parents[2] / "frontend" / "js" / "cameras.js"
+    ).read_text()
+    assert "45000" in cameras_js
+    assert "visibilitychange" in cameras_js
+    assert "_cleanupStream" in cameras_js

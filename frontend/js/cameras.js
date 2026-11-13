@@ -118,15 +118,81 @@ function hlsPlayer(url, stateHost) {
   return video;
 }
 
+function withCacheBuster(rawUrl) {
+  const separator = rawUrl.includes('?') ? '&' : '?';
+  return `${rawUrl}${separator}_t=${Date.now()}`;
+}
+
 function mjpegPlayer(url, stateHost) {
+  const REFRESH_MS = 45000;
+  const RETRY_MS = 3000;
+  let retryTimer = null;
+  let disposed = false;
+
   const image = el('img', {
     class: 'camera-stream',
-    src: url,
+    src: withCacheBuster(url),
     alt: 'Live MJPEG camera stream',
   });
-  image.addEventListener('error', () => {
+
+  const refresh = () => {
+    if (disposed) return;
+    if (!image.isConnected) {
+      cleanup();
+      return;
+    }
+    if (document.hidden) return;
+    image.src = withCacheBuster(url);
+  };
+
+  const refreshTimer = window.setInterval(refresh, REFRESH_MS);
+
+  const onLoad = () => {
+    if (retryTimer) {
+      window.clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    stateHost.replaceChildren();
+  };
+
+  const onError = () => {
     setState(stateHost, 'error', 'The MJPEG stream could not be loaded.');
-  });
+    if (!disposed && image.isConnected && !document.hidden && !retryTimer) {
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null;
+        refresh();
+      }, RETRY_MS);
+    }
+  };
+
+  const onVisibilityChange = () => {
+    if (!image.isConnected) {
+      cleanup();
+      return;
+    }
+    if (!document.hidden) {
+      refresh();
+    }
+  };
+
+  const cleanup = () => {
+    if (disposed) return;
+    disposed = true;
+    window.clearInterval(refreshTimer);
+    if (retryTimer) {
+      window.clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    image.removeEventListener('load', onLoad);
+    image.removeEventListener('error', onError);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    image.removeAttribute('src');
+  };
+
+  image.addEventListener('load', onLoad);
+  image.addEventListener('error', onError);
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  image._cleanupStream = cleanup;
   return image;
 }
 
@@ -183,10 +249,15 @@ export function renderCameraTile(options) {
   const container = el('div', { class: 'camera-container' }, [stateHost]);
   const controls = el('div', { class: 'camera-controls' });
   let stream = null;
+  let mjpegElement = null;
 
   const stop = () => {
     stopStream(stream);
     stream = null;
+    if (mjpegElement && typeof mjpegElement._cleanupStream === 'function') {
+      mjpegElement._cleanupStream();
+      mjpegElement = null;
+    }
   };
 
   const setPlaceholder = (text) => {
@@ -244,7 +315,8 @@ export function renderCameraTile(options) {
   } else if (source === 'hls' && url) {
     container.append(hlsPlayer(url, stateHost));
   } else if (source === 'mjpeg' && url) {
-    container.append(mjpegPlayer(url, stateHost));
+    mjpegElement = mjpegPlayer(url, stateHost);
+    container.append(mjpegElement);
   } else if (source === 'rtsp') {
     container.append(rtspNotice(url, stateHost));
   } else {
