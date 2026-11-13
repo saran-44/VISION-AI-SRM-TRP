@@ -83,3 +83,32 @@ def test_private_tables_exist(db):
     inspector = inspect(db.engine)
     schema = "transport_portal" if db.engine.dialect.name == "postgresql" else None
     assert {"users", "buses", "drivers", "events", "audit_logs", "schema_version"} <= set(inspector.get_table_names(schema=schema))
+
+
+def test_invalid_app_timezone_is_rejected_at_startup():
+    with pytest.raises(RuntimeError, match="APP_TIMEZONE"):
+        build_config(app_timezone="Mars/Olympus_Mons").validate()
+
+
+@pytest.mark.parametrize(
+    ("env_name", "value"),
+    [("JWT_TTL_MINUTES", "not-an-int"), ("OCR_CONFIDENCE_THRESHOLD", "bad-float")],
+)
+def test_invalid_numeric_env_raises_runtime_error(monkeypatch, env_name, value):
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    monkeypatch.setenv("JWT_SECRET", "a-very-long-secret-value-for-testing-1234")
+    monkeypatch.setenv(env_name, value)
+    with pytest.raises(RuntimeError, match=env_name):
+        Config.from_env()
+
+
+def test_firebase_project_id_retained_with_warning_when_app_id_missing(monkeypatch, caplog):
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    monkeypatch.setenv("JWT_SECRET", "a-very-long-secret-value-for-testing-1234")
+    monkeypatch.setenv("FIREBASE_PROJECT_ID", "vision-ai-srmtrp")
+    monkeypatch.delenv("FIREBASE_APP_ID", raising=False)
+    config = Config.from_env()
+    assert config.firebase == {}
+    assert config.firebase_project_id == "vision-ai-srmtrp"
+    assert config.firebase_auth_enabled is True
+    assert "FIREBASE_APP_ID" in caplog.text

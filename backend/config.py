@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 
+logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env", override=False)
 
@@ -17,11 +20,19 @@ def _bool(name: str, default: bool = False) -> bool:
 
 
 def _int(name: str, default: int) -> int:
-    return int(os.getenv(name, str(default)))
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer") from exc
 
 
 def _float(name: str, default: float) -> float:
-    return float(os.getenv(name, str(default)))
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a number") from exc
 
 
 def _csv(name: str) -> tuple[str, ...]:
@@ -136,6 +147,12 @@ class Config:
         cors_origins = _parse_origins(_csv("CORS_ALLOWED_ORIGINS"))
         camera_streams = _parse_camera_streams(os.getenv("CAMERA_STREAM_URLS", ""))
         firebase = _firebase_config()
+        raw_firebase_project_id = os.getenv("FIREBASE_PROJECT_ID", "").strip()
+        firebase_project_id = firebase.get("projectId", "") or raw_firebase_project_id
+        if raw_firebase_project_id and not firebase:
+            logger.warning(
+                "FIREBASE_PROJECT_ID is set without FIREBASE_APP_ID; browser Firebase SDK will be disabled."
+            )
         cfg = cls(
             environment=environment,
             debug=debug_requested and environment == "development",
@@ -155,12 +172,12 @@ class Config:
             overstay_hours=_float("OVERSTAY_HOURS", 12.0),
             camera_streams=camera_streams,
             firebase=firebase,
-            firebase_project_id=firebase.get("projectId", ""),
+            firebase_project_id=firebase_project_id,
             # Firebase sign-in is only usable when a project id is configured.
             # The flag stays on by default so that adding the project id is
             # enough to switch it on.
             firebase_auth_enabled=_bool("FIREBASE_AUTH_ENABLED", True)
-            and bool(firebase.get("projectId")),
+            and bool(firebase_project_id),
             firebase_allowed_providers=_csv("FIREBASE_ALLOWED_PROVIDERS")
             or ("password", "google.com"),
             firebase_auto_provision=_bool("FIREBASE_AUTO_PROVISION", True),
@@ -205,6 +222,10 @@ class Config:
             raise RuntimeError("OVERSTAY_HOURS must be positive")
         if self.jwt_ttl_minutes < 1 or self.jwt_ttl_minutes > 60:
             raise RuntimeError("JWT_TTL_MINUTES must be between 1 and 60")
+        try:
+            ZoneInfo(self.app_timezone)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise RuntimeError(f"Unknown APP_TIMEZONE: {self.app_timezone}") from None
         known_providers = {"password", "google.com"}
         unknown = set(self.firebase_allowed_providers) - known_providers
         if unknown:
