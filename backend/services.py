@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import io
+import threading
+import time as monotonic_time
 from collections import Counter, defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
@@ -12,6 +14,9 @@ from openpyxl import Workbook
 from .config import Config
 from .db import ASCENDING, DESCENDING, iso_utc, public_doc, utc_naive
 from .schemas import AnalyticsFilter, EventCreate, EventFilter, normalize_bus_number
+
+_stats_cache_lock = threading.Lock()
+_stats_cache: dict[tuple[int, str], tuple[float, dict[str, Any]]] = {}
 
 FLAG_LABELS = {
     "unregistered_plate": "Unregistered plate",
@@ -120,6 +125,76 @@ def compute_flag_reasons(db, event: dict[str, Any], config: Config) -> list[str]
     return sorted(set(reasons))
 
 
+def invalidate_stats_cache(db=None) -> None:
+    with _stats_cache_lock:
+        if db is None:
+            _stats_cache.clear()
+            return
+        target = id(db)
+        for key in [k for k in _stats_cache if k[0] == target]:
+            _stats_cache.pop(key, None)
+
+
+def _bus_state_from_event(event: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "bus_number": normalize_bus_number(event["bus_number"]),
+        "direction": event["direction"],
+        "last_timestamp": utc_naive(event["timestamp"]),
+        "last_event_id": str(event["_id"]),
+        "gate": event.get("gate"),
+        "camera_id": event.get("camera_id"),
+        "demo": bool(event.get("demo", False)),
+        "updated_at": naive_now(),
+    }
+
+
+def rebuild_bus_states(db) -> int:
+    """Idempotently rebuild bus_states from events ordered by (timestamp, _id)."""
+    latest_by_bus: dict[str, dict[str, Any]] = {}
+    cursor = db.events.find(
+        {},
+        {
+            "_id": 1,
+            "bus_number": 1,
+            "direction": 1,
+            "timestamp": 1,
+            "gate": 1,
+            "camera_id": 1,
+            "demo": 1,
+        },
+    ).sort([("timestamp", ASCENDING), ("_id", ASCENDING)])
+    for event in cursor:
+        bus_number = normalize_bus_number(event["bus_number"])
+        latest_by_bus[bus_number] = event
+    for event in latest_by_bus.values():
+        db.upsert_bus_state(_bus_state_from_event(event))
+    invalidate_stats_cache(db)
+    return len(latest_by_bus)
+
+
+def sync_bus_states_if_needed(db) -> int:
+    """Backfill bus_states once when empty and events already exist."""
+    if db.bus_states.find_one({}, {"_id": 1}) is not None:
+        return 0
+    if db.events.find_one({}, {"_id": 1}) is None:
+        return 0
+    return rebuild_bus_states(db)
+
+
+def purge_expired_records(db, config: Config) -> dict[str, int]:
+    """Delete expired events and bus_states only when retention_days > 0."""
+    deleted = {"events": 0, "bus_states": 0}
+    if config.event_retention_days > 0:
+        cutoff = naive_now() - timedelta(days=config.event_retention_days)
+        ev_res = db.events.delete_many({"timestamp": {"$lt": cutoff}})
+        bs_res = db.bus_states.delete_many({"updated_at": {"$lt": cutoff}})
+        deleted["events"] = int(getattr(ev_res, "deleted_count", 0) or 0)
+        deleted["bus_states"] = int(getattr(bs_res, "deleted_count", 0) or 0)
+        if deleted["events"] or deleted["bus_states"]:
+            invalidate_stats_cache(db)
+    return deleted
+
+
 def ingest_event(db, payload: EventCreate, config: Config, *, source: str = "device") -> dict[str, Any]:
     data = payload.model_dump()
     event = {
@@ -136,41 +211,30 @@ def ingest_event(db, payload: EventCreate, config: Config, *, source: str = "dev
     event["flagged"] = bool(event["flag_reasons"])
     result = db.events.insert_one(event)
     event["_id"] = result.inserted_id
+    db.upsert_bus_state(_bus_state_from_event(event))
+    invalidate_stats_cache(db)
     return public_doc(event)
 
 
 def compute_stats(db, config: Config) -> dict[str, Any]:
+    cache_key = (id(db), config.app_timezone)
+    if config.stats_cache_seconds > 0:
+        with _stats_cache_lock:
+            cached = _stats_cache.get(cache_key)
+            if cached and (monotonic_time.monotonic() - cached[0]) < config.stats_cache_seconds:
+                return dict(cached[1])
+
     now = naive_now()
     start, end = day_bounds(config)
-    all_events = list(
-        db.events.find(
-            {},
-            {
-                "bus_number": 1,
-                "direction": 1,
-                "timestamp": 1,
-                "flagged": 1,
-                "flag_reasons": 1,
-                "gate": 1,
-                "camera_id": 1,
-                "confidence": 1,
-            },
-        ).sort([("timestamp", ASCENDING), ("_id", ASCENDING)])
-    )
-
-    latest_by_bus: dict[str, dict[str, Any]] = {}
-    for event in all_events:
-        latest_by_bus[event["bus_number"]] = event
+    sync_bus_states_if_needed(db)
 
     inside_buses: list[dict[str, Any]] = []
-    for bus_number, event in latest_by_bus.items():
-        if event["direction"] != "IN":
-            continue
-        hours_inside = max(0.0, (now - event["timestamp"]).total_seconds() / 3600)
+    for state in db.bus_states.find({"direction": "IN"}, {"bus_number": 1, "last_timestamp": 1}):
+        hours_inside = max(0.0, (now - state["last_timestamp"]).total_seconds() / 3600)
         inside_buses.append(
             {
-                "bus_number": bus_number,
-                "since": iso_utc(event["timestamp"]),
+                "bus_number": state["bus_number"],
+                "since": iso_utc(state["last_timestamp"]),
                 "hours_inside": round(hours_inside, 2),
                 "overstay": hours_inside > config.overstay_hours,
             }
@@ -178,24 +242,30 @@ def compute_stats(db, config: Config) -> dict[str, Any]:
     inside_buses.sort(key=lambda item: item["hours_inside"], reverse=True)
 
     today_query = {"timestamp": {"$gte": start, "$lt": end}}
-    entries_today = db.events.count_documents({**today_query, "direction": "IN"})
-    exits_today = db.events.count_documents({**today_query, "direction": "OUT"})
-    events_today = db.events.count_documents(today_query)
-    flagged_today = db.events.count_documents({**today_query, "flagged": True})
-    unrecognized_today = db.events.count_documents(
-        {**today_query, "flag_reasons": "unregistered_plate"}
-    )
-
+    entries_today = 0
+    exits_today = 0
+    events_today = 0
+    flagged_today = 0
+    unrecognized_today = 0
     reason_counts: Counter[str] = Counter()
-    flagged_events = db.events.find(
-        {**today_query, "flagged": True},
-        {"flag_reasons": 1},
-    )
-    for event in flagged_events:
-        reason_counts.update(event.get("flag_reasons", []))
+
+    for event in db.events.find(today_query, {"direction": 1, "flagged": 1, "flag_reasons": 1}):
+        events_today += 1
+        if event.get("direction") == "IN":
+            entries_today += 1
+        elif event.get("direction") == "OUT":
+            exits_today += 1
+        if event.get("flagged"):
+            flagged_today += 1
+            reasons = event.get("flag_reasons") or []
+            reason_counts.update(reasons)
+            if "unregistered_plate" in reasons:
+                unrecognized_today += 1
+        elif "unregistered_plate" in (event.get("flag_reasons") or []):
+            unrecognized_today += 1
 
     last_event_doc = db.events.find_one({}, sort=event_sort())
-    return {
+    payload = {
         "generated_at": iso_utc(now),
         "timezone": config.app_timezone,
         "total_buses": db.buses.count_documents({}),
@@ -217,6 +287,10 @@ def compute_stats(db, config: Config) -> dict[str, Any]:
         },
         "last_event": public_doc(last_event_doc),
     }
+    if config.stats_cache_seconds > 0:
+        with _stats_cache_lock:
+            _stats_cache[cache_key] = (monotonic_time.monotonic(), dict(payload))
+    return payload
 
 
 def compute_analytics(db, analytics_filter: AnalyticsFilter, config: Config) -> dict[str, Any]:

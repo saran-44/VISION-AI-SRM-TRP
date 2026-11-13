@@ -319,3 +319,181 @@ def test_health_and_ready_are_exempt_from_rate_limits(app):
     exempt = limiter._route_exemptions
     assert any(route.endswith(".health") for route in exempt)
     assert any(route.endswith(".ready") for route in exempt)
+
+
+def test_compute_stats_uses_bus_states_on_out_of_order_events(client, db, users):
+    register_bus(client, users)
+    login_head_admin(client, users)
+    now = naive_now()
+    later_out = post_event(
+        client,
+        event_payload(direction="OUT", timestamp=(now - timedelta(minutes=2)).isoformat() + "Z"),
+    )
+    assert later_out.status_code == 201
+    earlier_in = post_event(
+        client,
+        event_payload(direction="IN", timestamp=(now - timedelta(minutes=20)).isoformat() + "Z"),
+    )
+    assert earlier_in.status_code == 201
+
+    stats = client.get("/api/stats").get_json()
+    assert stats["buses_inside"] == 0
+    state = db.bus_states.find_one({"bus_number": "BUS-001"})
+    assert state["direction"] == "OUT"
+
+
+def test_bus_states_backfills_from_existing_events(db, config):
+    from backend.services import compute_stats, sync_bus_states_if_needed
+
+    now = naive_now()
+    db.events.insert_one({
+        "bus_number": "BUS-BACKFILL",
+        "direction": "IN",
+        "gate": "Gate 1",
+        "camera_id": "cam-1",
+        "confidence": 0.9,
+        "timestamp": now - timedelta(minutes=10),
+        "created_at": now,
+        "flag_reasons": [],
+        "flagged": False,
+    })
+    assert db.bus_states.count_documents({}) == 0
+    assert sync_bus_states_if_needed(db) == 1
+    stats = compute_stats(db, config)
+    assert stats["buses_inside"] == 1
+    assert stats["inside_buses"][0]["bus_number"] == "BUS-BACKFILL"
+
+
+def test_compute_stats_cache_invalidated_on_ingest(client, db, users):
+    from backend.app import create_app
+    from backend.tests.conftest import build_config
+
+    app = create_app(build_config(stats_cache_seconds=30), database_engine=db.engine)
+    app.config.update(TESTING=True)
+    test_client = app.test_client()
+    register_bus(test_client, users)
+    login_head_admin(test_client, users)
+
+    assert test_client.get("/api/stats").get_json()["buses_inside"] == 0
+    assert post_event(test_client, event_payload(direction="IN")).status_code == 201
+    assert test_client.get("/api/stats").get_json()["buses_inside"] == 1
+
+
+def test_bus_states_duplicate_key_retry_then_ignore_when_newer(db, monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+
+    now = naive_now()
+    newer_ts = now - timedelta(minutes=1)
+    older_ts = now - timedelta(minutes=30)
+
+    db.upsert_bus_state({
+        "bus_number": "BUS-RACE",
+        "direction": "OUT",
+        "last_timestamp": newer_ts,
+        "last_event_id": "000000000000000000000002",
+        "gate": "Gate 1",
+        "camera_id": "cam-1",
+        "demo": False,
+        "updated_at": now,
+    })
+
+    # Simulate an IntegrityError on the initial UPSERT, forcing the fallback UPDATE path.
+    orig_begin = db.engine.begin
+    calls = [0]
+
+    class FakeConn:
+        def __init__(self, real_ctx):
+            self._real_ctx = real_ctx
+            self._conn = None
+
+        def __enter__(self):
+            self._conn = self._real_ctx.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self._real_ctx.__exit__(*args)
+
+        def execute(self, stmt, *args, **kwargs):
+            calls[0] += 1
+            if calls[0] == 1:
+                raise IntegrityError("duplicate", {}, Exception("unique violation"))
+            return self._conn.execute(stmt, *args, **kwargs)
+
+    monkeypatch.setattr(db.engine, "begin", lambda: FakeConn(orig_begin()))
+    db.upsert_bus_state({
+        "bus_number": "BUS-RACE",
+        "direction": "IN",
+        "last_timestamp": older_ts,
+        "last_event_id": "000000000000000000000001",
+        "gate": "Gate 1",
+        "camera_id": "cam-1",
+        "demo": False,
+        "updated_at": now,
+    })
+    assert calls[0] == 2
+    state = db.bus_states.find_one({"bus_number": "BUS-RACE"})
+    assert state["direction"] == "OUT"
+    assert state["last_timestamp"] == newer_ts
+
+
+def test_bus_states_ttl_index_only_when_retention_positive(db):
+    from backend.services import purge_expired_records
+    from backend.tests.conftest import build_config
+
+    now = naive_now()
+    old_ts = now - timedelta(days=400)
+    db.events.insert_one({
+        "bus_number": "BUS-OLD",
+        "direction": "IN",
+        "gate": "Gate 1",
+        "camera_id": "cam-1",
+        "confidence": 0.9,
+        "timestamp": old_ts,
+        "created_at": old_ts,
+        "flag_reasons": [],
+        "flagged": False,
+    })
+    db.upsert_bus_state({
+        "bus_number": "BUS-OLD",
+        "direction": "IN",
+        "last_timestamp": old_ts,
+        "last_event_id": "000000000000000000000001",
+        "gate": "Gate 1",
+        "camera_id": "cam-1",
+        "demo": False,
+        "updated_at": old_ts,
+    })
+
+    # Retention disabled (0) must never purge.
+    disabled = purge_expired_records(db, build_config(event_retention_days=0))
+    assert disabled == {"events": 0, "bus_states": 0}
+    assert db.events.count_documents({}) == 1
+    assert db.bus_states.count_documents({}) == 1
+
+    # Retention positive purges expired events and bus_states.
+    enabled = purge_expired_records(db, build_config(event_retention_days=365))
+    assert enabled == {"events": 1, "bus_states": 1}
+    assert db.events.count_documents({}) == 0
+    assert db.bus_states.count_documents({}) == 0
+
+
+def test_manage_states_cli_rebuild_reconstructs_states(db, config, capsys):
+    from backend.manage_states import _execute
+
+    now = naive_now()
+    db.events.insert_one({
+        "bus_number": "BUS-CLI",
+        "direction": "IN",
+        "gate": "Gate 1",
+        "camera_id": "cam-1",
+        "confidence": 0.9,
+        "timestamp": now - timedelta(minutes=5),
+        "created_at": now,
+        "flag_reasons": [],
+        "flagged": False,
+    })
+    assert _execute(db, config, "rebuild") == 0
+    assert "1 bus" in capsys.readouterr().out
+    assert db.bus_states.find_one({"bus_number": "BUS-CLI"})["direction"] == "IN"
+    assert _execute(db, config, "purge") == 0
+    assert "skipped" in capsys.readouterr().out.lower()

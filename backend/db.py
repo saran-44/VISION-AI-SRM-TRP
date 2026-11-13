@@ -21,8 +21,9 @@ from sqlalchemy import (
     JSON, Boolean, Column, DateTime, Float, Index, Integer, MetaData, String, Table,
     Text, and_, create_engine, delete, func, insert, or_, select, update,
 )
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.exc import DBAPIError, OperationalError, SQLAlchemyError
+from sqlalchemy.dialects.postgresql import JSONB, insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.pool import StaticPool
 
 from .config import Config
@@ -81,9 +82,21 @@ audit_logs = Table(
     Column("collection", Text), Column("record_id", Text), Column("before", json_type),
     Column("after", json_type), Column("ip", Text), Column("user_agent", Text),
 )
+bus_states = Table(
+    "bus_states", metadata, _id_column(),
+    Column("bus_number", String(20), nullable=False, unique=True),
+    Column("direction", String(3), nullable=False),
+    Column("last_timestamp", DateTime(), nullable=False),
+    Column("last_event_id", String(24), nullable=False),
+    Column("gate", Text), Column("camera_id", Text),
+    Column("demo", Boolean, nullable=False, default=False),
+    Column("updated_at", DateTime(), nullable=False),
+)
 Index("users_firebase_uid", users.c.firebase_uid)
 Index("audit_collection_action_timestamp", audit_logs.c.collection, audit_logs.c.action, audit_logs.c.timestamp.desc())
-TABLES = {table.name: table for table in (users, buses, drivers, events, audit_logs)}
+Index("bus_states_direction", bus_states.c.direction)
+Index("bus_states_updated_at", bus_states.c.updated_at)
+TABLES = {table.name: table for table in (users, buses, drivers, events, audit_logs, bus_states)}
 
 # IDs remain 24 hexadecimal characters, preserving URLs and allowing a future
 # explicit import of existing record IDs. They are identifiers, not secrets.
@@ -300,6 +313,65 @@ class Database:
         guard = getattr(self.engine, "_transport_preview_lock", None) or nullcontext()
         with guard, self.engine.connect() as conn:
             conn.execute(select(schema_version.c.version).limit(1))
+
+    def upsert_bus_state(self, state: dict[str, Any]) -> None:
+        """Atomically upsert a bus's latest state only if (last_timestamp, last_event_id) is newer."""
+        row = dict(state)
+        row.setdefault("_id", new_id())
+        insert_fn = pg_insert if self.engine.dialect.name == "postgresql" else sqlite_insert
+        stmt = insert_fn(bus_states).values(**row)
+        excluded = stmt.excluded
+        newer_pred = or_(
+            bus_states.c.last_timestamp < excluded.last_timestamp,
+            and_(
+                bus_states.c.last_timestamp == excluded.last_timestamp,
+                bus_states.c.last_event_id < excluded.last_event_id,
+            ),
+        )
+        upsert_stmt = stmt.on_conflict_do_update(
+            index_elements=[bus_states.c.bus_number],
+            set_={
+                "direction": excluded.direction,
+                "last_timestamp": excluded.last_timestamp,
+                "last_event_id": excluded.last_event_id,
+                "gate": excluded.gate,
+                "camera_id": excluded.camera_id,
+                "demo": excluded.demo,
+                "updated_at": excluded.updated_at,
+            },
+            where=newer_pred,
+        )
+        try:
+            with self.bus_states.guard(), self.engine.begin() as conn:
+                conn.execute(upsert_stmt)
+        except IntegrityError:
+            # Defensive retry once on concurrent first-insert race, then ignore if existing row is newer.
+            fallback_stmt = (
+                update(bus_states)
+                .where(
+                    and_(
+                        bus_states.c.bus_number == row["bus_number"],
+                        or_(
+                            bus_states.c.last_timestamp < row["last_timestamp"],
+                            and_(
+                                bus_states.c.last_timestamp == row["last_timestamp"],
+                                bus_states.c.last_event_id < row["last_event_id"],
+                            ),
+                        ),
+                    )
+                )
+                .values(
+                    direction=row["direction"],
+                    last_timestamp=row["last_timestamp"],
+                    last_event_id=row["last_event_id"],
+                    gate=row.get("gate"),
+                    camera_id=row.get("camera_id"),
+                    demo=bool(row.get("demo", False)),
+                    updated_at=row["updated_at"],
+                )
+            )
+            with self.bus_states.guard(), self.engine.begin() as conn:
+                conn.execute(fallback_stmt)
 
 
 def get_database(config: Config, engine=None):

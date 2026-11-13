@@ -33,7 +33,7 @@ def create_runtime_role(conn, role: str, password: str) -> None:
     conn.execute(sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD {}").format(ident, sql.Literal(password)))
     conn.execute(sql.SQL("GRANT USAGE ON SCHEMA transport_portal TO {}").format(ident))
     conn.execute(sql.SQL("GRANT SELECT ON transport_portal.schema_version TO {}").format(ident))
-    conn.execute(sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON transport_portal.users, transport_portal.buses, transport_portal.drivers, transport_portal.events TO {}").format(ident))
+    conn.execute(sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON transport_portal.users, transport_portal.buses, transport_portal.drivers, transport_portal.events, transport_portal.bus_states TO {}").format(ident))
     conn.execute(sql.SQL("GRANT SELECT, INSERT ON transport_portal.audit_logs TO {}").format(ident))
 
 

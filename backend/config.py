@@ -150,6 +150,7 @@ class Config:
     vision_max_concurrency: int = 2
     detection_rate_limit: str = "30 per minute"
     event_rate_limit: str = "120 per minute"
+    stats_cache_seconds: int = 5
 
     @classmethod
     def from_env(cls, overrides: dict | None = None) -> "Config":
@@ -210,6 +211,7 @@ class Config:
             vision_max_concurrency=_int("VISION_MAX_CONCURRENCY", 2),
             detection_rate_limit=os.getenv("DETECTION_RATE_LIMIT", "30 per minute"),
             event_rate_limit=os.getenv("EVENT_RATE_LIMIT", "120 per minute"),
+            stats_cache_seconds=_int("STATS_CACHE_SECONDS", 5),
         )
         if overrides:
             cfg = replace(cfg, **overrides)
@@ -272,6 +274,8 @@ class Config:
             raise RuntimeError("VISION_MAX_IMAGE_DIM must be between 64 and 16384")
         if not 1 <= self.vision_max_concurrency <= 16:
             raise RuntimeError("VISION_MAX_CONCURRENCY must be between 1 and 16")
+        if not 0 <= self.stats_cache_seconds <= 60:
+            raise RuntimeError("STATS_CACHE_SECONDS must be between 0 and 60")
         known_providers = {"password", "google.com"}
         unknown = set(self.firebase_allowed_providers) - known_providers
         if unknown:

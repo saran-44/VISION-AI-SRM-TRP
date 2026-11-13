@@ -115,6 +115,7 @@ def seed_demo_data(
     db.buses.delete_many({"demo": True})
     db.drivers.delete_many({"demo": True})
     db.events.delete_many({"demo": True})
+    db.bus_states.delete_many({"demo": True})
 
     now = naive_now()
     db.users.insert_many(
@@ -147,6 +148,9 @@ def seed_demo_data(
     for event in events:
         created = ingest_event(db, event, config, source="demo")
         db.events.update_one({"_id": created["id"]}, {"$set": {"demo": True}})
+        state = db.bus_states.find_one({"bus_number": created["bus_number"]})
+        if state:
+            db.bus_states.update_one({"_id": state["_id"]}, {"$set": {"demo": True}})
 
     return {
         "buses": len(DEMO_BUSES),

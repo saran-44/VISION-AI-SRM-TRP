@@ -53,8 +53,10 @@ from .services import (
     event_sort,
     events_for_export,
     ingest_event,
+    invalidate_stats_cache,
     naive_now,
     record_audit,
+    sync_bus_states_if_needed,
     xlsx_bytes,
 )
 from .firebase_auth import (
@@ -106,6 +108,7 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             x_prefix=0,
         )
     db = get_database_for_startup(config, database_engine)
+    sync_bus_states_if_needed(db)
     app.extensions["transport_db"] = db
 
     limiter = Limiter(
@@ -830,6 +833,7 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         data.update({"created_at": naive_now(), "updated_at": naive_now(), "demo": False})
         result = db.drivers.insert_one(data)
         after = db.drivers.find_one({"_id": result.inserted_id})
+        invalidate_stats_cache(db)
         record_audit(db, g.current_user, "create", "drivers", str(result.inserted_id), after=after, flask_request=request)
         return jsonify({"driver": public_doc(after)}), 201
 
@@ -860,6 +864,7 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         changes["updated_at"] = naive_now()
         db.drivers.update_one({"_id": oid}, {"$set": changes})
         after = db.drivers.find_one({"_id": oid})
+        invalidate_stats_cache(db)
         record_audit(db, g.current_user, "update", "drivers", str(oid), before=before, after=after, flask_request=request)
         return jsonify({"driver": public_doc(after)})
 
@@ -871,6 +876,7 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         if not before:
             return jsonify({"error": "Not found"}), 404
         db.drivers.delete_one({"_id": oid})
+        invalidate_stats_cache(db)
         record_audit(db, g.current_user, "delete", "drivers", str(oid), before=before, flask_request=request)
         return jsonify({"ok": True})
 
@@ -900,6 +906,7 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         except IntegrityError:
             return jsonify({"error": "A bus with this number already exists"}), 409
         after = db.buses.find_one({"_id": result.inserted_id})
+        invalidate_stats_cache(db)
         record_audit(db, g.current_user, "create", "buses", str(result.inserted_id), after=after, flask_request=request)
         return jsonify({"bus": public_doc(after)}), 201
 
@@ -931,6 +938,7 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         except IntegrityError:
             return jsonify({"error": "A bus with this number already exists"}), 409
         after = db.buses.find_one({"_id": oid})
+        invalidate_stats_cache(db)
         record_audit(db, g.current_user, "update", "buses", str(oid), before=before, after=after, flask_request=request)
         return jsonify({"bus": public_doc(after)})
 
@@ -942,6 +950,7 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         if not before:
             return jsonify({"error": "Not found"}), 404
         db.buses.delete_one({"_id": oid})
+        invalidate_stats_cache(db)
         record_audit(db, g.current_user, "delete", "buses", str(oid), before=before, flask_request=request)
         return jsonify({"ok": True})
 

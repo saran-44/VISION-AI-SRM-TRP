@@ -82,7 +82,10 @@ def test_production_defaults_cookie_secure_to_true(monkeypatch):
 def test_private_tables_exist(db):
     inspector = inspect(db.engine)
     schema = "transport_portal" if db.engine.dialect.name == "postgresql" else None
-    assert {"users", "buses", "drivers", "events", "audit_logs", "schema_version"} <= set(inspector.get_table_names(schema=schema))
+    assert {"users", "buses", "drivers", "events", "audit_logs", "bus_states", "schema_version"} <= set(inspector.get_table_names(schema=schema))
+    bus_state_indexes = {idx["name"] for idx in inspector.get_indexes("bus_states", schema=schema)}
+    assert "bus_states_direction" in bus_state_indexes
+    assert "bus_states_updated_at" in bus_state_indexes
 
 
 def test_invalid_app_timezone_is_rejected_at_startup():

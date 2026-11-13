@@ -75,6 +75,17 @@ CREATE TABLE transport_portal.audit_logs (
     ip text,
     user_agent text
 );
+CREATE TABLE transport_portal.bus_states (
+    _id varchar(24) PRIMARY KEY,
+    bus_number varchar(20) NOT NULL UNIQUE,
+    direction varchar(3) NOT NULL,
+    last_timestamp timestamp NOT NULL,
+    last_event_id varchar(24) NOT NULL,
+    gate text,
+    camera_id text,
+    demo boolean NOT NULL DEFAULT false,
+    updated_at timestamp NOT NULL
+);
 CREATE INDEX drivers_name ON transport_portal.drivers (name);
 CREATE INDEX drivers_bus_number ON transport_portal.drivers (bus_number);
 CREATE INDEX events_timestamp ON transport_portal.events (timestamp DESC, _id DESC);
@@ -87,6 +98,8 @@ CREATE INDEX audit_timestamp ON transport_portal.audit_logs (timestamp DESC);
 CREATE INDEX audit_actor ON transport_portal.audit_logs (actor, timestamp DESC);
 CREATE INDEX users_firebase_uid ON transport_portal.users (firebase_uid) WHERE firebase_uid IS NOT NULL;
 CREATE INDEX audit_collection_action_timestamp ON transport_portal.audit_logs (collection, action, timestamp DESC);
+CREATE INDEX bus_states_direction ON transport_portal.bus_states (direction);
+CREATE INDEX bus_states_updated_at ON transport_portal.bus_states (updated_at);
 -- Supabase may set table default privileges for its API roles. Deny those
 -- roles explicitly as well as PUBLIC; the Flask database login is granted
 -- only the privileges it needs by scripts/configure_supabase.py.
