@@ -639,3 +639,37 @@ def test_cameras_js_configures_mjpeg_refresh_and_cleanup():
     assert "45000" in cameras_js
     assert "visibilitychange" in cameras_js
     assert "_cleanupStream" in cameras_js
+
+
+def test_vision_status_is_lightweight_and_does_not_instantiate_ocr_or_model(monkeypatch):
+    from backend import vision
+
+    called = False
+
+    def fail_heavy(*_a, **_kw):
+        nonlocal called
+        called = True
+        raise AssertionError("vision_status must not instantiate heavy OCR or YOLO models")
+
+    monkeypatch.setattr(vision, "_ocr_rapidocr", fail_heavy)
+    monkeypatch.setattr(vision, "_ocr_tesseract", fail_heavy)
+    monkeypatch.setattr(vision, "_ocr_easyocr", fail_heavy)
+    monkeypatch.setattr(vision, "load_model", fail_heavy)
+    monkeypatch.setattr(vision, "_package_present", lambda mod: mod in {"torch", "ultralytics", "cv2", "PIL", "rapidocr_onnxruntime"})
+
+    status = vision.vision_status()
+    assert called is False
+    assert status["ocr_available"] == "rapidocr"
+    assert status["model_loaded"] is False
+
+
+def test_backend_logger_configures_stdout_handler_without_duplicates(app):
+    import logging
+
+    backend_logger = logging.getLogger("backend")
+    assert len(backend_logger.handlers) >= 1
+    first_count = len(backend_logger.handlers)
+    from backend.app import _configure_backend_logging
+
+    _configure_backend_logging()
+    assert len(backend_logger.handlers) == first_count

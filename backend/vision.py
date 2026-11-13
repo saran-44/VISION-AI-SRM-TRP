@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import base64
 import binascii
+import importlib.util
 import io
 import logging
 import os
 import re
+import shutil
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -467,8 +469,24 @@ def best_candidate(result: DetectionResult) -> PlateCandidate | None:
 # --------------------------------------------------------------------------- #
 # Health reporting
 # --------------------------------------------------------------------------- #
+def _package_present(module_name: str) -> bool:
+    return importlib.util.find_spec(module_name) is not None
+
+
+def _ocr_probe_ready(name: str) -> bool:
+    if name in _ocr_cache:
+        return True
+    if name == "rapidocr":
+        return _package_present("rapidocr_onnxruntime")
+    if name == "tesseract":
+        return _package_present("pytesseract") and bool(shutil.which("tesseract"))
+    if name == "easyocr":
+        return _package_present("easyocr")
+    return False
+
+
 def vision_status() -> dict[str, Any]:
-    """Describe what the vision stack can currently do."""
+    """Describe what the vision stack can currently do without heavy initialization."""
     path = model_path()
     status: dict[str, Any] = {
         "model_path": str(path),
@@ -483,39 +501,24 @@ def vision_status() -> dict[str, Any]:
     if not path.exists():
         status["problems"].append(f"Model file missing at {path}")
 
-    try:
-        import torch  # type: ignore  # noqa: F401
-    except ImportError:
-        status["problems"].append("torch is not installed")
-    try:
-        import ultralytics  # type: ignore  # noqa: F401
-    except ImportError:
-        status["problems"].append("ultralytics is not installed")
-    try:
-        import cv2  # type: ignore  # noqa: F401
-    except ImportError:
-        status["problems"].append("opencv is not installed")
-    try:
-        import PIL  # type: ignore  # noqa: F401
-    except ImportError:
-        status["problems"].append("Pillow is not installed")
+    for mod_name, label in (
+        ("torch", "torch"),
+        ("ultralytics", "ultralytics"),
+        ("cv2", "opencv"),
+        ("PIL", "Pillow"),
+    ):
+        if not _package_present(mod_name):
+            status["problems"].append(f"{label} is not installed")
 
     engine = ocr_engine_name()
     if engine != "none":
+        probes = ("rapidocr", "tesseract", "easyocr") if engine == "auto" else (engine,)
         usable = False
-        for probe in ("rapidocr", "tesseract", "easyocr"):
-            try:
-                if probe == "rapidocr":
-                    _ocr_rapidocr()
-                elif probe == "tesseract":
-                    _ocr_tesseract()
-                else:
-                    _ocr_easyocr()
+        for probe in probes:
+            if _ocr_probe_ready(probe):
                 usable = True
                 status["ocr_available"] = probe
                 break
-            except VisionUnavailable:
-                continue
         if not usable:
             status["problems"].append(
                 "no OCR engine is usable (install rapidocr-onnxruntime, tesseract-ocr or easyocr)"

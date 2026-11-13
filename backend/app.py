@@ -4,9 +4,11 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import logging
 import math
 import os
 import socket
+import sys
 import threading
 import time
 import urllib.error
@@ -88,7 +90,21 @@ from .vision import (
 _ORIG_URLOPEN = urllib.request.urlopen
 
 
+def _configure_backend_logging() -> None:
+    backend_logger = logging.getLogger("backend")
+    level_name = os.getenv("LOG_LEVEL", "INFO").strip().upper()
+    level = getattr(logging, level_name, logging.INFO)
+    backend_logger.setLevel(level)
+    if not backend_logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+        )
+        backend_logger.addHandler(handler)
+
+
 def create_app(config: Config | None = None, database_engine=None) -> Flask:
+    _configure_backend_logging()
     config = config or Config.from_env()
     scan_content_limit = max(
         config.max_content_length_bytes,
