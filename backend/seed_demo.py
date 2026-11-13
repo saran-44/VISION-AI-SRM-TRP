@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from datetime import timedelta
 
-from bson import ObjectId
 
 from .auth import hash_password
 from .config import Config
@@ -147,7 +146,7 @@ def seed_demo_data(
     events = demo_events()
     for event in events:
         created = ingest_event(db, event, config, source="demo")
-        db.events.update_one({"_id": ObjectId(created["id"])}, {"$set": {"demo": True}})
+        db.events.update_one({"_id": created["id"]}, {"$set": {"demo": True}})
 
     return {
         "buses": len(DEMO_BUSES),

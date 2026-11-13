@@ -18,6 +18,22 @@ jobs:
   backend:
     name: Backend tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: transport_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d transport_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:ci-only-password@127.0.0.1:5432/transport_test
+      ALLOW_TEST_DATABASE_RESET: "true"
+      JWT_SECRET: ci-only-secret-value-not-used-by-tests
     steps:
       - uses: actions/checkout@v4
 
@@ -31,21 +47,17 @@ jobs:
           pip install -r backend/requirements.txt
 
       - name: Run tests
-        env:
-          MONGO_URI: mongomock://transport
-          JWT_SECRET: ci-only-secret-value-not-used-by-tests
         run: python -m pytest
 
       - name: Byte-compile all backend modules
         run: python -m compileall -q backend
 
-      - name: The access-list CLI must be runnable
+      - name: The access-list CLI persists across processes
         env:
-          MONGO_URI: mongomock://cli
-          JWT_SECRET: ci-only-secret-value-not-used-by-tests
+          DATABASE_URL: postgresql://postgres:ci-only-password@127.0.0.1:5432/transport_test
         run: |
           python -m backend.manage_access add ci.user@example.invalid
-          python -m backend.manage_access list
+          python -m backend.manage_access list | grep ci.user@example.invalid
 
   vision:
     name: Vision stack (optional)

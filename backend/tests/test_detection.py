@@ -145,9 +145,9 @@ def test_firebase_config_exposes_the_public_subset(app, client):
     application = create_with_firebase(app)
     payload = application.test_client().get("/api/config/firebase").get_json()
     assert payload["enabled"] is True
-    assert payload["projectId"] == "srmtrpai"
+    assert payload["projectId"] == "vision-ai-srmtrp"
     assert payload["analytics"] is True
-    assert payload["config"]["authDomain"] == "srmtrpai.firebaseapp.com"
+    assert payload["config"]["authDomain"] == "vision-ai-srmtrp.firebaseapp.com"
     # The private key must never be exposed.
     assert "private_key" not in payload["config"]
 
@@ -160,14 +160,14 @@ def create_with_firebase(app):
         app.config["TRANSPORT_CONFIG"],
         firebase={
             "apiKey": "test-api-key",
-            "authDomain": "srmtrpai.firebaseapp.com",
-            "projectId": "srmtrpai",
-            "storageBucket": "srmtrpai.firebasestorage.app",
-            "messagingSenderId": "734375891811",
-            "appId": "1:734375891811:web:6851938bef332bc0e53956",
-            "measurementId": "G-7MXBNH3N7D",
+            "authDomain": "vision-ai-srmtrp.firebaseapp.com",
+            "projectId": "vision-ai-srmtrp",
+            "storageBucket": "vision-ai-srmtrp.firebasestorage.app",
+            "messagingSenderId": "235811571442",
+            "appId": "1:235811571442:web:342e488e0ac2ee75b0f26b",
+            "measurementId": "G-S4HS9TGV4H",
         },
-        firebase_project_id="srmtrpai",
+        firebase_project_id="vision-ai-srmtrp",
     )
     application = create_app(config)
     application.config.update(TESTING=True)

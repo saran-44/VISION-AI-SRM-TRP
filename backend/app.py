@@ -3,21 +3,18 @@ from __future__ import annotations
 import json
 import math
 import os
-import re
 import time
 import urllib.request
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from bson import ObjectId
 from flask import Flask, Response, current_app, g, jsonify, make_response, redirect, request, send_from_directory, stream_with_context
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from pydantic import ValidationError
-from pymongo import ASCENDING, DESCENDING
-from pymongo.errors import DuplicateKeyError, PyMongoError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from .access import AccessDenied, resolve_identity
 from .auth import (
@@ -32,7 +29,7 @@ from .auth import (
     verify_password,
 )
 from .config import Config
-from .db import get_database_for_startup, iso_utc, public_doc, utc_naive
+from .db import ASCENDING, DESCENDING, get_database_for_startup, iso_utc, public_doc, utc_naive, valid_id
 from .schemas import (
     AnalyticsFilter,
     BusCreate,
@@ -72,7 +69,7 @@ from .vision import (
 )
 
 
-def create_app(config: Config | None = None, mongo_client=None) -> Flask:
+def create_app(config: Config | None = None, database_engine=None) -> Flask:
     config = config or Config.from_env()
     app = Flask(__name__, static_folder=None)
     app.config.update(
@@ -86,7 +83,7 @@ def create_app(config: Config | None = None, mongo_client=None) -> Flask:
         SECRET_KEY=os.urandom(32).hex(),
     )
     app.json.sort_keys = False
-    db = get_database_for_startup(config, mongo_client)
+    db = get_database_for_startup(config, database_engine)
     app.extensions["transport_db"] = db
 
     limiter = Limiter(key_func=get_remote_address, app=app)
@@ -153,7 +150,7 @@ def create_app(config: Config | None = None, mongo_client=None) -> Flask:
                 400,
             )
 
-    def mongo_payload(model, *, exclude_unset: bool = False) -> dict[str, Any]:
+    def database_payload(model, *, exclude_unset: bool = False) -> dict[str, Any]:
         data = model.model_dump(exclude_unset=exclude_unset)
         for key, value in list(data.items()):
             if isinstance(value, datetime):
@@ -162,8 +159,8 @@ def create_app(config: Config | None = None, mongo_client=None) -> Flask:
                 data[key] = value.isoformat()
         return data
 
-    def oid_or_none(value: str) -> ObjectId | None:
-        return ObjectId(value) if ObjectId.is_valid(value) else None
+    def oid_or_none(value: str) -> str | None:
+        return value.lower() if valid_id(value) else None
 
     def serialize_many(docs) -> list[dict[str, Any]]:
         return [public_doc(doc) for doc in docs]
@@ -183,7 +180,7 @@ def create_app(config: Config | None = None, mongo_client=None) -> Flask:
     def search_regex(value: str | None) -> dict[str, str] | None:
         if not value:
             return None
-        return {"$regex": re.escape(value), "$options": "i"}
+        return {"$contains_ci": value}
 
     def send_page(filename: str) -> Response:
         return send_from_directory(frontend_dir / "pages", filename, max_age=0)
@@ -682,7 +679,7 @@ def create_app(config: Config | None = None, mongo_client=None) -> Flask:
         payload, error = validate(DriverCreate)
         if error:
             return error
-        data = mongo_payload(payload)
+        data = database_payload(payload)
         if not db.buses.find_one({"bus_number": data["bus_number"]}, {"_id": 1}):
             return jsonify({"error": "Register this bus before assigning a driver"}), 400
         data.update({"created_at": naive_now(), "updated_at": naive_now(), "demo": False})
@@ -710,7 +707,7 @@ def create_app(config: Config | None = None, mongo_client=None) -> Flask:
         payload, error = validate(DriverUpdate)
         if error:
             return error
-        changes = mongo_payload(payload, exclude_unset=True)
+        changes = database_payload(payload, exclude_unset=True)
         if not changes:
             return jsonify({"error": "No fields supplied"}), 400
         if "bus_number" in changes and not db.buses.find_one({"bus_number": changes["bus_number"]}, {"_id": 1}):
@@ -751,11 +748,11 @@ def create_app(config: Config | None = None, mongo_client=None) -> Flask:
         payload, error = validate(BusCreate)
         if error:
             return error
-        data = mongo_payload(payload)
+        data = database_payload(payload)
         data.update({"created_at": naive_now(), "updated_at": naive_now(), "demo": False})
         try:
             result = db.buses.insert_one(data)
-        except DuplicateKeyError:
+        except IntegrityError:
             return jsonify({"error": "A bus with this number already exists"}), 409
         after = db.buses.find_one({"_id": result.inserted_id})
         record_audit(db, g.current_user, "create", "buses", str(result.inserted_id), after=after, flask_request=request)
@@ -780,13 +777,13 @@ def create_app(config: Config | None = None, mongo_client=None) -> Flask:
         payload, error = validate(BusUpdate)
         if error:
             return error
-        changes = mongo_payload(payload, exclude_unset=True)
+        changes = database_payload(payload, exclude_unset=True)
         if not changes:
             return jsonify({"error": "No fields supplied"}), 400
         changes["updated_at"] = naive_now()
         try:
             db.buses.update_one({"_id": oid}, {"$set": changes})
-        except DuplicateKeyError:
+        except IntegrityError:
             return jsonify({"error": "A bus with this number already exists"}), 409
         after = db.buses.find_one({"_id": oid})
         record_audit(db, g.current_user, "update", "buses", str(oid), before=before, after=after, flask_request=request)
@@ -862,13 +859,14 @@ def create_app(config: Config | None = None, mongo_client=None) -> Flask:
     def rate_limited(_error):
         return jsonify({"error": "Too many requests. Please try again later."}), 429
 
-    @app.errorhandler(DuplicateKeyError)
+    @app.errorhandler(IntegrityError)
     def duplicate_key(_error):
         return jsonify({"error": "A duplicate record exists"}), 409
 
-    @app.errorhandler(PyMongoError)
+    @app.errorhandler(SQLAlchemyError)
     def database_error(_error):
-        current_app.logger.exception("Database request failed")
+        # Driver messages and SQL may contain credentials or personal data.
+        current_app.logger.error("Database request failed (%s)", type(_error).__name__)
         if request.path.startswith("/api/"):
             return jsonify({"error": "A temporary data service error occurred"}), 503
         return make_response("Service temporarily unavailable", 503)

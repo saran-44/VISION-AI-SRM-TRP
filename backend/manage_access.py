@@ -1,6 +1,6 @@
 """Manage the transport portal's access list.
 
-The access list is the ``users`` collection: the authoritative record of which
+The access list is the ``users`` table: the authoritative record of which
 email addresses may use the portal and what role each one holds. Firebase
 supplies the credential; this list supplies the authorisation.
 
@@ -24,7 +24,7 @@ Typical use:
     # let a re-created Firebase account take over an email
     python -m backend.manage_access unlink principal@srmtrp.edu.in
 
-The script reads ``MONGO_URI`` and ``MONGO_DB_NAME`` from the environment
+The script reads ``DATABASE_URL`` from the environment
 (or a ``.env`` file), exactly like the application.
 """
 from __future__ import annotations
@@ -33,9 +33,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
-
-from pymongo.errors import ConfigurationError, ConnectionFailure, OperationFailure
+from sqlalchemy.exc import SQLAlchemyError
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -49,7 +47,7 @@ from backend.access import (  # noqa: E402
     unlink_firebase_account,
 )
 from backend.config import Config  # noqa: E402
-from backend.db import create_mongo_client, get_database  # noqa: E402
+from backend.db import get_database  # noqa: E402
 
 
 def _load_dotenv() -> None:
@@ -64,52 +62,16 @@ def _load_dotenv() -> None:
 
 def _database():
     _load_dotenv()
-    uri = os.getenv("MONGO_URI", "").strip()
-    if not uri:
-        raise SystemExit("MONGO_URI is not set. Add it to your .env or export it.")
-
-    # Config also parses the URI to choose a default database. Check it first
-    # so malformed bracket/IPv6 syntax does not result in an unsafe traceback.
+    if not os.getenv("DATABASE_URL", "").strip():
+        raise SystemExit("DATABASE_URL is not set. Add it privately to .env or export it.")
     try:
-        urlsplit(uri)
-    except ValueError:
+        config = Config.from_env()
+        return get_database(config)
+    except (SQLAlchemyError, RuntimeError, ValueError):
+        # Driver error text may contain connection details or personal data.
         raise SystemExit(
-            "MongoDB connection string is malformed. Check its format and "
-            "URL-encode special characters in the credentials."
-        ) from None
-
-    config = Config.from_env()
-    try:
-        client = create_mongo_client(uri)
-        return get_database(config, client)
-    except ConfigurationError:
-        # PyMongo may raise this while parsing the URI or looking up SRV DNS.
-        raise SystemExit(
-            "MongoDB connection configuration or DNS lookup failed. Check "
-            "MONGO_URI, SRV DNS, and URL-encoding of credentials."
-        ) from None
-    except ConnectionFailure:
-        raise SystemExit(
-            "Could not establish a usable MongoDB connection. Check network, "
-            "TLS, DNS, and the Atlas IP access list. This does not verify "
-            "whether the credentials are valid."
-        ) from None
-    except OperationFailure as error:
-        # Authentication is normally code 18; Atlas can also use code 8000.
-        message = str(error).lower()
-        if error.code == 18 or "authentication failed" in message or "bad auth" in message:
-            raise SystemExit(
-                "MongoDB authentication failed. Check the database user and "
-                "password, including URL-encoding of special characters."
-            ) from None
-        if error.code == 13:
-            raise SystemExit(
-                "MongoDB denied database access. Check MONGO_DB_NAME and the "
-                "database user's permissions, including permission to create indexes."
-            ) from None
-        raise SystemExit(
-            "MongoDB rejected database initialization. Check database permissions "
-            "and index state; consult Atlas logs without sharing credentials."
+            "Could not initialize PostgreSQL. Check DATABASE_URL format, TLS certificate, "
+            "network restrictions, credentials, permissions and the schema migration."
         ) from None
 
 
@@ -160,7 +122,15 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     db = _database()
+    try:
+        return _execute(db, args)
+    except SQLAlchemyError:
+        # Query failures may contain access-list data or connection details.
+        print("PostgreSQL request failed; check permissions and connectivity.", file=sys.stderr)
+        return 1
 
+
+def _execute(db, args) -> int:
     if args.command == "list":
         _print_entries(list_access_entries(db))
         return 0
@@ -192,8 +162,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Firebase link cleared: {entry['email']}")
         return 0
 
-    parser.error(f"Unknown command '{args.command}'")
-    return 2
+    raise ValueError("Unknown command")
 
 
 if __name__ == "__main__":

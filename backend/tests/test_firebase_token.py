@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from backend import firebase_auth
 from backend.firebase_auth import FirebaseAuthError, verify_id_token
 
-PROJECT_ID = "srmtrpai"
+PROJECT_ID = "vision-ai-srmtrp"
 
 
 @pytest.fixture(scope="module")

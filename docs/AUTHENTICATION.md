@@ -4,11 +4,10 @@ This document explains how the SRM TRP Transport console authenticates, how
 access is restricted to specific email addresses, and exactly what to click in
 the Firebase console.
 
-> **Recommendation: stay with Firebase. Do not add Supabase.** See
-> [§7](#7-why-not-supabase) for the reasoning. For the exact initial-admin
-> account, private email-verification helper and ordered Windows deployment,
-> follow [DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md). The live Firebase project and
-> Atlas connection have not been verified from this workspace.
+> Firebase Authentication verifies identities; Supabase PostgreSQL stores the
+> server-side access list and application data. The private database schema is
+> not exposed through Supabase's Data API. Follow [DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md)
+> for onboarding and deployment. No live cloud integration has been verified.
 
 ---
 
@@ -45,7 +44,7 @@ accounts via the Firebase SDK or REST API, even if this portal has no sign-up
 page. Firebase's **Google** provider also permits sign-in by arbitrary Google
 accounts. Neither provider alone proves that an administrator approved access.
 
-Both providers must supply a **verified email**. The MongoDB access list then
+Both providers must supply a **verified email**. The PostgreSQL access list then
 controls authorization:
 
 | Sign-in method | May an unknown email sign in? | Rule |
@@ -55,7 +54,7 @@ controls authorization:
 
 > **Migrating an existing deployment:** Earlier versions accepted unapproved
 > password sign-ups and did not require a verified email. Before reopening an
-> affected deployment, review the Firebase users, MongoDB access entries, UID
+> affected deployment, review the Firebase users, old and current access entries, UID
 > bindings and audit logs; deactivate unauthorized records. Rotate the app's
 > `JWT_SECRET` to invalidate sessions issued before the fix. Do not assume
 > that deploying the fix removes access records already created by the old
@@ -87,7 +86,7 @@ that specific Firebase account**; an attacker may have registered the email
 first. Do not assume there is a verification checkbox in the console. An
 unverified address cannot sign in to the portal, even if it appears on the
 access list. The portal has no built-in verification or reset button;
-[DEPLOY_WINDOWS.md §7](DEPLOY_WINDOWS.md#7-verify-the-firebase-email-and-seed-the-administrator)
+[DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md)
 explains how to send and check a verification email privately with
 `scripts/send_firebase_verification.py`.
 
@@ -95,7 +94,7 @@ For an existing email, independently verify mailbox ownership and control of
 the specific Firebase account/UID before recovery or granting `head_admin`.
 Do not reuse any password previously shared in chat.
 
-Add every authorized user to MongoDB with `backend.manage_access`, or use the
+Add every authorized user to PostgreSQL with `backend.manage_access`, or use the
 optional admin approval claim described in [§4](#4-the-access-list) for
 password accounts. Google users always need an access-list entry.
 
@@ -104,8 +103,8 @@ password accounts. Google users always need an access-list entry.
 **Authentication → Settings → Authorised domains**
 
 Add only the domains the portal is actually served from. For the expected
-`srmtrpai` default site these may include `srmtrpai.web.app` and
-`srmtrpai.firebaseapp.com`; verify the real site first. Add `localhost` only
+`vision-ai-srmtrp` default site these may include `vision-ai-srmtrp.web.app` and
+`vision-ai-srmtrp.firebaseapp.com`; verify the real site first. Add `localhost` only
 when required for local development.
 
 These domains control the Firebase web OAuth/redirect flow; they are **not**
@@ -144,7 +143,7 @@ There is therefore **no private key to store, rotate or leak** for verification.
 
 ## 4. The access list
 
-The access list is the `users` collection in MongoDB. Each record holds:
+The access list is the `transport_portal.users` PostgreSQL table. Each record holds:
 
 | Field | Meaning |
 | --- | --- |
@@ -157,9 +156,8 @@ The access list is the `users` collection in MongoDB. Each record holds:
 
 ### Managing it
 
-The CLI reads `MONGO_URI` and `MONGO_DB_NAME` from the environment, and it
-**loads `.env` automatically** — so once `.env` holds the real Atlas
-connection string, no export is needed:
+The CLI reads `DATABASE_URL` and **loads `.env` automatically**. Use the
+same private PostgreSQL URL and CA as the application:
 
 ```bash
 # see who has access
@@ -185,18 +183,14 @@ python -m backend.manage_access unlink transport.office@srmtrp.edu.in
 > Unlinking allows a different verified Firebase identity with that email to
 > bind; it must not be used to bypass an unexplained UID mismatch.
 
-> **Which database it touches.** `MONGO_DB_NAME` decides the database; if it
-> is not set, the name is taken from the path of `MONGO_URI`, falling back to
-> `transport_db`. Set it explicitly so the access list and the application
-> cannot end up in different databases.
-
-> **Connection troubleshooting.** During database initialization, the CLI
-> reports configuration/DNS problems, connection failures, authentication
-> failures, and permission denials without printing the connection string.
-> A connection failure does **not** establish whether the credentials are
-> valid. Check DNS, TLS, network access and the Atlas IP access list; for an
-> authentication failure, also check URL-encoding of the credentials. The
-> database user must be able to create the application's indexes.
+> **Which database it touches.** `DATABASE_URL` selects the database; the
+> access list is in its private `transport_portal.users` table. Ensure the
+> URL points to the intended Supabase project before granting a role.
+>
+> **Connection troubleshooting.** Errors are deliberately sanitized. A
+> connection failure does not prove the credentials are invalid. Check the
+> exact session-pooler host, qualified role/project username, TLS CA,
+> network restrictions, schema migration, URL encoding and role grants.
 
 Output looks like this:
 
@@ -216,7 +210,7 @@ custom claim matching that verified address. Its new role is
 created in Firebase is not, by itself, proof of administrator approval.
 Google users never auto-provision, and changing an email requires fresh approval.
 
-The simplest approach is to add each verified user's email to MongoDB with the
+The simplest approach is to add each verified user's email to PostgreSQL with the
 access-list CLI; no custom claim is required for an existing active entry.
 To require an explicit entry for everyone, set:
 
@@ -242,7 +236,7 @@ import os
 import firebase_admin
 from firebase_admin import auth
 
-firebase_admin.initialize_app(options={"projectId": "srmtrpai"})
+firebase_admin.initialize_app(options={"projectId": "vision-ai-srmtrp"})
 user = auth.get_user_by_email(os.environ["APPROVED_EMAIL"].strip())
 if not user.email_verified or user.disabled:
     raise SystemExit("Account must be verified and enabled before approval.")
@@ -257,7 +251,7 @@ unset APPROVED_EMAIL
 Custom-claim updates replace the entire claim object; the example preserves
 other claims, but concurrent updates can still race. Removing this claim later
 **does not** deactivate an access-list record already created. To revoke
-portal access, deactivate the MongoDB entry and manage the Firebase account as
+portal access, deactivate the PostgreSQL entry and manage the Firebase account as
 well. Keep the default role at `transport_office`; assign `head_admin`
 explicitly only to trusted administrators.
 
@@ -281,7 +275,7 @@ Signing out clears the cookie and records the event in the audit log.
 
 ### The break-glass path
 
-The original MongoDB password login can be enabled for controlled local
+The legacy local password login can be enabled for controlled local
 setups, but the checked-in Cloud Build deployment explicitly sets
 `LEGACY_PASSWORD_LOGIN_ENABLED=false`. When disabled, `POST /api/auth/login`
 returns `403` and the login page drops the local-account section. Do not
@@ -293,9 +287,9 @@ enable a production break-glass path without a reviewed security plan.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `FIREBASE_PROJECT_ID` | empty | Firebase project ID; `srmtrpai` in the checked-in build. |
+| `FIREBASE_PROJECT_ID` | empty | Firebase project ID; `vision-ai-srmtrp` in the checked-in build. |
 | `FIREBASE_APP_ID` | empty | Web app ID; configuration is absent without it. |
-| `FIREBASE_API_KEY` | empty | Public Firebase web API key, externalized from the repository and sent to the browser. |
+| `FIREBASE_API_KEY` | empty | Public Firebase web API key, configured from the environment and sent to the browser. |
 | `FIREBASE_AUTH_DOMAIN` | empty | Auth domain; confirm the actual value in Firebase. |
 | `FIREBASE_STORAGE_BUCKET` | empty | Firebase storage bucket, if applicable. |
 | `FIREBASE_MESSAGING_SENDER_ID` | empty | Messaging sender ID. |
@@ -304,33 +298,19 @@ enable a production break-glass path without a reviewed security plan.
 | `FIREBASE_ALLOWED_PROVIDERS` | `password,google.com` | Which providers are accepted. |
 | `FIREBASE_AUTO_PROVISION` | `true` | Auto-create an access record only for a verified password account with the admin-set approval claim. |
 | `FIREBASE_DEFAULT_ROLE` | `transport_office` | The role given to an auto-provisioned account. |
-| `LEGACY_PASSWORD_LOGIN_ENABLED` | `true` | Keep the local MongoDB password login. |
+| `LEGACY_PASSWORD_LOGIN_ENABLED` | `true` | Keep the local database password login. |
 
 ---
 
-## 7. Why not Supabase?
+## 7. Supabase PostgreSQL and Firebase
 
-**Recommendation: Firebase. A second provider would add cost and risk without
-adding protection.**
-
-| Consideration | Firebase | Supabase |
-| --- | --- | --- |
-| Already set up | ✅ `srmtrpai` exists; Hosting and Analytics are already integrated | ❌ A second project, a second SDK, a second set of secrets |
-| Hosting | ✅ Already configured in `firebase.json` | ❌ Would need a separate deployment |
-| Where your data lives | MongoDB | MongoDB — **not** Postgres |
-| Row Level Security | n/a | Supabase's headline security feature — but it only protects **Postgres tables**. Your events, drivers and buses live in **MongoDB**, so RLS would not apply to a single row of your actual data. |
-| Server-side token verification | ✅ Public JWKS, no service account needed | ✅ Also good, but you would still need the anon/service key configured |
-| Provider mix | ✅ Firebase (Google) + optional email/password | ✅ Similar |
-
-The decisive point is the third row. Supabase's main advantage is a policy
-language attached to its own database. Since this project's data is in
-MongoDB, moving the identity provider to Supabase would buy **no** additional
-data protection — you would still enforce the allowlist in application code,
-exactly as described above.
-
-If you later want to move the *data* into Postgres (and want RLS), that is a
-separate migration decision, and then Supabase becomes worth revisiting. For
-identity alone, Firebase is the smaller and safer change.
+The Flask backend connects directly to Supabase PostgreSQL using a dedicated
+server-side database role and verified TLS. It verifies Firebase tokens itself
+and enforces the access list and roles before serving application data. No
+Supabase Auth or browser-side service-role key is required. Do not expose the
+private `transport_portal` schema via PostgREST; RLS is not the enforcement
+mechanism in this design. Switching Firebase projects requires verifying users
+again and reviewing UID bindings; no old identities or records are copied.
 
 ---
 

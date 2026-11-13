@@ -1,6 +1,6 @@
 """Access control for the SRM TRP Transport console.
 
-The ``users`` collection is the authoritative **authorisation list**: it holds
+The ``users`` table is the authoritative **authorisation list**: it holds
 the email address, the role and whether the account is active. Firebase
 supplies the *credential*; this module decides whether a successfully
 authenticated identity is allowed into the portal.
@@ -141,9 +141,19 @@ def _create_user(db, email: str, provider: str, default_role: str) -> dict[str, 
 
 def _record_provider(db, user: dict[str, Any], provider: str, uid: str) -> None:
     updates: dict[str, Any] = {"last_sign_in_at": _now(), "auth_provider": provider}
-    if uid and not user.get("firebase_uid"):
+    query: dict[str, Any] = {"_id": user["_id"], "active": True}
+    if uid:
+        # Compare-and-set: simultaneous first logins for different Firebase
+        # accounts must not overwrite each other's UID binding. The UPDATE
+        # itself checks both the active flag and existing binding atomically.
+        query["$or"] = [{"firebase_uid": None}, {"firebase_uid": uid}]
         updates["firebase_uid"] = uid
-    db.users.update_one({"_id": user["_id"]}, {"$set": updates})
+    result = db.users.update_one(query, {"$set": updates})
+    if result.matched_count != 1:
+        raise AccessDenied(
+            "This account was deactivated or is bound to a different Firebase account.",
+            status=403,
+        )
 
 
 def list_access_entries(db) -> list[dict[str, Any]]:

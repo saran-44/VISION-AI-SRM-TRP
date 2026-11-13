@@ -16,8 +16,11 @@ def test_cloud_build_uses_a_manual_submission_safe_image_tag_and_timeout():
     image = "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$BUILD_ID"
     assert config.count(image) == 3
     assert "$COMMIT_SHA" not in config
-    assert "MONGO_DB_NAME=srmtrpai" in config
-    assert "MONGO_URI=mongo-uri:latest" in config
+    assert "DATABASE_URL=database-url:latest" in config
+    assert "PGSSLROOTCERT=/secrets/supabase-ca.crt" in config
+    assert "/secrets/supabase-ca.crt=supabase-ca:latest" in config
+    assert "vision-ai-srmtrp.firebasestorage.app" in config
+    assert "342e488e0ac2ee75b0f26b" in config
 
 
 def test_cloud_build_sets_the_secure_first_deployment_path():
@@ -34,7 +37,7 @@ def test_cloud_build_sets_the_secure_first_deployment_path():
     assert "FIREBASE_AUTO_PROVISION=false" in config
     assert "LEGACY_PASSWORD_LOGIN_ENABLED=false" in config
     dockerfile = (ROOT / "deploy" / "Dockerfile").read_text()
-    # Gunicorn must not kill a worker before the bounded MongoDB startup retry
+    # Gunicorn must not kill a worker before the bounded PostgreSQL startup retry
     # window has allowed Direct VPC egress and Cloud NAT to become ready.
     assert '"--timeout", "180"' in dockerfile
     assert "periodSeconds=10,failureThreshold=24" in config

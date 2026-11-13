@@ -5,12 +5,11 @@ detections into live, auditable bus movement records: how many buses are inside
 the campus right now, who entered today, which vehicles looked suspicious, and
 a searchable history of drivers, buses and changes.
 
-> **Status:** the application is fully implemented and tested in this repository.
-> The bus-sticker detector (`best.pt` + `backend/vision.py`), the browser
-> webcam and the NVR/DVR camera hooks are all integrated. Two things must
-> still be supplied by the operator: the **real camera stream URLs** and the
-> **Firebase API key** (both are read from the environment). See
-> [Not included](#not-included) and `TRANSPORT_PROJECT_STATUS.md`.
+> **Status:** The backend uses Supabase PostgreSQL with Firebase Authentication.
+> The supplied Firebase project is `vision-ai-srmtrp`; no live Supabase,
+> Firebase, Hosting or Cloud Run integration has been verified here. Real
+> camera streams, Supabase connection details and deployment remain operator tasks.
+> Existing MongoDB records are **not** automatically imported.
 
 ---
 
@@ -50,7 +49,7 @@ a searchable history of drivers, buses and changes.
 ## Architecture
 
 ```
-browser ──HTTP(S)──▶ Flask API (backend/)  ──▶ MongoDB
+browser ──HTTP(S)──▶ Flask API (backend/)  ──▶ Supabase PostgreSQL
  detection device ──POST /api/events (device key)──▶
 ```
 
@@ -58,7 +57,7 @@ browser ──HTTP(S)──▶ Flask API (backend/)  ──▶ MongoDB
 | --- | --- | --- |
 | API + page serving | `backend/` | Flask 3 application factory, JWT/cookie auth, RBAC, pydantic validation, rate limiting, security headers |
 | Frontend | `frontend/` | Vanilla ES modules, no build step, one shared layout module, vendored Chart.js / hls.js / SheetJS |
-| Data | MongoDB | Indexes are created on startup (`backend/db.py`) |
+| Data | Supabase PostgreSQL | Private `transport_portal` schema; apply the SQL migration before startup |
 
 Detailed module-by-module notes live in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -74,55 +73,35 @@ Roles are enforced on the server for every page and every endpoint.
 
 ## Quick start
 
-Requirements: Python 3.11+, Node 18+ (only for the frontend checks), MongoDB 6+
-(or `mongomock://` for a local, in-memory run).
+Requirements: Python 3.11+, Node 18+ for frontend checks. The disposable
+preview uses in-memory SQLite, not your Supabase project; do not use it for
+real records. Explicitly overriding `DATABASE_URL` avoids loading a real URL
+from an existing `.env`.
 
 ```bash
-# 1. install dependencies
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r backend/requirements.txt
-
-# 2. create your environment file (never commit it)
-cp .env.example .env
-$EDITOR .env          # set MONGO_URI, JWT_SECRET, DEVICE_API_KEYS
-
-# 3. run the app
-python -m backend.wsgi            # http://127.0.0.1:5000
+DATABASE_URL=sqlite:///:memory: python scripts/run_preview.py --host 127.0.0.1
 ```
 
-Then open <http://127.0.0.1:5000/> and sign in with an account from MongoDB.
-
-To create your first accounts, insert them directly (passwords are hashed with
-Argon2id):
-
-```python
-from backend.auth import hash_password
-from backend.db import get_database
-from backend.config import Config
-
-db = get_database(Config.from_env())
-db.users.insert_one({
-    "email": "head.admin@example.edu",
-    "password_hash": hash_password("a-long-passphrase"),
-    "role": "head_admin",
-    "active": True,
-})
-```
-
-Or seed the fake demo dataset (see [Demo data](#demo-data)).
+The preview prints a temporary password for its fake accounts; all data is
+lost when it stops. For actual Supabase setup, private access-list management,
+Windows Git Bash and Cloud deployment, follow the complete
+[`docs/DEPLOY_WINDOWS.md`](docs/DEPLOY_WINDOWS.md). The production API only
+starts after the SQL schema migration has been applied; it never creates or
+migrates tables at startup.
 
 ## Environment variables
 
 All configuration comes from the environment (a local `.env` file is loaded
-automatically). `.env.example` lists every variable with safe placeholder
-values; `.env` is git-ignored.
+automatically). `.env.example` lists variables with placeholders and public Firebase identifiers; `.env` is git-ignored.
 
 | Variable | Required | Default | Purpose |
 | --- | --- | --- | --- |
 | `ENVIRONMENT` | yes | `development` | `development` / `testing` / `production` |
-| `MONGO_URI` | yes | – | MongoDB connection string (`mongodb://`, `mongodb+srv://`, `mongomock://`) |
-| `MONGO_DB_NAME` | no | database from URI | Database name |
+| `DATABASE_URL` | yes | – | Private PostgreSQL URL; production requires `sslmode=verify-full` |
+| `PGSSLROOTCERT` | production | – | Path to the Supabase CA certificate from the dashboard |
 | `JWT_SECRET` | yes | – | HS256 signing key; ≥ 32 characters in production |
 | `JWT_TTL_MINUTES` | no | `15` | Access-token lifetime (1–60) |
 | `COOKIE_SECURE` | no | `true` in production | `Secure` flag on the session cookie |
@@ -162,7 +141,7 @@ python -m backend.seed_demo
 
 It creates 4 buses, 3 drivers, 8 events (including one unregistered plate and
 one low-confidence read) and 2 users. Demo records are tagged `demo: true` and
-can be removed with `db.buses.deleteMany({demo: true})` and friends.
+are deleted/replaced on the next explicit demo seed. Never seed a production database.
 
 ## Detection / OCR integration
 
@@ -267,9 +246,9 @@ The browser camera API requires a **secure context** (`https://` or
 Firebase Hosting serves the static login/assets and rewrites unmatched paths,
 including protected pages and `/api/**`, to Cloud Run. Protected templates are
 not uploaded to Hosting. Analytics is optional; the production build requires
-Firebase Authentication and an active MongoDB access entry. The browser's
-Firebase configuration is served by `GET /api/config/firebase`; the public web
-API key is externalized from the repository.
+Firebase Authentication and an active PostgreSQL access entry. The browser's
+Firebase configuration is served by `GET /api/config/firebase`; the supplied
+web API key is a public project identifier, not a Supabase secret.
 
 See [`docs/FIREBASE.md`](docs/FIREBASE.md).
 
@@ -302,8 +281,7 @@ python -m backend.manage_access set-role principal@srmtrp.edu.in head_admin
 python -m backend.manage_access deactivate transport.office@srmtrp.edu.in
 ```
 
-The Firebase console setup, the auto-provisioning rules and the reasoning
-behind **not** adding Supabase are in
+The Firebase console setup and auto-provisioning rules are in
 [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md).
 
 ## API reference
@@ -340,55 +318,46 @@ an HttpOnly, SameSite=Lax cookie (`__session`, the name Firebase Hosting forward
 ## Tests and CI
 
 ```bash
-python -m pytest                    # backend tests (mock database, no live cloud)
-node scripts/check_frontend.mjs      # imports, assets and element references
-node scripts/check_auth_flow.mjs     # mocked sign-out and Google redirect
-node scripts/check_firebase_loader.mjs  # lazy SDK loading and retry
-python scripts/scan_secrets.py       # selective high-confidence pattern scan
+python -m pytest                       # isolated in-memory SQLite by default
+node scripts/check_frontend.mjs
+node scripts/check_auth_flow.mjs
+node scripts/check_firebase_loader.mjs
+python scripts/scan_secrets.py
 ```
 
-The test suite uses `mongomock://`, so no database or secrets are required.
-GitHub Actions (`.github/workflows/ci.yml`) runs these checks on pushes and
-pull requests. The selective secret scan skips documents, tests and Git
-history; passing it is not proof that the repository or history is clean.
+CI also runs the full backend suite against a disposable PostgreSQL service
+and applies the exact SQL migration. To run that path locally, provide a local
+PostgreSQL database whose name ends in `_test`, and explicitly permit reset:
+
+```bash
+# WARNING: the transport_portal schema in this local test database is dropped.
+export TEST_DATABASE_URL='postgresql://example-user:example-password@127.0.0.1:5432/transport_test'
+export ALLOW_TEST_DATABASE_RESET=true
+python -m pytest
+```
+
+Never set `TEST_DATABASE_URL` to a real project or database. The test fixture
+requires a localhost address and opt-in, and destroys its test schema. These
+checks do **not** validate Supabase networking, TLS, Firebase or Cloud Run.
+The selective secret scan skips documents, tests and history; it is not a
+complete security audit.
 
 ## Deployment
 
-> Deploying from Windows with Git Bash? Follow
-> [`docs/DEPLOY_WINDOWS.md`](docs/DEPLOY_WINDOWS.md) — the full chain
-> (toolchain install → log in → Cloud Run → Firebase Hosting) with
-> Windows-specific notes.
+Follow the ordered [Windows Git Bash runbook](docs/DEPLOY_WINDOWS.md) to
+apply the private-schema migration once, create a dedicated database login,
+configure verified TLS, set the Firebase project, and deploy Cloud Run and
+Hosting. It also covers the static NAT configuration, secret handling,
+initial administrator and verification. Existing MongoDB data and access
+entries are not copied; plan and validate a separate import if needed.
 
-1. **Provision MongoDB** — a dedicated database with a least-privilege user.
-   Indexes are created automatically on startup.
-2. **Set the environment** — at minimum `ENVIRONMENT=production`, `MONGO_URI`,
-   `JWT_SECRET` (≥ 32 chars), `DEVICE_API_KEYS`, `COOKIE_SECURE=true` and the
-   verified Firebase configuration. Configure `CORS_ALLOWED_ORIGINS` only for
-   explicit cross-origin callers. Use your platform's secret manager and never
-   commit credentials. The runbook configures restrictive Firebase defaults
-   and static Cloud NAT egress before the first Cloud Run deployment.
-3. **Serve with a WSGI server** behind TLS:
-
-   ```bash
-   gunicorn --workers 3 --bind 0.0.0.0:8000 --timeout 180 backend.wsgi:app
-   ```
-
-   Use a shared `RATELIMIT_STORAGE_URI` (for example Redis) when running more
-   than one worker, otherwise each worker keeps its own login counter.
-4. **Proxy** — terminate TLS in front of gunicorn and forward
-   `X-Forwarded-Proto`; set `PREFERRED_URL_SCHEME=https` behaviour by running
-   with `ENVIRONMENT=production`. Server-sent events need buffering disabled
-   (`proxy_buffering off;` for nginx).
-5. **Static files** — `frontend/` is served by the Flask app itself
-   (`/assets`, `/js`, `/vendor`), so no separate web server is required. For
-   higher throughput, serve `/assets`, `/js` and `/vendor` from nginx and proxy
-   only `/api` and the page routes to gunicorn.
-6. **Create accounts** and seed or import buses, then hand out device keys to
-   the detection service.
+Use a shared rate-limit store before operating multiple instances: the default
+in-memory limiter is per process. Do not expose the `transport_portal` schema
+through the Supabase Data API; the Flask server enforces user authorization.
 
 ## Security notes
 
-- `MONGO_URI`, `JWT_SECRET` and `DEVICE_API_KEYS` are read from the
+- `DATABASE_URL`, `JWT_SECRET` and `DEVICE_API_KEYS` are read from the
   environment; `.env` is git-ignored and `.env.example` contains placeholders.
   An earlier credential remains in Git history: rotate exposed credentials,
   verify revocation and coordinate a sensitive-history purge before production.
@@ -409,9 +378,9 @@ data.
 
 ## Not included
 
-- **The Firebase API key.** It is read from the environment
-  (`FIREBASE_API_KEY`) and deliberately not committed. See
-  [`docs/FIREBASE.md`](docs/FIREBASE.md).
+- **Supabase project details and private database credentials.** Set them locally
+  and in Secret Manager; never commit or share them in chat. The Firebase web
+  API key in `.env.example` is a public browser identifier.
 - **Real camera streams.** Tiles show “Demo footage” until `CAMERA_STREAM_URLS`
   is configured with HLS or MJPEG URLs.
 - **Real bus/driver register data.** Only demo data is seeded; the register

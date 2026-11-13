@@ -14,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("PostgreSQL URI with embedded password", re.compile(r"postgres(?:ql)?://[^\s:/@]+:[^\s@]+@", re.I)),
     ("MongoDB URI with embedded password", re.compile(r"mongodb(?:\+srv)?://[^\s:/@]+:[^\s@]+@", re.I)),
     ("Private key block", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----")),
     ("AWS access key id", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),

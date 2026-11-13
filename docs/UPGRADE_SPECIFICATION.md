@@ -1,10 +1,14 @@
-# SRM TRP Transport — Upgrade Specification
+# SRM TRP Transport — Historical Upgrade Specification
 
-> **Purpose.** This document is the complete, self-contained specification for
-> the SRM TRP Transport upgrade. It is written to be imported into Claude (or
-> any other engineer/agent) so that the architecture can be analysed, the
-> implementation plan followed, and the remaining work continued **without
-> reconstructing context**.
+> **Historical document, not an operations guide.** The architecture, project
+> identifiers, database descriptions and commands below describe earlier
+> versions and may be obsolete. The current backend uses Supabase PostgreSQL
+> and Firebase project `vision-ai-srmtrp`. Use [ARCHITECTURE.md](ARCHITECTURE.md)
+> and [DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md) for current instructions. No data
+> has been imported and no cloud deployment has been verified.
+
+> **Purpose.** This historical specification records the earlier upgrade
+> requirements and implementation. It is not a current deployment guide.
 >
 > It records the requirements, model investigation and limits on provenance,
 > implementation, API contracts, deployment topology and outstanding risks.

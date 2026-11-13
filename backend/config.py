@@ -4,7 +4,7 @@ import json
 import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
 
@@ -28,11 +28,6 @@ def _csv(name: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in os.getenv(name, "").split(",") if item.strip())
 
 
-def _db_name_from_uri(uri: str) -> str:
-    path = urlparse(uri).path.lstrip("/")
-    return path.split("?", 1)[0] or "transport_db"
-
-
 def _parse_origins(values: tuple[str, ...]) -> tuple[str, ...]:
     parsed: list[str] = []
     for value in values:
@@ -47,9 +42,9 @@ def _parse_origins(values: tuple[str, ...]) -> tuple[str, ...]:
 def _firebase_config() -> dict[str, str]:
     """Collect the public Firebase web configuration from the environment.
 
-    These values are browser identifiers, not secrets, but they are kept out of
-    source control so that a key can be rotated or replaced without a code
-    change, and so that the repository never carries deployment credentials.
+    These values are public browser identifiers, not database credentials.
+    Runtime environment settings can override the identifiers shown in the
+    example configuration without changing the application code.
     """
     mapping = {
         "apiKey": "FIREBASE_API_KEY",
@@ -105,8 +100,7 @@ class Config:
     environment: str
     debug: bool
     testing: bool
-    mongo_uri: str
-    mongo_db_name: str
+    database_url: str
     jwt_secret: str
     jwt_ttl_minutes: int
     cookie_secure: bool
@@ -132,7 +126,7 @@ class Config:
     def from_env(cls, overrides: dict | None = None) -> "Config":
         environment = os.getenv("ENVIRONMENT", "development").strip().lower()
         debug_requested = _bool("FLASK_DEBUG", False)
-        mongo_uri = os.getenv("MONGO_URI", "").strip()
+        database_url = os.getenv("DATABASE_URL", "").strip()
         jwt_secret = os.getenv("JWT_SECRET", "").strip()
         cors_origins = _parse_origins(_csv("CORS_ALLOWED_ORIGINS"))
         camera_streams = _parse_camera_streams(os.getenv("CAMERA_STREAM_URLS", ""))
@@ -141,8 +135,7 @@ class Config:
             environment=environment,
             debug=debug_requested and environment == "development",
             testing=_bool("TESTING", False),
-            mongo_uri=mongo_uri,
-            mongo_db_name=os.getenv("MONGO_DB_NAME", "").strip() or _db_name_from_uri(mongo_uri),
+            database_url=database_url,
             jwt_secret=jwt_secret,
             jwt_ttl_minutes=_int("JWT_TTL_MINUTES", 15),
             cookie_secure=_bool("COOKIE_SECURE", environment == "production"),
@@ -175,11 +168,24 @@ class Config:
         return cfg
 
     def validate(self) -> None:
-        if not self.mongo_uri:
-            raise RuntimeError("MONGO_URI is required")
-        allowed_uri_prefixes = ("mongodb://", "mongodb+srv://", "mongomock://")
-        if not self.mongo_uri.startswith(allowed_uri_prefixes):
-            raise RuntimeError("MONGO_URI has an unsupported scheme")
+        if not self.database_url:
+            raise RuntimeError("DATABASE_URL is required")
+        try:
+            parts = urlparse(self.database_url)
+            if parts.scheme not in {"postgresql", "postgres", "sqlite"}:
+                raise RuntimeError("DATABASE_URL has an unsupported scheme")
+            if parts.scheme == "sqlite":
+                if self.environment == "production" or self.database_url != "sqlite:///:memory:":
+                    raise RuntimeError("SQLite is restricted to disposable in-memory previews and tests")
+            else:
+                if not parts.hostname or not parts.path.lstrip("/"):
+                    raise RuntimeError("DATABASE_URL must include a host and database")
+                _ = parts.port  # reject malformed ports without leaking the URL
+                modes = parse_qs(parts.query, keep_blank_values=True).get("sslmode", [])
+                if self.environment == "production" and modes != ["verify-full"]:
+                    raise RuntimeError("Production DATABASE_URL must use sslmode=verify-full")
+        except ValueError:
+            raise RuntimeError("DATABASE_URL is malformed; URL-encode credentials") from None
         if not self.jwt_secret:
             raise RuntimeError("JWT_SECRET is required")
         if self.environment == "production":
