@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
+
 from .firebase_auth import (
     PORTAL_APPROVAL_CLAIM,
     PROVIDER_GOOGLE,
@@ -95,9 +97,22 @@ def resolve_identity(
                 "Ask the transport office to add it to the access list.",
                 status=403,
             )
-        user = _create_user(db, email, provider, default_role)
-        _record_provider(db, user, provider, firebase_uid(claims))
-        return user, True
+        user, created = _create_or_get_user(db, email, provider, default_role)
+        if not user.get("active", True):
+            raise AccessDenied(
+                "This account has been deactivated. Contact the transport office.",
+                status=403,
+            )
+        bound_uid = user.get("firebase_uid")
+        incoming_uid = firebase_uid(claims)
+        if bound_uid and incoming_uid and bound_uid != incoming_uid:
+            raise AccessDenied(
+                "This email is already bound to a different Firebase account. "
+                "Contact the transport office to reset the link.",
+                status=403,
+            )
+        _record_provider(db, user, provider, incoming_uid)
+        return user, created
 
     if not user.get("active", True):
         raise AccessDenied(
@@ -118,7 +133,7 @@ def resolve_identity(
     return user, False
 
 
-def _create_user(db, email: str, provider: str, default_role: str) -> dict[str, Any]:
+def _create_or_get_user(db, email: str, provider: str, default_role: str) -> tuple[dict[str, Any], bool]:
     from .auth import hash_password  # noqa: F401  (kept for symmetry / future use)
     from .services import naive_now
 
@@ -134,9 +149,15 @@ def _create_user(db, email: str, provider: str, default_role: str) -> dict[str, 
         "created_at": now,
         "updated_at": now,
     }
-    result = db.users.insert_one(document)
-    document["_id"] = result.inserted_id
-    return document
+    try:
+        result = db.users.insert_one(document)
+        document["_id"] = result.inserted_id
+        return document, True
+    except IntegrityError:
+        existing = find_user(db, email)
+        if existing is None:
+            raise
+        return existing, False
 
 
 def _record_provider(db, user: dict[str, Any], provider: str, uid: str) -> None:

@@ -448,3 +448,22 @@ def test_head_admin_can_read_its_own_profile(client, users):
     response = client.get("/api/auth/me")
     assert response.status_code == 200
     assert response.get_json()["user"]["email"] == HEAD_ADMIN_EMAIL
+
+
+def test_concurrent_auto_provision_duplicate_key_recovers_cleanly(db, monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+
+    email = "raced.teacher@srmtrp.edu.in"
+    claims = _claims(email, PROVIDER_PASSWORD, uid="uid-race-1")
+    orig_insert_one = db.users.insert_one
+
+    def racing_insert_one(doc):
+        # Simulate another worker inserting the user row just before our insert.
+        orig_insert_one(dict(doc))
+        raise IntegrityError("duplicate", {}, Exception("unique violation"))
+
+    monkeypatch.setattr(db.users, "insert_one", racing_insert_one)
+    user, created = resolve_identity(db, claims, auto_provision=True)
+    assert created is False
+    assert user["email"] == email
+    assert db.users.find_one({"email": email})["firebase_uid"] == "uid-race-1"

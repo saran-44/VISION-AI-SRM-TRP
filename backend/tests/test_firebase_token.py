@@ -217,3 +217,16 @@ def test_provider_and_identity_helpers():
     assert identity_of(claims) == {"google.com": "a@srmtrp.edu.in"}
     assert provider_of({}) == "unknown"
     assert identity_of({"firebase": {"identities": "not-a-dict"}}) == {}
+
+
+def test_jwks_client_uses_5s_timeout(monkeypatch):
+    monkeypatch.setattr(firebase_auth, "_jwk_client", None)
+    client = firebase_auth._signing_key_client()
+    assert client.timeout == 5
+
+
+def test_empty_or_whitespace_sub_is_rejected(stub_keys, keypair):
+    for bad_sub in ("", "   "):
+        token = _token(keypair, sub=bad_sub)
+        with pytest.raises(FirebaseAuthError, match="subject"):
+            verify_id_token(token, PROJECT_ID)

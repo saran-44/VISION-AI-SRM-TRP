@@ -64,7 +64,7 @@ def _signing_key_client() -> PyJWKClient:
         if _jwk_client is None:
             # lifespan caches the key set for five minutes, which is enough to
             # pick up Google's key rotation without hammering the endpoint.
-            _jwk_client = PyJWKClient(GOOGLE_SECURE_TOKEN_JWKS, lifespan=300)
+            _jwk_client = PyJWKClient(GOOGLE_SECURE_TOKEN_JWKS, lifespan=300, timeout=5)
         return _jwk_client
 
 
@@ -97,25 +97,29 @@ def verify_id_token(id_token: str, project_id: str) -> dict[str, Any]:
             "The authentication service is temporarily unavailable.", status=503
         ) from exc
 
+    expected_issuer = f"https://securetoken.google.com/{project_id}"
     try:
         claims = jwt.decode(
             id_token,
             signing_key.key,
             algorithms=["RS256"],
             audience=project_id,
-            options={"require": ["exp", "iat", "sub", "aud"]},
+            issuer=expected_issuer,
+            options={"require": ["exp", "iat", "sub", "aud", "iss"]},
             leeway=30,
         )
     except jwt.ExpiredSignatureError as exc:
         raise FirebaseAuthError("The Firebase session has expired. Please sign in again.") from exc
     except jwt.InvalidAudienceError as exc:
         raise FirebaseAuthError("This token was not issued for this application.") from exc
+    except jwt.InvalidIssuerError as exc:
+        raise FirebaseAuthError("This token was not issued by this Firebase project.") from exc
     except jwt.PyJWTError as exc:
         raise FirebaseAuthError("The Firebase ID token is not valid.") from exc
 
-    expected_issuer = f"https://securetoken.google.com/{project_id}"
-    if claims.get("iss") != expected_issuer:
-        raise FirebaseAuthError("This token was not issued by this Firebase project.")
+    sub = claims.get("sub")
+    if not isinstance(sub, str) or not sub.strip():
+        raise FirebaseAuthError("The Firebase ID token has an empty subject.")
 
     return claims
 
