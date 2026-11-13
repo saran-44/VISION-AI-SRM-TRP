@@ -7,6 +7,13 @@ service **`srm-trp-transport`**, and initial administrator
 data** and **Firebase Authentication for sign-in**. It does not use Supabase
 Auth or a Supabase service-role key.
 
+> **First deployment?** If Supabase network restrictions are disabled (the
+> default) and you want the shortest route, start with
+> [`DEPLOY_GITBASH_QUICKSTART.md`](DEPLOY_GITBASH_QUICKSTART.md). It skips the
+> Direct VPC egress and Cloud NAT steps below and uses
+> `deploy/cloudbuild.quick.yaml`. Come back to this runbook when you tighten
+> networking, IAM, secret rotation or rollback.
+
 > **Before starting**
 >
 > - No actual Supabase project, Firebase sign-in, Hosting rewrite or Cloud Run

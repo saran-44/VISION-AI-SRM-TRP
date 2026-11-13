@@ -1,0 +1,89 @@
+# Render Blueprint — free-tier backend for the SRM TRP Transport portal.
+#
+# The Flask API and the static frontend are served by ONE service, because
+# backend/app.py already serves frontend/ (index.html, assets, js, vendor and
+# the protected pages). That removes the need for Firebase Hosting rewrites,
+# which can only target Cloud Run or Cloud Functions.
+#
+#   https://<service>.onrender.com/          -> login page
+#   https://<service>.onrender.com/dashboard -> protected page (session required)
+#
+# Supabase remains the database; Firebase remains the sign-in provider.
+# See docs/DEPLOY_RENDER_FREE.md for the ordered steps.
+#
+# Values marked `sync: false` are prompted for (or pasted) in the Render
+# dashboard and are never stored in Git.
+
+services:
+  - type: web
+    name: srm-trp-transport
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./deploy/render/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      # Render terminates TLS, so the session cookie must be Secure.
+      - key: COOKIE_SECURE
+        value: "true"
+      # Render appends X-Forwarded-For/Proto. Without this, login throttling and
+      # the audit log would see the proxy address instead of the client.
+      - key: TRUST_PROXY_HEADERS
+        value: "true"
+      - key: APP_TIMEZONE
+        value: Asia/Kolkata
+      - key: JWT_TTL_MINUTES
+        value: "15"
+      - key: LOGIN_RATE_LIMIT
+        value: 5 per minute;20 per hour
+      - key: RATELIMIT_ENABLED
+        value: "true"
+      # In-memory limiter is per instance; fine for a single free instance.
+      - key: RATELIMIT_STORAGE_URI
+        value: memory://
+      - key: OCR_CONFIDENCE_THRESHOLD
+        value: "0.75"
+      - key: OVERSTAY_HOURS
+        value: "12"
+      # Firebase web identifiers are public, not secrets.
+      - key: FIREBASE_PROJECT_ID
+        value: vision-ai-srmtrp
+      - key: FIREBASE_AUTH_DOMAIN
+        value: vision-ai-srmtrp.firebaseapp.com
+      - key: FIREBASE_STORAGE_BUCKET
+        value: vision-ai-srmtrp.firebasestorage.app
+      - key: FIREBASE_MESSAGING_SENDER_ID
+        value: "235811571442"
+      - key: FIREBASE_APP_ID
+        value: 1:235811571442:web:342e488e0ac2ee75b0f26b
+      - key: FIREBASE_MEASUREMENT_ID
+        value: G-S4HS9TGV4H
+      - key: FIREBASE_ALLOWED_PROVIDERS
+        value: password,google.com
+      # Every account must be granted access explicitly from the CLI or the
+      # Manage page. Firebase self-sign-up alone grants nothing.
+      - key: FIREBASE_AUTO_PROVISION
+        value: "false"
+      - key: FIREBASE_DEFAULT_ROLE
+        value: transport_office
+      - key: LEGACY_PASSWORD_LOGIN_ENABLED
+        value: "false"
+      # ---------------------------------------------------------------- secrets
+      # Supabase session-pooler URL. Must end with ?sslmode=verify-full.
+      - key: DATABASE_URL
+        sync: false
+      # base64 of the downloaded Supabase CA certificate (single line):
+      #   base64 -w0 prod-ca-2021.crt
+      # deploy/render/entrypoint.sh decodes it and sets PGSSLROOTCERT.
+      - key: PGSSLROOTCERT_B64
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: DEVICE_API_KEYS
+        sync: false
+      - key: FIREBASE_API_KEY
+        sync: false

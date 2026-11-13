@@ -106,6 +106,11 @@ class Config:
     cookie_secure: bool
     cors_allowed_origins: tuple[str, ...] = field(default_factory=tuple)
     device_api_keys: tuple[str, ...] = field(default_factory=tuple)
+    # Set only when the app runs behind a proxy that appends (does not
+    # forward) X-Forwarded-* headers, e.g. Render, Railway or an nginx
+    # reverse proxy. Without it, login throttling and the audit log would key
+    # on the proxy's address instead of the real client.
+    trust_proxy_headers: bool = False
     login_rate_limit: str = "5 per minute;20 per hour"
     rate_limit_enabled: bool = True
     rate_limit_storage_uri: str = "memory://"
@@ -141,6 +146,7 @@ class Config:
             cookie_secure=_bool("COOKIE_SECURE", environment == "production"),
             cors_allowed_origins=cors_origins,
             device_api_keys=_csv("DEVICE_API_KEYS"),
+            trust_proxy_headers=_bool("TRUST_PROXY_HEADERS", False),
             login_rate_limit=os.getenv("LOGIN_RATE_LIMIT", "5 per minute;20 per hour"),
             rate_limit_enabled=_bool("RATELIMIT_ENABLED", True),
             rate_limit_storage_uri=os.getenv("RATELIMIT_STORAGE_URI", "memory://"),
