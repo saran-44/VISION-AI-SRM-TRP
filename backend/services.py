@@ -407,21 +407,8 @@ def compute_analytics(db, analytics_filter: AnalyticsFilter, config: Config) -> 
     )
     query = build_event_query(event_filter, config)
     query["timestamp"] = {"$gte": start_utc, "$lt": end_utc}
-    events = list(db.events.find(query).sort([("timestamp", ASCENDING)]).limit(50_000))
-
-    def hour_key(timestamp: datetime) -> datetime:
-        """Bucket key (UTC) for a timestamp, grouped by campus-local hour."""
-        local = timestamp.replace(tzinfo=timezone.utc).astimezone(zone)
-        local = local.replace(minute=0, second=0, microsecond=0)
-        return local.astimezone(timezone.utc).replace(tzinfo=None)
-
-    hour_counts: Counter[datetime] = Counter()
-    gate_counts: Counter[str] = Counter()
-    bus_counts: Counter[str] = Counter()
-    for event in events:
-        hour_counts[hour_key(event["timestamp"])] += 1
-        gate_counts[event.get("gate", "Unknown")] += 1
-        bus_counts[event.get("bus_number", "Unknown")] += 1
+    agg = db.aggregate_analytics(query, config.app_timezone)
+    hour_counts = agg["hour_counts"]
 
     per_hour: list[dict[str, Any]] = []
     bucket_local = start_local
@@ -440,37 +427,75 @@ def compute_analytics(db, analytics_filter: AnalyticsFilter, config: Config) -> 
         "range": {"from": iso_utc(start_utc), "to": iso_utc(end_utc), "timezone": config.app_timezone},
         "direction": analytics_filter.direction,
         "per_hour": per_hour,
-        "per_gate": [
-            {"gate": gate, "count": count} for gate, count in gate_counts.most_common(12)
-        ],
-        "per_bus": [
-            {"bus_number": bus, "count": count} for bus, count in bus_counts.most_common(12)
-        ],
-        "totals": {
-            "events": len(events),
-            "gates": len(gate_counts),
-            "buses": len(bus_counts),
-        },
+        "per_gate": agg["per_gate"],
+        "per_bus": agg["per_bus"],
+        "totals": agg["totals"],
     }
 
-def events_for_export(db, event_filter: EventFilter, config: Config, *, max_rows: int = 10_000):
-    docs = query_events(db, event_filter, config, limit=max_rows)
-    rows: list[dict[str, Any]] = []
-    for doc in docs:
-        public = public_doc(doc)
-        rows.append(
-            {
-                "timestamp": public.get("timestamp", ""),
-                "bus_number": public.get("bus_number", ""),
-                "direction": public.get("direction", ""),
-                "gate": public.get("gate", ""),
-                "camera_id": public.get("camera_id", ""),
-                "confidence": public.get("confidence", ""),
-                "flagged": "yes" if public.get("flagged") else "no",
-                "flag_reasons": ", ".join(public.get("flag_reasons", [])),
-            }
+
+def _export_row(doc: dict[str, Any]) -> dict[str, Any]:
+    public = public_doc(doc)
+    return {
+        "timestamp": public.get("timestamp", ""),
+        "bus_number": public.get("bus_number", ""),
+        "direction": public.get("direction", ""),
+        "gate": public.get("gate", ""),
+        "camera_id": public.get("camera_id", ""),
+        "confidence": public.get("confidence", ""),
+        "flagged": "yes" if public.get("flagged") else "no",
+        "flag_reasons": ", ".join(public.get("flag_reasons", [])),
+    }
+
+
+def is_export_truncated(
+    db,
+    event_filter: EventFilter,
+    config: Config,
+    *,
+    max_rows: int | None = None,
+) -> tuple[bool, int]:
+    limit = max_rows if max_rows is not None else config.export_max_rows
+    query = build_event_query(event_filter, config)
+    return db.events.count_documents_capped(query, limit + 1) > limit, limit
+
+
+def iter_export_rows(
+    db,
+    event_filter: EventFilter,
+    config: Config,
+    *,
+    max_rows: int | None = None,
+    batch_size: int = 500,
+):
+    limit = max_rows if max_rows is not None else config.export_max_rows
+    query = build_event_query(event_filter, config)
+    projection = {field: 1 for field in EXPORT_FIELDS}
+    offset = 0
+    while offset < limit:
+        chunk_limit = min(batch_size, limit - offset)
+        batch = list(
+            db.events.find(query, projection)
+            .sort(event_sort())
+            .skip(offset)
+            .limit(chunk_limit)
         )
-    return rows
+        if not batch:
+            break
+        for doc in batch:
+            yield _export_row(doc)
+        if len(batch) < chunk_limit:
+            break
+        offset += len(batch)
+
+
+def events_for_export(
+    db,
+    event_filter: EventFilter,
+    config: Config,
+    *,
+    max_rows: int | None = None,
+):
+    return list(iter_export_rows(db, event_filter, config, max_rows=max_rows))
 
 
 def safe_cell(value: Any) -> str:
@@ -480,27 +505,44 @@ def safe_cell(value: Any) -> str:
     return text
 
 
-def csv_bytes(rows: list[dict[str, Any]]) -> bytes:
+def iter_csv_chunks(rows, *, chunk_rows: int = 250):
     buffer = io.StringIO(newline="")
     writer = csv.DictWriter(buffer, fieldnames=EXPORT_FIELDS, quoting=csv.QUOTE_MINIMAL)
     writer.writeheader()
+    yield ("\ufeff" + buffer.getvalue()).encode("utf-8")
+    buffer.seek(0)
+    buffer.truncate(0)
+
+    pending = 0
     for row in rows:
         writer.writerow({key: safe_cell(row.get(key, "")) for key in EXPORT_FIELDS})
-    return buffer.getvalue().encode("utf-8-sig")
+        pending += 1
+        if pending >= chunk_rows:
+            yield buffer.getvalue().encode("utf-8")
+            buffer.seek(0)
+            buffer.truncate(0)
+            pending = 0
+    if pending:
+        yield buffer.getvalue().encode("utf-8")
 
 
-def xlsx_bytes(rows: list[dict[str, Any]]) -> bytes:
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Bus Events"
-    sheet.append(EXPORT_FIELDS)
-    for row in rows:
-        sheet.append([safe_cell(row.get(key, "")) for key in EXPORT_FIELDS])
+def csv_bytes(rows: list[dict[str, Any]]) -> bytes:
+    return b"".join(iter_csv_chunks(rows))
+
+
+def xlsx_bytes(rows) -> bytes:
+    workbook = Workbook(write_only=True)
+    sheet = workbook.create_sheet("Bus Events")
     sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = sheet.dimensions
     widths = {"A": 22, "B": 16, "C": 10, "D": 18, "E": 16, "F": 12, "G": 10, "H": 36}
     for column, width in widths.items():
         sheet.column_dimensions[column].width = width
+    sheet.append(EXPORT_FIELDS)
+    row_count = 1
+    for row in rows:
+        sheet.append([safe_cell(row.get(key, "")) for key in EXPORT_FIELDS])
+        row_count += 1
+    sheet.auto_filter.ref = f"A1:H{row_count}"
     buffer = io.BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()

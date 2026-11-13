@@ -173,6 +173,7 @@ class Config:
     event_rate_limit: str = "120 per minute"
     event_dedup_window_seconds: int = 30
     stats_cache_seconds: int = 5
+    export_max_rows: int = 10_000
 
     @classmethod
     def from_env(cls, overrides: dict | None = None) -> "Config":
@@ -239,6 +240,7 @@ class Config:
             event_rate_limit=os.getenv("EVENT_RATE_LIMIT", "120 per minute"),
             event_dedup_window_seconds=_int("EVENT_DEDUP_WINDOW_SECONDS", 30),
             stats_cache_seconds=_int("STATS_CACHE_SECONDS", 5),
+            export_max_rows=_int("EXPORT_MAX_ROWS", 10_000),
         )
         if overrides:
             cfg = replace(cfg, **overrides)
@@ -315,6 +317,8 @@ class Config:
             raise RuntimeError("EVENT_DEDUP_WINDOW_SECONDS must be between 0 and 3600")
         if not 0 <= self.stats_cache_seconds <= 60:
             raise RuntimeError("STATS_CACHE_SECONDS must be between 0 and 60")
+        if not 100 <= self.export_max_rows <= 100_000:
+            raise RuntimeError("EXPORT_MAX_ROWS must be between 100 and 100000")
         known_providers = {"password", "google.com"}
         unknown = set(self.firebase_allowed_providers) - known_providers
         if unknown:

@@ -657,3 +657,100 @@ def test_detection_client_retries_with_stable_idempotency_key_on_503_and_stops_o
     )
     assert bad_res.status_code == 400
     assert calls_400[0] == 1
+
+
+def test_export_sets_truncation_headers_before_streaming_csv_and_xlsx(db, users):
+    import io
+    from openpyxl import load_workbook
+    from backend.app import create_app
+    from backend.auth import hash_password
+    from backend.tests.conftest import HEAD_ADMIN_EMAIL, HEAD_ADMIN_PASSWORD, build_config, login
+
+    now = naive_now()
+    db.events.insert_many([
+        {
+            "bus_number": f"BUS-{i:03d}",
+            "direction": "IN" if i % 2 == 0 else "OUT",
+            "gate": "Gate 1",
+            "camera_id": "cam-1",
+            "confidence": 0.9,
+            "timestamp": now - timedelta(minutes=i),
+            "created_at": now,
+            "flag_reasons": [],
+            "flagged": False,
+        }
+        for i in range(105)
+    ])
+
+    app = create_app(build_config(export_max_rows=100), database_engine=db.engine)
+    app.config.update(TESTING=True)
+    client = app.test_client()
+    login(client, HEAD_ADMIN_EMAIL, HEAD_ADMIN_PASSWORD)
+
+    csv_stream = client.get("/api/export/events.csv", buffered=False)
+    assert csv_stream.status_code == 200
+    # G-12: headers must already be set before consuming the stream.
+    assert csv_stream.headers["X-Export-Truncated"] == "true"
+    assert csv_stream.headers["X-Export-Limit"] == "100"
+    csv_lines = [line for line in csv_stream.get_data(as_text=True).splitlines() if line]
+    assert len(csv_lines) == 101  # 1 header + 100 rows
+
+    xlsx_res = client.get("/api/export/events.xlsx")
+    assert xlsx_res.status_code == 200
+    assert xlsx_res.headers["X-Export-Truncated"] == "true"
+    assert xlsx_res.headers["X-Export-Limit"] == "100"
+    wb = load_workbook(io.BytesIO(xlsx_res.data))
+    ws = wb["Bus Events"]
+    assert ws.freeze_panes == "A2"
+    assert ws.auto_filter.ref == "A1:H101"
+    assert ws.max_row == 101
+
+    # Filtered subset under limit reports X-Export-Truncated: false.
+    under_res = client.get("/api/export/events.csv?bus_number=BUS-001", buffered=False)
+    assert under_res.headers["X-Export-Truncated"] == "false"
+    under_res.close()
+
+
+def test_analytics_sql_aggregation_buckets_by_local_hour_and_gate(client, db, users):
+    now = naive_now().replace(minute=15, second=0, microsecond=0)
+    db.events.insert_many([
+        {
+            "bus_number": "BUS-A",
+            "direction": "IN",
+            "gate": "Gate 1",
+            "camera_id": "cam-1",
+            "confidence": 0.9,
+            "timestamp": now,
+            "created_at": now,
+            "flag_reasons": [],
+            "flagged": False,
+        },
+        {
+            "bus_number": "BUS-A",
+            "direction": "IN",
+            "gate": "Gate 1",
+            "camera_id": "cam-1",
+            "confidence": 0.9,
+            "timestamp": now - timedelta(hours=1),
+            "created_at": now,
+            "flag_reasons": [],
+            "flagged": False,
+        },
+        {
+            "bus_number": "BUS-B",
+            "direction": "IN",
+            "gate": "Gate 2",
+            "camera_id": "cam-2",
+            "confidence": 0.9,
+            "timestamp": now,
+            "created_at": now,
+            "flag_reasons": [],
+            "flagged": False,
+        },
+    ])
+    login_head_admin(client, users)
+    res = client.get("/api/analytics?hours=24&direction=IN").get_json()
+    assert res["totals"] == {"events": 3, "gates": 2, "buses": 2}
+    assert res["per_gate"][0] == {"gate": "Gate 1", "count": 2}
+    assert res["per_bus"][0] == {"bus_number": "BUS-A", "count": 2}
+    assert sum(item["count"] for item in res["per_hour"]) == 3

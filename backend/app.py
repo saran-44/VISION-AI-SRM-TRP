@@ -62,6 +62,9 @@ from .services import (
     ingest_event,
     ingest_event_with_status,
     invalidate_stats_cache,
+    is_export_truncated,
+    iter_csv_chunks,
+    iter_export_rows,
     naive_now,
     record_audit,
     sync_bus_states_if_needed,
@@ -888,9 +891,16 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         event_filter, error = validate(EventFilter, source="args")
         if error:
             return error
-        rows = events_for_export(db, event_filter, config)
-        response = Response(csv_bytes(rows), mimetype="text/csv; charset=utf-8")
+        truncated, max_rows = is_export_truncated(db, event_filter, config)
+        response = Response(
+            stream_with_context(
+                iter_csv_chunks(iter_export_rows(db, event_filter, config, max_rows=max_rows))
+            ),
+            mimetype="text/csv; charset=utf-8",
+        )
         response.headers["Content-Disposition"] = 'attachment; filename="bus-events.csv"'
+        response.headers["X-Export-Truncated"] = "true" if truncated else "false"
+        response.headers["X-Export-Limit"] = str(max_rows)
         return response
 
     @app.get("/api/export/events.xlsx")
@@ -899,12 +909,14 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         event_filter, error = validate(EventFilter, source="args")
         if error:
             return error
-        rows = events_for_export(db, event_filter, config)
+        truncated, max_rows = is_export_truncated(db, event_filter, config)
         response = Response(
-            xlsx_bytes(rows),
+            xlsx_bytes(iter_export_rows(db, event_filter, config, max_rows=max_rows)),
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
         response.headers["Content-Disposition"] = 'attachment; filename="bus-events.xlsx"'
+        response.headers["X-Export-Truncated"] = "true" if truncated else "false"
+        response.headers["X-Export-Limit"] = str(max_rows)
         return response
 
     @app.get("/api/stream")

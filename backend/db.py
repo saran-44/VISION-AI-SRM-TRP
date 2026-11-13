@@ -266,6 +266,17 @@ class TableStore:
         with self.guard(), self.engine.connect() as conn:
             return conn.execute(stmt).scalar_one()
 
+    def count_documents_capped(self, query, limit: int) -> int:
+        sub = (
+            select(self.table.c._id)
+            .where(_predicate(self.table, query, self.engine.dialect.name))
+            .limit(limit)
+            .subquery()
+        )
+        stmt = select(func.count()).select_from(sub)
+        with self.guard(), self.engine.connect() as conn:
+            return conn.execute(stmt).scalar_one()
+
     def insert_one(self, document):
         data = dict(document)
         data.setdefault("_id", new_id())
@@ -384,6 +395,84 @@ class Database:
             )
             with self.bus_states.guard(), self.engine.begin() as conn:
                 conn.execute(fallback_stmt)
+
+    def aggregate_analytics(
+        self,
+        query: dict[str, Any],
+        timezone_name: str,
+        *,
+        gate_limit: int = 12,
+        bus_limit: int = 12,
+    ) -> dict[str, Any]:
+        """Compute analytics totals, top gates/buses, and hourly buckets using SQL."""
+        from collections import Counter
+        from datetime import timezone as dt_timezone
+        from zoneinfo import ZoneInfo
+
+        dialect = self.engine.dialect.name
+        pred = _predicate(events, query, dialect)
+        totals_stmt = select(
+            func.count().label("events"),
+            func.count(func.distinct(events.c.gate)).label("gates"),
+            func.count(func.distinct(events.c.bus_number)).label("buses"),
+        ).where(pred)
+        gate_stmt = (
+            select(events.c.gate, func.count().label("cnt"))
+            .where(pred)
+            .group_by(events.c.gate)
+            .order_by(func.count().desc(), events.c.gate.asc())
+            .limit(gate_limit)
+        )
+        bus_stmt = (
+            select(events.c.bus_number, func.count().label("cnt"))
+            .where(pred)
+            .group_by(events.c.bus_number)
+            .order_by(func.count().desc(), events.c.bus_number.asc())
+            .limit(bus_limit)
+        )
+
+        hour_counts: dict[datetime, int] = {}
+        with self.events.guard(), self.engine.connect() as conn:
+            totals_row = conn.execute(totals_stmt).mappings().one()
+            gate_rows = conn.execute(gate_stmt).mappings().all()
+            bus_rows = conn.execute(bus_stmt).mappings().all()
+            if dialect == "postgresql":
+                local_ts = func.timezone(timezone_name, func.timezone("UTC", events.c.timestamp))
+                local_hour = func.date_trunc("hour", local_ts)
+                utc_bucket = func.timezone("UTC", func.timezone(timezone_name, local_hour)).label("hour")
+                hour_stmt = (
+                    select(utc_bucket, func.count().label("cnt"))
+                    .where(pred)
+                    .group_by(utc_bucket)
+                    .order_by(utc_bucket.asc())
+                )
+                for row in conn.execute(hour_stmt).mappings().all():
+                    hour_counts[utc_naive(row["hour"])] = int(row["cnt"])
+            else:
+                zone = ZoneInfo(timezone_name)
+                counter: Counter[datetime] = Counter()
+                ts_stmt = select(events.c.timestamp).where(pred)
+                for (ts,) in conn.execute(ts_stmt):
+                    local = ts.replace(tzinfo=dt_timezone.utc).astimezone(zone)
+                    local = local.replace(minute=0, second=0, microsecond=0)
+                    counter[local.astimezone(dt_timezone.utc).replace(tzinfo=None)] += 1
+                hour_counts = dict(counter)
+
+        return {
+            "hour_counts": hour_counts,
+            "per_gate": [
+                {"gate": row["gate"] or "Unknown", "count": int(row["cnt"])} for row in gate_rows
+            ],
+            "per_bus": [
+                {"bus_number": row["bus_number"] or "Unknown", "count": int(row["cnt"])}
+                for row in bus_rows
+            ],
+            "totals": {
+                "events": int(totals_row["events"] or 0),
+                "gates": int(totals_row["gates"] or 0),
+                "buses": int(totals_row["buses"] or 0),
+            },
+        }
 
 
 def get_database(config: Config, engine=None):
