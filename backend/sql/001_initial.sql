@@ -26,6 +26,7 @@ CREATE TABLE transport_portal.users (
 CREATE TABLE transport_portal.buses (
     _id varchar(24) PRIMARY KEY,
     bus_number varchar(20) NOT NULL UNIQUE,
+    plate_key varchar(20),
     registration_number text,
     route text,
     capacity integer,
@@ -88,6 +89,7 @@ CREATE TABLE transport_portal.bus_states (
 );
 CREATE INDEX drivers_name ON transport_portal.drivers (name);
 CREATE INDEX drivers_bus_number ON transport_portal.drivers (bus_number);
+CREATE INDEX buses_plate_key ON transport_portal.buses (plate_key);
 CREATE INDEX events_timestamp ON transport_portal.events (timestamp DESC, _id DESC);
 CREATE INDEX events_bus_timestamp ON transport_portal.events (bus_number, timestamp DESC);
 CREATE INDEX events_gate_direction_timestamp ON transport_portal.events (gate, direction, timestamp DESC);

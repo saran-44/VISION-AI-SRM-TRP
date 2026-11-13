@@ -9,7 +9,7 @@ from datetime import timedelta
 from .auth import hash_password
 from .config import Config
 from .db import get_database
-from .schemas import EventCreate
+from .schemas import EventCreate, plate_key
 from .services import aware_now, ingest_event, naive_now
 
 DEMO_BUSES = [
@@ -140,7 +140,7 @@ def seed_demo_data(
     )
 
     for bus in DEMO_BUSES:
-        db.buses.insert_one({**bus, "demo": True, "created_at": now, "updated_at": now})
+        db.buses.insert_one({**bus, "plate_key": plate_key(bus["bus_number"]), "demo": True, "created_at": now, "updated_at": now})
     for driver in DEMO_DRIVERS:
         db.drivers.insert_one({**driver, "demo": True, "created_at": now, "updated_at": now})
 

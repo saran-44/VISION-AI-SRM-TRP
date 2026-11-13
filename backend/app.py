@@ -44,6 +44,7 @@ from .schemas import (
     FirebaseTokenSchema,
     LoginSchema,
     SearchFilter,
+    plate_key,
 )
 from .services import (
     camera_config,
@@ -900,6 +901,7 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         if error:
             return error
         data = database_payload(payload)
+        data["plate_key"] = plate_key(data["bus_number"])
         data.update({"created_at": naive_now(), "updated_at": naive_now(), "demo": False})
         try:
             result = db.buses.insert_one(data)
@@ -932,6 +934,8 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         changes = database_payload(payload, exclude_unset=True)
         if not changes:
             return jsonify({"error": "No fields supplied"}), 400
+        if "bus_number" in changes:
+            changes["plate_key"] = plate_key(changes["bus_number"])
         changes["updated_at"] = naive_now()
         try:
             db.buses.update_one({"_id": oid}, {"$set": changes})

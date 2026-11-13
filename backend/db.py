@@ -57,6 +57,7 @@ users = Table(
 )
 buses = Table(
     "buses", metadata, _id_column(), Column("bus_number", String(20), nullable=False, unique=True),
+    Column("plate_key", String(20)),
     Column("registration_number", Text), Column("route", Text), Column("capacity", Integer),
     Column("insurance_expiry", Text), Column("status", Text), Column("notes", Text),
     Column("demo", Boolean, nullable=False, default=False), *_timestamps(),
@@ -93,6 +94,7 @@ bus_states = Table(
     Column("updated_at", DateTime(), nullable=False),
 )
 Index("users_firebase_uid", users.c.firebase_uid)
+Index("buses_plate_key", buses.c.plate_key)
 Index("audit_collection_action_timestamp", audit_logs.c.collection, audit_logs.c.action, audit_logs.c.timestamp.desc())
 Index("bus_states_direction", bus_states.c.direction)
 Index("bus_states_updated_at", bus_states.c.updated_at)

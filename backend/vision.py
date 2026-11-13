@@ -285,8 +285,9 @@ def normalize_plate(text: str) -> str:
         return ""
     upper = text.upper().replace("\n", " ").strip()
     cleaned = PLATE_CLEAN_RE.sub("", upper)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -")
-    return cleaned
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ._-")
+    cleaned = re.sub(r"^[^A-Z0-9]+", "", cleaned)
+    return cleaned[:20].rstrip(" ._-")
 
 
 # --------------------------------------------------------------------------- #

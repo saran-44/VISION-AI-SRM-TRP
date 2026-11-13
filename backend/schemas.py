@@ -15,6 +15,11 @@ def normalize_bus_number(value: str) -> str:
     return re.sub(r"\s+", " ", value.strip().upper())
 
 
+def plate_key(value: str) -> str:
+    """Canonical alphanumeric comparison key for matching plate variants."""
+    return re.sub(r"[^A-Z0-9]", "", value.upper())
+
+
 def clean_text(value: str) -> str:
     value = value.strip()
     if CONTROL_RE.search(value):

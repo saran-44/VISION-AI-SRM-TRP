@@ -28,6 +28,16 @@ CREATE INDEX IF NOT EXISTS bus_states_direction
 CREATE INDEX IF NOT EXISTS bus_states_updated_at
     ON transport_portal.bus_states (updated_at);
 
+ALTER TABLE transport_portal.buses
+    ADD COLUMN IF NOT EXISTS plate_key varchar(20);
+
+UPDATE transport_portal.buses
+SET plate_key = regexp_replace(upper(bus_number), '[^A-Z0-9]', '', 'g')
+WHERE plate_key IS NULL;
+
+CREATE INDEX IF NOT EXISTS buses_plate_key
+    ON transport_portal.buses (plate_key);
+
 DO $$
 DECLARE api_role text;
 BEGIN

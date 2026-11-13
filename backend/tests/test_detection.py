@@ -463,3 +463,34 @@ def test_scan_and_event_rate_limits_return_429_keyed_by_device_key(db, monkeypat
     for _ in range(2):
         assert client.post("/api/events", headers={"X-Device-Key": DEVICE_KEY}, json=ev).status_code == 201
     assert client.post("/api/events", headers={"X-Device-Key": DEVICE_KEY}, json=ev).status_code == 429
+
+
+def test_normalize_plate_strips_leading_trailing_punctuation_and_caps_length():
+    from backend.vision import normalize_plate
+
+    assert normalize_plate("..-- TN 12\nAB 1234 __ ") == "TN 12 AB 1234"
+    assert normalize_plate("___---...") == ""
+    long_plate = "TN12AB12345678901234-EXTRA"
+    normalized = normalize_plate(long_plate)
+    assert len(normalized) == 20
+    assert normalized == "TN12AB12345678901234"
+    assert normalize_plate("TN12AB1234567890123-EXTRA") == "TN12AB1234567890123"
+
+
+def test_buses_plate_key_maintained_on_create_update_and_indexed(client, db, users):
+    from sqlalchemy import inspect
+
+    login_transport_office(client, users)
+    created = client.post("/api/buses", json={"bus_number": "TN 12 AB-1234", "capacity": 40})
+    assert created.status_code == 201
+    bus_id = created.get_json()["bus"]["id"]
+    assert db.buses.find_one({"_id": bus_id})["plate_key"] == "TN12AB1234"
+
+    updated = client.put(f"/api/buses/{bus_id}", json={"bus_number": "TN-12-AB.9999"})
+    assert updated.status_code == 200
+    assert db.buses.find_one({"_id": bus_id})["plate_key"] == "TN12AB9999"
+
+    inspector = inspect(db.engine)
+    schema = "transport_portal" if db.engine.dialect.name == "postgresql" else None
+    bus_indexes = {idx["name"] for idx in inspector.get_indexes("buses", schema=schema)}
+    assert "buses_plate_key" in bus_indexes
