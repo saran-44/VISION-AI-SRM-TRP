@@ -50,6 +50,23 @@ def _parse_origins(values: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(parsed))
 
 
+def _normalize_public_origin(raw: str) -> str:
+    value = raw.strip().rstrip("/")
+    if not value:
+        return ""
+    parts = urlparse(value)
+    if (
+        parts.scheme not in {"http", "https"}
+        or not parts.netloc
+        or "*" in value
+        or parts.path not in {"", "/"}
+        or parts.query
+        or parts.fragment
+    ):
+        raise RuntimeError("PUBLIC_ORIGIN must be a bare http:// or https:// origin with no path, query, or fragment")
+    return f"{parts.scheme}://{parts.netloc}"
+
+
 def _firebase_config() -> dict[str, str]:
     """Collect the public Firebase web configuration from the environment.
 
@@ -116,6 +133,7 @@ class Config:
     jwt_ttl_minutes: int
     cookie_secure: bool
     cors_allowed_origins: tuple[str, ...] = field(default_factory=tuple)
+    public_origin: str = ""
     device_api_keys: tuple[str, ...] = field(default_factory=tuple)
     # Set only when the app runs behind a proxy that appends (does not
     # forward) X-Forwarded-* headers, e.g. Render, Railway or an nginx
@@ -177,6 +195,7 @@ class Config:
             jwt_ttl_minutes=_int("JWT_TTL_MINUTES", 15),
             cookie_secure=_bool("COOKIE_SECURE", environment == "production"),
             cors_allowed_origins=cors_origins,
+            public_origin=os.getenv("PUBLIC_ORIGIN", "").strip().rstrip("/"),
             device_api_keys=_csv("DEVICE_API_KEYS"),
             trust_proxy_headers=_bool("TRUST_PROXY_HEADERS", False),
             trusted_proxy_count=_int("TRUSTED_PROXY_COUNT", 0),
@@ -246,6 +265,12 @@ class Config:
                 raise RuntimeError("JWT_SECRET must be a strong random value in production")
             if self.debug:
                 raise RuntimeError("Flask debug must be disabled in production")
+            if not (self.public_origin or self.cors_allowed_origins):
+                raise RuntimeError(
+                    "In production, set PUBLIC_ORIGIN or CORS_ALLOWED_ORIGINS for CSRF origin validation"
+                )
+        if self.public_origin:
+            _normalize_public_origin(self.public_origin)
         if not 0 < self.ocr_confidence_threshold < 1:
             raise RuntimeError("OCR_CONFIDENCE_THRESHOLD must be between 0 and 1")
         if self.overstay_hours <= 0:

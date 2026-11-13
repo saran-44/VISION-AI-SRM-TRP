@@ -94,6 +94,12 @@ bus_states = Table(
     Column("demo", Boolean, nullable=False, default=False),
     Column("updated_at", DateTime(), nullable=False),
 )
+revoked_tokens = Table(
+    "revoked_tokens", metadata, _id_column(),
+    Column("jti", String(64), nullable=False, unique=True),
+    Column("expires_at", DateTime(), nullable=False),
+    Column("revoked_at", DateTime(), nullable=False),
+)
 Index("users_firebase_uid", users.c.firebase_uid)
 Index("buses_plate_key", buses.c.plate_key)
 Index("events_idempotency_key", events.c.idempotency_key, unique=True)
@@ -101,7 +107,8 @@ Index("events_dedup", events.c.bus_number, events.c.direction, events.c.camera_i
 Index("audit_collection_action_timestamp", audit_logs.c.collection, audit_logs.c.action, audit_logs.c.timestamp.desc())
 Index("bus_states_direction", bus_states.c.direction)
 Index("bus_states_updated_at", bus_states.c.updated_at)
-TABLES = {table.name: table for table in (users, buses, drivers, events, audit_logs, bus_states)}
+Index("revoked_tokens_expires_at", revoked_tokens.c.expires_at)
+TABLES = {table.name: table for table in (users, buses, drivers, events, audit_logs, bus_states, revoked_tokens)}
 
 # IDs remain 24 hexadecimal characters, preserving URLs and allowing a future
 # explicit import of existing record IDs. They are identifiers, not secrets.

@@ -88,6 +88,12 @@ CREATE TABLE transport_portal.bus_states (
     demo boolean NOT NULL DEFAULT false,
     updated_at timestamp NOT NULL
 );
+CREATE TABLE transport_portal.revoked_tokens (
+    _id varchar(24) PRIMARY KEY,
+    jti varchar(64) NOT NULL UNIQUE,
+    expires_at timestamp NOT NULL,
+    revoked_at timestamp NOT NULL
+);
 CREATE INDEX drivers_name ON transport_portal.drivers (name);
 CREATE INDEX drivers_bus_number ON transport_portal.drivers (bus_number);
 CREATE INDEX buses_plate_key ON transport_portal.buses (plate_key);
@@ -105,6 +111,7 @@ CREATE INDEX users_firebase_uid ON transport_portal.users (firebase_uid) WHERE f
 CREATE INDEX audit_collection_action_timestamp ON transport_portal.audit_logs (collection, action, timestamp DESC);
 CREATE INDEX bus_states_direction ON transport_portal.bus_states (direction);
 CREATE INDEX bus_states_updated_at ON transport_portal.bus_states (updated_at);
+CREATE INDEX revoked_tokens_expires_at ON transport_portal.revoked_tokens (expires_at);
 -- Supabase may set table default privileges for its API roles. Deny those
 -- roles explicitly as well as PUBLIC; the Flask database login is granted
 -- only the privileges it needs by scripts/configure_supabase.py.

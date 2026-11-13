@@ -73,10 +73,35 @@ def test_production_defaults_cookie_secure_to_true(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/db?sslmode=verify-full")
     monkeypatch.setenv("JWT_SECRET", "a-very-long-secret-value-for-testing-1234")
+    monkeypatch.setenv("PUBLIC_ORIGIN", "https://transport.example.edu")
     monkeypatch.delenv("COOKIE_SECURE", raising=False)
     config = Config.from_env()
     assert config.cookie_secure is True
     assert config.debug is False
+
+
+def test_production_requires_public_origin_or_cors_allowed_origins():
+    with pytest.raises(RuntimeError, match="PUBLIC_ORIGIN"):
+        build_config(
+            environment="production",
+            database_url="postgresql://localhost/db?sslmode=verify-full",
+            cors_allowed_origins=(),
+            public_origin="",
+        ).validate()
+
+    with pytest.raises(RuntimeError, match="PUBLIC_ORIGIN"):
+        build_config(
+            environment="production",
+            database_url="postgresql://localhost/db?sslmode=verify-full",
+            public_origin="https://transport.example.edu/subpath",
+        ).validate()
+
+    build_config(
+        environment="production",
+        database_url="postgresql://localhost/db?sslmode=verify-full",
+        cors_allowed_origins=(),
+        public_origin="https://transport.example.edu",
+    ).validate()
 
 
 def test_private_tables_exist(db):

@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from .access import AccessDenied, resolve_identity
 from .auth import (
+    COOKIE_NAME,
     clear_auth_cookie,
     create_access_token,
     public_user,
@@ -28,6 +29,7 @@ from .auth import (
     require_device_key_or_roles,
     require_page_roles,
     require_roles,
+    revoke_access_token,
     set_auth_cookie,
     verify_password,
 )
@@ -132,6 +134,30 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         ):
             return "device:" + hashlib.sha256(provided.encode("utf-8")).hexdigest()[:16]
         return "ip:" + get_remote_address()
+
+    allowed_csrf_origins = set(config.cors_allowed_origins)
+    if config.public_origin:
+        allowed_csrf_origins.add(config.public_origin.rstrip("/"))
+
+    @app.before_request
+    def enforce_csrf():
+        if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+            return None
+        if request.path in {"/api/events", "/api/detection/scan"} and request.headers.get("X-Device-Key"):
+            return None
+
+        sec_fetch_site = request.headers.get("Sec-Fetch-Site", "").strip().lower()
+        origin = request.headers.get("Origin", "").strip().rstrip("/")
+        if sec_fetch_site:
+            if sec_fetch_site in {"same-origin", "none"}:
+                return None
+            if origin and origin in allowed_csrf_origins:
+                return None
+            return jsonify({"error": "Cross-origin state-changing request rejected"}), 403
+
+        if origin and origin not in allowed_csrf_origins:
+            return jsonify({"error": "Cross-origin state-changing request rejected"}), 403
+        return None
 
     @app.before_request
     def enforce_content_length():
@@ -454,6 +480,9 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
     @app.post("/api/auth/logout")
     @require_roles()
     def logout():
+        token = request.cookies.get(COOKIE_NAME, "")
+        if token:
+            revoke_access_token(config, db, token)
         record_audit(db, g.current_user, "logout", "users", g.current_user.get("id"), flask_request=request)
         response = make_response(jsonify({"ok": True}))
         clear_auth_cookie(response, config)

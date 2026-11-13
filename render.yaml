@@ -27,6 +27,8 @@ services:
     envVars:
       - key: ENVIRONMENT
         value: production
+      - key: PUBLIC_ORIGIN
+        value: https://srm-trp-transport.onrender.com
       # Render terminates TLS, so the session cookie must be Secure.
       - key: COOKIE_SECURE
         value: "true"

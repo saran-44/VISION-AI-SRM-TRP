@@ -82,7 +82,7 @@ def clean_postgres_test_database(prepare_postgres_test_database):
     if url:
         import psycopg
         with psycopg.connect(url, autocommit=True) as conn:
-            conn.execute("TRUNCATE transport_portal.users, transport_portal.buses, transport_portal.drivers, transport_portal.events, transport_portal.audit_logs, transport_portal.bus_states")
+            conn.execute("TRUNCATE transport_portal.users, transport_portal.buses, transport_portal.drivers, transport_portal.events, transport_portal.audit_logs, transport_portal.bus_states, transport_portal.revoked_tokens")
     yield
 
 

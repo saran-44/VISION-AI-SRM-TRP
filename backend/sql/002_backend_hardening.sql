@@ -48,15 +48,25 @@ CREATE UNIQUE INDEX IF NOT EXISTS events_idempotency_key
 CREATE INDEX IF NOT EXISTS events_dedup
     ON transport_portal.events (bus_number, direction, camera_id, timestamp DESC);
 
+CREATE TABLE IF NOT EXISTS transport_portal.revoked_tokens (
+    _id varchar(24) PRIMARY KEY,
+    jti varchar(64) NOT NULL UNIQUE,
+    expires_at timestamp NOT NULL,
+    revoked_at timestamp NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS revoked_tokens_expires_at
+    ON transport_portal.revoked_tokens (expires_at);
+
 DO $$
 DECLARE api_role text;
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'transport_portal_app') THEN
-        GRANT SELECT, INSERT, UPDATE, DELETE ON transport_portal.bus_states TO transport_portal_app;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON transport_portal.bus_states, transport_portal.revoked_tokens TO transport_portal_app;
     END IF;
     FOREACH api_role IN ARRAY ARRAY['anon', 'authenticated', 'service_role'] LOOP
         IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = api_role) THEN
-            EXECUTE format('REVOKE ALL ON transport_portal.bus_states FROM %I', api_role);
+            EXECUTE format('REVOKE ALL ON transport_portal.bus_states, transport_portal.revoked_tokens FROM %I', api_role);
         END IF;
     END LOOP;
 END $$;

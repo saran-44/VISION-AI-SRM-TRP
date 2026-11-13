@@ -121,6 +121,88 @@ def test_login_rate_limit_blocks_repeated_failures(users):
     assert blocked.get_json()["error"].startswith("Too many requests")
 
 
+def test_logout_revokes_jti_so_replayed_cookie_is_rejected(client, db, users):
+    login_res = login(client, HEAD_ADMIN_EMAIL, HEAD_ADMIN_PASSWORD)
+    assert login_res.status_code == 200
+    cookie = client.get_cookie("__session")
+    assert cookie is not None
+
+    logout_res = client.post("/api/auth/logout")
+    assert logout_res.status_code == 200
+    assert db.revoked_tokens.count_documents({}) == 1
+
+    # Replay the old JWT cookie after logout; must fail with 401.
+    client.set_cookie("__session", cookie.value)
+    assert client.get("/api/auth/me").status_code == 401
+
+
+def test_csrf_allows_same_origin_and_public_origin_and_blocks_cross_site(db, users):
+    cfg = build_config(
+        public_origin="https://vision-ai-srmtrp.web.app",
+        cors_allowed_origins=("https://console.example.edu",),
+    )
+    app = create_app(cfg, database_engine=db.engine)
+    app.config.update(TESTING=True)
+    client = app.test_client()
+    assert login(client, TRANSPORT_EMAIL, TRANSPORT_PASSWORD).status_code == 200
+    session_cookie = client.get_cookie("__session").value
+    client.set_cookie("__session", session_cookie, domain="srm-trp-transport-abc.a.run.app")
+
+    # Proxied Firebase Hosting request: Host is Cloud Run, Origin is Hosting, Sec-Fetch-Site is same-origin.
+    res_same = client.post(
+        "/api/buses",
+        json={"bus_number": "BUS-CSRF-1", "capacity": 40},
+        headers={
+            "Host": "srm-trp-transport-abc.a.run.app",
+            "Sec-Fetch-Site": "same-origin",
+            "Origin": "https://vision-ai-srmtrp.web.app",
+        },
+    )
+    assert res_same.status_code == 201
+
+    # Cross-site from an explicitly allowlisted origin passes.
+    res_allowed = client.post(
+        "/api/buses",
+        json={"bus_number": "BUS-CSRF-2", "capacity": 40},
+        headers={
+            "Sec-Fetch-Site": "cross-site",
+            "Origin": "https://console.example.edu",
+        },
+    )
+    assert res_allowed.status_code == 201
+
+    # Cross-site from an unlisted origin is rejected with 403.
+    res_evil = client.post(
+        "/api/buses",
+        json={"bus_number": "BUS-CSRF-3", "capacity": 40},
+        headers={"Sec-Fetch-Site": "cross-site", "Origin": "https://evil.example"},
+    )
+    assert res_evil.status_code == 403
+
+    # same-site from a sibling subdomain is rejected when not allowlisted.
+    res_sibling = client.post(
+        "/api/buses",
+        json={"bus_number": "BUS-CSRF-4", "capacity": 40},
+        headers={"Sec-Fetch-Site": "same-site", "Origin": "https://other.web.app"},
+    )
+    assert res_sibling.status_code == 403
+
+    # Missing Sec-Fetch-Site with unlisted Origin is rejected with 403.
+    res_origin_only = client.post(
+        "/api/buses",
+        json={"bus_number": "BUS-CSRF-5", "capacity": 40},
+        headers={"Origin": "https://evil.example"},
+    )
+    assert res_origin_only.status_code == 403
+
+    # Non-browser client sending neither header is allowed when authenticated.
+    res_non_browser = client.post(
+        "/api/buses",
+        json={"bus_number": "BUS-CSRF-6", "capacity": 40},
+    )
+    assert res_non_browser.status_code == 201
+
+
 def test_security_headers_are_present(client, users):
     response = client.get("/api/health")
     assert response.headers["X-Content-Type-Options"] == "nosniff"

@@ -9,9 +9,10 @@ import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from flask import current_app, g, jsonify, make_response, redirect, request
+from sqlalchemy.exc import IntegrityError
 
 from .config import Config
-from .db import public_doc
+from .db import public_doc, utc_naive
 
 # Firebase Hosting forwards only the __session cookie to Cloud Run. Direct
 # deployments use the same host-only, HttpOnly cookie for consistency.
@@ -84,11 +85,40 @@ def user_from_token(config: Config, db, token: str) -> dict | None:
         payload = decode_access_token(config, token)
     except jwt.PyJWTError:
         return None
+    jti = payload.get("jti")
+    if jti and db.revoked_tokens.find_one({"jti": jti}, {"_id": 1}):
+        return None
     email = payload.get("email") or payload.get("sub")
     user = db.users.find_one({"email": email, "active": True})
     if not user or user.get("role") != payload.get("role"):
         return None
     return public_user(user)
+
+
+def revoke_access_token(config: Config, db, token: str) -> bool:
+    try:
+        payload = decode_access_token(config, token)
+    except jwt.PyJWTError:
+        return False
+    jti = payload.get("jti")
+    if not jti:
+        return False
+    exp_raw = payload.get("exp")
+    if isinstance(exp_raw, (int, float)):
+        expires_at = utc_naive(datetime.fromtimestamp(exp_raw, tz=timezone.utc))
+    else:
+        expires_at = utc_naive(datetime.now(timezone.utc) + timedelta(minutes=config.jwt_ttl_minutes))
+    now_naive = utc_naive(datetime.now(timezone.utc))
+    try:
+        db.revoked_tokens.insert_one({
+            "jti": str(jti),
+            "expires_at": expires_at,
+            "revoked_at": now_naive,
+        })
+    except IntegrityError:
+        pass
+    db.revoked_tokens.delete_many({"expires_at": {"$lt": now_naive}})
+    return True
 
 
 def set_auth_cookie(response, token: str, config: Config) -> None:
