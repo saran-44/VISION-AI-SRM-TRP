@@ -67,8 +67,17 @@ def _database():
     try:
         config = Config.from_env()
         return get_database(config)
-    except (SQLAlchemyError, RuntimeError, ValueError):
+    except SQLAlchemyError:
         # Driver error text may contain connection details or personal data.
+        raise SystemExit(
+            "Could not initialize PostgreSQL. Check DATABASE_URL format, TLS certificate, "
+            "network restrictions, credentials, permissions and the schema migration."
+        ) from None
+    except RuntimeError as exc:
+        # Application-authored messages (schema mismatch, rejected login) contain
+        # no driver text and are the only actionable diagnosis, so show them.
+        raise SystemExit(f"Could not initialize PostgreSQL: {exc}") from None
+    except ValueError:
         raise SystemExit(
             "Could not initialize PostgreSQL. Check DATABASE_URL format, TLS certificate, "
             "network restrictions, credentials, permissions and the schema migration."

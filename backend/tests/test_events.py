@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import timedelta
-
 from backend.services import naive_now
 from backend.tests.conftest import DEVICE_KEY, login_head_admin, login_transport_office
 
@@ -13,7 +11,10 @@ def event_payload(**overrides):
         "gate": "Gate 1",
         "camera_id": "gate-1-entry",
         "confidence": 0.95,
-        "timestamp": (naive_now() - timedelta(minutes=5)).isoformat() + "Z",
+        # "Now", not "five minutes ago": app_timezone is Asia/Kolkata, so for the
+        # first five minutes after local midnight a five-minute-old event belongs
+        # to yesterday and every "today" assertion in this file fails.
+        "timestamp": naive_now().isoformat() + "Z",
     }
     payload.update(overrides)
     return payload
