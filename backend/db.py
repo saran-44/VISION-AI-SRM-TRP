@@ -296,6 +296,11 @@ class Database:
         for name, table in TABLES.items():
             setattr(self, name, TableStore(engine, table))
 
+    def ping(self) -> None:
+        guard = getattr(self.engine, "_transport_preview_lock", None) or nullcontext()
+        with guard, self.engine.connect() as conn:
+            conn.execute(select(schema_version.c.version).limit(1))
+
 
 def get_database(config: Config, engine=None):
     owned_engine = engine is None

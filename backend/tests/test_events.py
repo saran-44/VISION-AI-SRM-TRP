@@ -296,3 +296,26 @@ def test_sse_slot_released_when_response_closed_before_iteration(db):
     sem = app.extensions["sse_semaphore"]
     assert sem.acquire(blocking=False) is True
     sem.release()
+
+
+def test_ready_endpoint_returns_200_when_db_ok_and_503_on_sqlalchemy_error(client, db, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    ok = client.get("/api/ready")
+    assert ok.status_code == 200
+    assert ok.get_json() == {"status": "ready", "database": "ok"}
+
+    def fail_ping():
+        raise OperationalError("secret SQL", {}, Exception("sensitive"))
+
+    monkeypatch.setattr(db, "ping", fail_ping)
+    failing = client.get("/api/ready")
+    assert failing.status_code == 503
+    assert failing.get_json() == {"status": "unavailable", "database": "unreachable"}
+
+
+def test_health_and_ready_are_exempt_from_rate_limits(app):
+    limiter = app.extensions["limiter"]
+    exempt = limiter._route_exemptions
+    assert any(route.endswith(".health") for route in exempt)
+    assert any(route.endswith(".ready") for route in exempt)

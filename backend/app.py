@@ -275,8 +275,19 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
 
     # ------------------------------------------------------------------- auth
     @app.get("/api/health")
+    @limiter.exempt
     def health():
         return jsonify({"status": "ok", "service": "srm-trp-transport", "time": iso_utc(naive_now())})
+
+    @app.get("/api/ready")
+    @limiter.exempt
+    def ready():
+        try:
+            db.ping()
+        except SQLAlchemyError:
+            current_app.logger.warning("Readiness check failed: database unreachable")
+            return jsonify({"status": "unavailable", "database": "unreachable"}), 503
+        return jsonify({"status": "ready", "database": "ok"})
 
     @app.post("/api/auth/login")
     @limiter.limit(config.login_rate_limit)
