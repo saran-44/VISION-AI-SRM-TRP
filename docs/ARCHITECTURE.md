@@ -19,15 +19,20 @@
 
 | Module | Responsibility |
 | --- | --- |
-| `config.py` | Reads every setting from the environment; validates CORS origins, camera stream URLs and production secret strength. |
-| `db.py` | PostgreSQL engine, typed table access, schema-version check, UTC helpers and `_id` → `id` serializer. |
-| `schemas.py` | Pydantic models for every request/response body and query filter. |
-| `auth.py` | Argon2 hashing, JWT issue/verify, HttpOnly cookie helpers, role and device-key decorators. |
-| `services.py` | Event ingestion and flag rules, stats/analytics computation, CSV/XLSX writers, audit records, camera configuration. |
-| `app.py` | Application factory: routes, security headers, CORS, rate limiting, error handlers. |
+| `config.py` | Reads every setting from the environment; validates CORS/CSRF origins, camera stream URLs, timezone, numeric bounds and production secret strength. |
+| `db.py` | PostgreSQL engine, typed table access (`users`, `buses`, `drivers`, `events`, `audit_logs`, `bus_states`, `revoked_tokens`), schema-version check, SQL analytics aggregation, readiness ping, UTC helpers and `_id` → `id` serializer. |
+| `schemas.py` | Pydantic models for every request/response body and query filter, plus `plate_key()` canonicalization. |
+| `auth.py` | Argon2 hashing, JWT issue/verify/revocation, HttpOnly cookie helpers, role and device-key decorators. |
+| `firebase_auth.py` | Verifies Firebase ID tokens against Google's JWKS keys (`timeout=5`, issuer, audience, non-empty `sub`). |
+| `access.py` | Access-list authorization, verified email enforcement, atomic UID binding and admin-approved provisioning. |
+| `services.py` | Event deduplication/ingestion, `bus_states` sync, flag rules, cached stats/SQL analytics, streaming CSV/XLSX writers, audit records and camera configuration. |
+| `vision.py` | Lazy YOLOv10n sticker detection (`best.pt`), strict image validation, crop OCR (`rapidocr`/`tesseract`/`easyocr`) and `normalize_plate()`. |
+| `app.py` | Application factory: routes (`/api/auth/*`, `/api/ready`, `/api/stream*`, `/api/detection/*`, CRUD, exports), security headers, CORS/CSRF, proxy-aware rate limiting, error handlers. |
 | `wsgi.py` | WSGI entry point (`gunicorn backend.wsgi:app`). |
+| `manage_access.py` | CLI for managing the portal access list and Firebase UID unlinking. |
+| `manage_states.py` | CLI for rebuilding `bus_states` and running optional retention purges. |
 | `seed_demo.py` | Opt-in fake demo data (requires `ALLOW_DEMO_SEED=true` and explicit passwords). |
-| `detection_client.py` | Reference client for posting one detection event. |
+| `detection_client.py` | Reference client for posting detection events with `X-Idempotency-Key` and bounded retries. |
 
 ## Frontend (`/frontend`)
 
@@ -63,9 +68,11 @@ Both roles are enforced server-side by `require_roles` / `require_page_roles`.
 ## Database and security boundary
 
 The private `transport_portal` PostgreSQL schema is installed once from
-`backend/sql/001_initial.sql`; startup only checks the schema version and
-read access. A dedicated server-side role has DML permissions for the four
-application tables and append/read access to audit logs. Review ambient
+`backend/sql/001_initial.sql` (plus incremental migrations such as
+`002_backend_hardening.sql`); startup only checks the schema version and read
+access. A dedicated server-side role has DML permissions for the six
+application tables (`users`, `buses`, `drivers`, `events`, `bus_states`,
+`revoked_tokens`) and append/read access to audit logs. Review ambient
 `PUBLIC` privileges in the Supabase project separately. The schema must not
 be exposed through the Supabase Data API: Firebase tokens are verified by
 Flask, and Flask enforces verified-email/access-list/role checks. Supabase RLS

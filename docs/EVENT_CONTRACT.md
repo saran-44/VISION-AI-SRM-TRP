@@ -16,11 +16,16 @@ application over HTTPS.
 POST {TRANSPORT_API_URL}/api/events
 Content-Type: application/json
 X-Device-Key: <device API key from the server's DEVICE_API_KEYS allowlist>
+X-Idempotency-Key: <optional caller-supplied UUID/token, max 128 printable chars>
 ```
 
 The device key is compared against the allowlist in constant time. Requests
 without a valid key receive `401 {"error": "Invalid device API key"}`. A server
-with no configured keys rejects all ingestion with `503`.
+with no configured keys rejects all ingestion with `503`. `X-Idempotency-Key`
+(stripped before API responses and audit logs) makes network retries safe;
+repeated identical deliveries or duplicate camera detections within
+`EVENT_DEDUP_WINDOW_SECONDS` (default `30` s) return the existing event with
+`200 {"event": {...}, "deduplicated": true}`.
 
 ## Payload
 
@@ -52,18 +57,19 @@ early instead of being silently ignored.
 | Status | Body | Meaning |
 | --- | --- | --- |
 | `201` | `{"event": {...}}` | Stored. The event includes the computed `flagged` boolean and `flag_reasons` list. |
-| `400` | `{"error": "Validation failed", "details": [...]}` | The payload did not satisfy the contract. |
+| `200` | `{"event": {...}, "deduplicated": true}` | Existing event matched via `X-Idempotency-Key` or sliding `EVENT_DEDUP_WINDOW_SECONDS` window. |
+| `400` | `{"error": "Validation failed", "details": [...]}` | The payload or `X-Idempotency-Key` did not satisfy the contract. |
 | `401` | `{"error": "Invalid device API key"}` | Missing or wrong device key. |
-| `429` | `{"error": "Too many requests…"}` | Rate limited. |
+| `429` | `{"error": "Too many requests…"}` | `EVENT_RATE_LIMIT` exceeded (keyed by device key or IP). |
 | `503` | `{"error": "Device ingestion is not configured"}` | No device keys configured on the server. |
 
 ## Flag rules (computed server side)
 
 | Reason | Rule |
 | --- | --- |
-| `unregistered_plate` | The normalized bus number does not exist in the `buses` collection. |
+| `unregistered_plate` | No registered bus matches the canonical `plate_key` (alphanumeric normalization of `bus_number`) in the `buses` table. Matching buses canonicalize `bus_number` to the registered value. |
 | `low_ocr_confidence` | `confidence` is below `OCR_CONFIDENCE_THRESHOLD` (default `0.75`). |
-| `long_overstay` | The bus's last unmatched `IN` event is older than `OVERSTAY_HOURS` (default `12`). |
+| `long_overstay` | The bus's latest prior `IN` event has no closing `OUT` event ordered by `(timestamp, _id)` before this event and is older than `OVERSTAY_HOURS` (default `12`). |
 
 Every ingested event is also written to the audit log with the actor
 `device-client`.

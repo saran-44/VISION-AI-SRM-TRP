@@ -62,3 +62,14 @@ def test_cloudbuild_sets_concurrency_limit():
     assert '"16"' in config
     assert "SSE_MAX_CONNECTIONS=4" in config
     assert "SSE_MAX_SECONDS=50" in config
+
+
+def test_docs_have_no_stale_event_stream_or_422_contradictions():
+    for name in ("ARCHITECTURE.md", "DETECTION.md", "EVENT_CONTRACT.md", "UPGRADE_SPECIFICATION.md"):
+        text = (ROOT / "docs" / name).read_text()
+        assert "/api/events/stream" not in text, name
+    spec = (ROOT / "docs" / "UPGRADE_SPECIFICATION.md").read_text()
+    assert "failures return `422`" not in spec
+    assert "/api/ready" in spec
+    contract = (ROOT / "docs" / "EVENT_CONTRACT.md").read_text()
+    assert "X-Idempotency-Key" in contract

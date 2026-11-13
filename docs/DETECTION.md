@@ -115,8 +115,8 @@ this order and uses the first that works:
 | Order | Engine | Package | Notes |
 | --- | --- | --- | --- |
 | 1 | **RapidOCR** | `rapidocr-onnxruntime` | **Default.** ONNX-based, bundles its own models, needs no system packages. Recommended. |
-| 2 | Tesseract | `pytesseract` + system `tesseract-ocr` | Requires the binary to be installed on the host. |
-| 3 | EasyOCR | `easyocr` | Heavy (PyTorch already present, but pulls `scikit-image`). |
+| 2 | Tesseract | `pytesseract` + system `tesseract-ocr` | Requires the binary to be installed on the host (binary availability is cached per process). |
+| 3 | EasyOCR | `easyocr` | Heavy (PyTorch already present, pulls `scikit-image`). In `auto` mode, only tried when `VISION_ALLOW_EASYOCR_AUTO=true` (or set `VISION_OCR_ENGINE=easyocr` explicitly). |
 
 Verified in this environment: RapidOCR read a synthetic plate at **0.994**
 confidence, and the full pipeline runs a frame in **~114 ms** on CPU.
@@ -124,10 +124,13 @@ confidence, and the full pipeline runs a frame in **~114 ms** on CPU.
 ### Plate normalisation
 
 `normalize_plate()` upper-cases the text, strips characters that cannot
-appear on an Indian registration plate, collapses whitespace, and removes the
-spaces that separate the two halves of a plate (`TN 12 AB 1234` → `TN12AB1234`)
-while preserving the internal grouping used for display
-(`TN 12 AB 1234`).
+appear on an Indian registration plate, collapses runs of whitespace while
+preserving internal spacing (`"tn 12 ab 1234"` → `"TN 12 AB 1234"`), trims
+leading/trailing punctuation (`" ._-"`), ensures an alphanumeric start, and
+caps the result at 20 characters. When events are ingested, `plate_key()`
+(alphanumeric comparison without spaces or punctuation) matches OCR spacing
+variants against registered `buses` so `"TN 12 AB 1234"` resolves cleanly
+to a registered `"TN-12-AB-1234"` record.
 
 ---
 
@@ -191,17 +194,24 @@ curl -X POST http://localhost:5000/api/detection/scan \
 }
 ```
 
-Error responses:
+Error responses & rate limits:
 
 | Status | Meaning |
 | --- | --- |
-| `400` | No image supplied, or a malformed body. |
+| `400` | No image supplied, invalid base64/URI/dimensions/pixel bomb (`detection_scan_rejected`), or invalid `record_event` metadata. |
 | `401` | No device key and no valid session. |
-| `403` | A session was supplied but the role is not `head_admin`. |
-| `503` | The vision stack is unavailable (model missing, no OCR engine). |
+| `403` | A session was supplied without `head_admin`, or `record_event=true` was requested without `X-Device-Key`. |
+| `413` | Request body exceeds `ceil(VISION_MAX_IMAGE_BYTES * 4/3) + 64 KB`. |
+| `429` | Per-key/IP `DETECTION_RATE_LIMIT` exceeded. |
+| `503` | The vision stack is unavailable (`detection_scan_failed`) or `VISION_MAX_CONCURRENCY` slots are busy. |
 | `500` | Inference raised an unexpected error. |
 
-Every scan is written to the audit log with the action `detection_scan`.
+Valid scans are written to the audit log with the action `detection_scan`
+(compact summary when `AUDIT_DETECTION_SCANS=true`). Rejected image inputs
+log `detection_scan_rejected`, and runtime vision failures log
+`detection_scan_failed`. Device-key callers may pass `record_event=true`
+alongside `direction`, `gate`, and `camera_id` (and optional `X-Idempotency-Key`)
+to record the best recognized plate directly into `/api/events`.
 
 ---
 

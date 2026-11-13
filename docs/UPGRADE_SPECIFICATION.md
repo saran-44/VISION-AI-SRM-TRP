@@ -187,14 +187,14 @@ These are standing instructions. They continue to apply to any follow-up work.
 - **Device authentication:** `X-Device-Key` header, compared with
   `hmac.compare_digest` against the `DEVICE_API_KEYS` list.
 - **Validation:** every request body and query string is validated by a
-  Pydantic model in `backend/schemas.py`; failures return `422` with a
+  Pydantic model in `backend/schemas.py`; failures return `400` with a
   field-level error map.
 - **Flag rules:** `unregistered_plate` (number not in the bus register),
   `low_ocr_confidence` (confidence `< OCR_CONFIDENCE_THRESHOLD`), and
   `long_overstay` (inside longer than `OVERSTAY_HOURS`).
-- **"Currently Inside"** is derived from the latest IN/OUT state per bus, not
-  stored separately.
-- **Live updates:** Server-Sent Events (`/api/events/stream`), with an
+- **"Currently Inside"** is maintained atomically in `bus_states` (monotonic latest
+  `IN`/`OUT` state per bus).
+- **Live updates:** Server-Sent Events (`/api/stream`), with an
   automatic fall back to polling when the SSE connection cannot be
   established.
 
@@ -380,13 +380,12 @@ order and uses the first that works:
 ### 6.3 Plate normalisation
 
 `normalize_plate()` upper-cases the text, strips characters that cannot appear
-on an Indian registration plate, collapses whitespace, and removes the space
-that separates the two halves of a plate while preserving the display
-grouping:
+on an Indian registration plate, collapses whitespace (preserving internal
+spacing), trims leading/trailing punctuation (`" ._-"`) and caps at 20 characters:
 
 ```
 "tn 12 ab 1234"   ->  "TN 12 AB 1234"
-"tn-12-ab-1234"   ->  "TN 12 AB 1234"
+"tn-12-ab-1234"   ->  "TN-12-AB-1234"
 ```
 
 ### 6.4 Wiring into the API
@@ -791,7 +790,8 @@ firebase deploy --only hosting --project=srmtrpai
 | `GET` | `/api/events` | `head_admin` | Paginated, filtered event list. |
 | `POST` | `/api/events` | device key | Ingest a movement. |
 | `GET` | `/api/events/<id>` | `head_admin` | One event. |
-| `GET` | `/api/events/stream` | `head_admin` | Server-Sent Events feed. |
+| `GET` | `/api/stream` | `head_admin` | Server-Sent Events feed. |
+| `GET` | `/api/ready` | public | Database readiness probe. |
 | `GET` | `/api/export/events.csv` | `head_admin` | CSV export. |
 | `GET` | `/api/export/events.xlsx` | `head_admin` | XLSX export. |
 | `GET` | `/api/drivers`, `/api/buses`, `/api/audit` | role-based | Records. |
