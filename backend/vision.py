@@ -156,18 +156,23 @@ def _require_pil():
 
 
 def _ocr_tesseract():
-    try:
-        import pytesseract  # type: ignore
-    except ImportError as exc:
-        raise VisionUnavailable("pytesseract is not installed") from exc
-    try:
-        pytesseract.get_tesseract_version()
-    except Exception as exc:  # pragma: no cover - depends on environment
-        raise VisionUnavailable(
-            "The tesseract binary is not available on this machine. Install the "
-            "`tesseract-ocr` system package or choose another OCR engine."
-        ) from exc
-    return pytesseract
+    with _ocr_lock:
+        cached = _ocr_cache.get("tesseract")
+        if cached is not None:
+            return cached
+        try:
+            import pytesseract  # type: ignore
+        except ImportError as exc:
+            raise VisionUnavailable("pytesseract is not installed") from exc
+        try:
+            pytesseract.get_tesseract_version()
+        except Exception as exc:  # pragma: no cover - depends on environment
+            raise VisionUnavailable(
+                "The tesseract binary is not available on this machine. Install the "
+                "`tesseract-ocr` system package or choose another OCR engine."
+            ) from exc
+        _ocr_cache["tesseract"] = pytesseract
+        return pytesseract
 
 
 def _ocr_easyocr():
@@ -252,6 +257,15 @@ def _run_rapidocr(image, engine) -> str:
     return " ".join(str(item[1]) for item in result)
 
 
+def _allow_easyocr_auto() -> bool:
+    return os.getenv("VISION_ALLOW_EASYOCR_AUTO", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def read_text(image, engine_name: str | None = None) -> str:
     """Read text out of an image using the configured OCR backend."""
     engine_name = (engine_name or ocr_engine_name()).lower()
@@ -260,7 +274,11 @@ def read_text(image, engine_name: str | None = None) -> str:
     errors: list[str] = []
     order: Iterable[str]
     if engine_name == "auto":
-        order = ("rapidocr", "tesseract", "easyocr")
+        order = (
+            ("rapidocr", "tesseract", "easyocr")
+            if _allow_easyocr_auto()
+            else ("rapidocr", "tesseract")
+        )
     else:
         order = (engine_name,)
 
@@ -512,7 +530,14 @@ def vision_status() -> dict[str, Any]:
 
     engine = ocr_engine_name()
     if engine != "none":
-        probes = ("rapidocr", "tesseract", "easyocr") if engine == "auto" else (engine,)
+        if engine == "auto":
+            probes = (
+                ("rapidocr", "tesseract", "easyocr")
+                if _allow_easyocr_auto()
+                else ("rapidocr", "tesseract")
+            )
+        else:
+            probes = (engine,)
         usable = False
         for probe in probes:
             if _ocr_probe_ready(probe):

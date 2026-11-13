@@ -673,3 +673,60 @@ def test_backend_logger_configures_stdout_handler_without_duplicates(app):
 
     _configure_backend_logging()
     assert len(backend_logger.handlers) == first_count
+
+
+def test_ocr_tesseract_caches_version_probe_across_calls(monkeypatch):
+    import sys
+    import types
+    from backend import vision
+
+    version_calls = [0]
+
+    def fake_version():
+        version_calls[0] += 1
+        return "5.3.0"
+
+    fake_mod = types.SimpleNamespace(
+        get_tesseract_version=fake_version,
+        image_to_string=lambda *_a, **_kw: "TN 12 AB 1234",
+    )
+    monkeypatch.delitem(vision._ocr_cache, "tesseract", raising=False)
+    monkeypatch.setitem(sys.modules, "pytesseract", fake_mod)
+
+    first = vision._ocr_tesseract()
+    second = vision._ocr_tesseract()
+    assert first is fake_mod and second is fake_mod
+    assert version_calls[0] == 1
+
+
+def test_ocr_auto_skips_easyocr_unless_explicitly_enabled(monkeypatch):
+    from backend import vision
+
+    tried = []
+
+    def fail_rapid():
+        tried.append("rapidocr")
+        raise vision.VisionUnavailable("no rapidocr")
+
+    def fail_tess():
+        tried.append("tesseract")
+        raise vision.VisionUnavailable("no tesseract")
+
+    def fake_easy():
+        tried.append("easyocr")
+        return object()
+
+    monkeypatch.setattr(vision, "_ocr_rapidocr", fail_rapid)
+    monkeypatch.setattr(vision, "_ocr_tesseract", fail_tess)
+    monkeypatch.setattr(vision, "_ocr_easyocr", fake_easy)
+    monkeypatch.setattr(vision, "_run_easyocr", lambda _img, _r: "BUS-001")
+    monkeypatch.delenv("VISION_ALLOW_EASYOCR_AUTO", raising=False)
+
+    with pytest.raises(vision.VisionUnavailable):
+        vision.read_text(object(), engine_name="auto")
+    assert tried == ["rapidocr", "tesseract"]
+
+    tried.clear()
+    monkeypatch.setenv("VISION_ALLOW_EASYOCR_AUTO", "true")
+    assert vision.read_text(object(), engine_name="auto") == "BUS-001"
+    assert tried == ["rapidocr", "tesseract", "easyocr"]
