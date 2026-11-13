@@ -5,22 +5,22 @@ the email address, the role and whether the account is active. Firebase
 supplies the *credential*; this module decides whether a successfully
 authenticated identity is allowed into the portal.
 
-The two are deliberately separate. Firebase's email/password provider only
-accepts accounts an administrator explicitly created, so for that provider a
-successful sign-in is itself proof that the account was provisioned. Google's
-sign-in provider issues a valid token for **any** Google account, so it proves
-nothing — those identities must already be on the list.
+The two are deliberately separate. Firebase password and Google accounts
+can be created without an administrator's approval. The backend requires a
+verified email and an active access-list entry, except that a password account
+with an administrator-set Firebase approval claim may be auto-provisioned.
 """
 from __future__ import annotations
 
 from typing import Any
 
 from .firebase_auth import (
+    PORTAL_APPROVAL_CLAIM,
     PROVIDER_GOOGLE,
     PROVIDER_PASSWORD,
-    SELF_PROVING_PROVIDERS,
     email_of,
     firebase_uid,
+    is_email_verified,
     provider_of,
 )
 
@@ -74,18 +74,22 @@ def resolve_identity(
             status=403,
         )
 
+    # An unverified password account can be created with somebody else's
+    # email. Check ownership before accepting an existing access-list entry or
+    # binding a Firebase UID to it.
+    if not is_email_verified(claims):
+        raise AccessDenied("Verify your email address before signing in.", status=403)
+
     user = find_user(db, email)
 
     if user is None:
-        # Only a provider that proves an administrator provisioned the account
-        # may create the authorisation record automatically.
-        if provider not in SELF_PROVING_PROVIDERS:
-            raise AccessDenied(
-                "This email address is not authorised for the transport portal. "
-                "Ask the transport office to add it to the access list.",
-                status=403,
-            )
-        if not auto_provision:
+        # A valid password token alone is not approval: Firebase permits
+        # self-sign-up. The custom claim must come from a trusted Firebase
+        # administrator, match this exact email, and is never accepted for
+        # Google users. An email change therefore requires fresh approval.
+        approved_email = claims.get(PORTAL_APPROVAL_CLAIM)
+        approved = isinstance(approved_email, str) and approved_email.strip().lower() == email
+        if provider != PROVIDER_PASSWORD or not auto_provision or not approved:
             raise AccessDenied(
                 "This email address is not authorised for the transport portal. "
                 "Ask the transport office to add it to the access list.",

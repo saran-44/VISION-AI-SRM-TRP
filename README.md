@@ -277,16 +277,18 @@ with access restricted to a list of authorised email addresses.
 
 Two independent gates must both pass:
 
-1. **Firebase** decides whether the credential is valid. Email/password only
-   accepts accounts you created in the Firebase console.
-2. **The backend's access list** decides whether that identity may use the
-   portal. Google sign-in is refused for any email that is not on the list.
+1. **Firebase** decides whether the credential is valid. Firebase password
+   accounts may also be created through client sign-up, so a valid token is
+   not proof of administrator approval.
+2. **The backend** requires a verified email and an active access-list entry.
+   An unknown password user can be auto-provisioned only with an
+   administrator-set Firebase approval claim; unknown Google users are denied.
 
 The browser exchanges the Firebase ID token for the application's own
-short-lived HttpOnly session cookie at `POST /api/auth/firebase`. The Firebase
-token is verified server-side against Google's **public** signing keys, so
-there is **no service account and no private key** to manage. The ID token is
-used once and discarded.
+short-lived HttpOnly session cookie at `POST /api/auth/firebase`. The backend
+verifies the token against Google's **public** signing keys and does not
+persist it. No service-account private key is needed for that verification;
+setting approval claims is a separate trusted-administrator operation.
 
 Manage the access list with the bundled CLI:
 

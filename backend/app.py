@@ -335,6 +335,18 @@ def create_app(config: Config | None = None, mongo_client=None) -> Flask:
                 auto_provision=config.firebase_auto_provision,
                 default_role=config.firebase_default_role,
             )
+        except FirebaseAuthError as exc:
+            # A signed Firebase token may still lack an email address.
+            record_audit(
+                db,
+                None,
+                "login_denied",
+                "users",
+                None,
+                after={"reason": exc.message, "provider": provider_of(claims)},
+                flask_request=request,
+            )
+            return jsonify({"error": exc.message}), exc.status
         except AccessDenied as exc:
             record_audit(
                 db,

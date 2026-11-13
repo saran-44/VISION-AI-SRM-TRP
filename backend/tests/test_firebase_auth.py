@@ -15,6 +15,7 @@ import pytest
 from backend import app as app_module
 from backend.access import AccessDenied, resolve_identity
 from backend.firebase_auth import (
+    PORTAL_APPROVAL_CLAIM,
     PROVIDER_GOOGLE,
     PROVIDER_PASSWORD,
     email_of,
@@ -49,6 +50,8 @@ def _claims(email: str, provider: str = PROVIDER_PASSWORD, uid: str = FIREBASE_U
         "sub": uid,
         "email": email,
         "email_verified": True,
+        # The existing provisioning tests use an administrator-approved email.
+        PORTAL_APPROVAL_CLAIM: email.strip().lower(),
         "iss": "https://securetoken.google.com/srmtrpai",
         "aud": "srmtrpai",
         "firebase": {
@@ -153,7 +156,7 @@ def test_firebase_login_rejects_an_unverifiable_token(app, monkeypatch):
     assert "not valid" in response.get_json()["error"]
 
 
-def test_firebase_login_auto_provisions_a_password_user(firebase_client, users, db):
+def test_firebase_login_auto_provisions_an_approved_password_user(firebase_client, users, db):
     response = firebase_client.post("/api/auth/firebase", json={"id_token": _token(PROVIDER_PASSWORD, "new.teacher@srmtrp.edu.in")})
     assert response.status_code == 200
     payload = response.get_json()
@@ -162,6 +165,85 @@ def test_firebase_login_auto_provisions_a_password_user(firebase_client, users, 
     assert payload["user"]["role"] == "transport_office"
     # The session cookie was issued.
     assert "transport_token" in response.headers.get("Set-Cookie", "")
+
+
+@pytest.mark.parametrize("approval", [None, False, True, "true", 1, "other@example.invalid"])
+def test_firebase_login_denies_self_registered_password_users(
+    app, users, db, monkeypatch, approval
+):
+    email = "unlisted@example.invalid"
+    claims = _claims(email, PROVIDER_PASSWORD)
+    if approval is None:
+        claims.pop(PORTAL_APPROVAL_CLAIM)
+    else:
+        claims[PORTAL_APPROVAL_CLAIM] = approval
+    monkeypatch.setattr(app_module, "verify_firebase_id_token", lambda *_: claims)
+
+    response = app.test_client().post(
+        "/api/auth/firebase", json={"id_token": _token(PROVIDER_PASSWORD, email)}
+    )
+    assert response.status_code == 403
+    assert "not authorised" in response.get_json()["error"]
+    assert "transport_token" not in response.headers.get("Set-Cookie", "")
+    assert db.users.find_one({"email": email}) is None
+
+
+def test_password_email_change_requires_fresh_administrator_approval(app, users, db, monkeypatch):
+    new_email = "new-address@example.invalid"
+    claims = _claims(new_email, PROVIDER_PASSWORD)
+    claims[PORTAL_APPROVAL_CLAIM] = "previous-address@example.invalid"
+    monkeypatch.setattr(app_module, "verify_firebase_id_token", lambda *_: claims)
+
+    response = app.test_client().post(
+        "/api/auth/firebase", json={"id_token": _token(PROVIDER_PASSWORD, new_email)}
+    )
+    assert response.status_code == 403
+    assert db.users.find_one({"email": new_email}) is None
+
+
+@pytest.mark.parametrize("provider", [PROVIDER_PASSWORD, PROVIDER_GOOGLE])
+@pytest.mark.parametrize("verified", [False, "true", None])
+def test_firebase_login_rejects_unverified_listed_users_before_uid_binding(
+    app, users, db, monkeypatch, provider, verified
+):
+    claims = _claims(HEAD_ADMIN_EMAIL, provider, "untrusted-uid")
+    if verified is None:
+        claims.pop("email_verified")
+    else:
+        claims["email_verified"] = verified
+    monkeypatch.setattr(app_module, "verify_firebase_id_token", lambda *_: claims)
+
+    response = app.test_client().post(
+        "/api/auth/firebase", json={"id_token": _token(provider, HEAD_ADMIN_EMAIL)}
+    )
+    assert response.status_code == 403
+    assert "Verify your email" in response.get_json()["error"]
+    assert "transport_token" not in response.headers.get("Set-Cookie", "")
+    assert db.users.find_one({"email": HEAD_ADMIN_EMAIL}).get("firebase_uid") is None
+
+
+def test_listed_verified_password_user_does_not_need_custom_claim(app, users, monkeypatch):
+    claims = _claims(HEAD_ADMIN_EMAIL, PROVIDER_PASSWORD)
+    claims.pop(PORTAL_APPROVAL_CLAIM)
+    monkeypatch.setattr(app_module, "verify_firebase_id_token", lambda *_: claims)
+
+    response = app.test_client().post(
+        "/api/auth/firebase", json={"id_token": _token(PROVIDER_PASSWORD, HEAD_ADMIN_EMAIL)}
+    )
+    assert response.status_code == 200
+    assert response.get_json()["created"] is False
+
+
+def test_firebase_login_rejects_a_signed_token_without_email(app, users, monkeypatch):
+    claims = _claims(HEAD_ADMIN_EMAIL, PROVIDER_PASSWORD)
+    claims.pop("email")
+    monkeypatch.setattr(app_module, "verify_firebase_id_token", lambda *_: claims)
+
+    response = app.test_client().post(
+        "/api/auth/firebase", json={"id_token": _token(PROVIDER_PASSWORD, HEAD_ADMIN_EMAIL)}
+    )
+    assert response.status_code == 401
+    assert "no email" in response.get_json()["error"]
 
 
 def test_firebase_login_does_not_auto_provision_a_google_user(firebase_client, users, db):

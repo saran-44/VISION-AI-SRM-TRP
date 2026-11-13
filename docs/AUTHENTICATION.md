@@ -15,20 +15,17 @@ the Firebase console.
   Browser                    Firebase                     Flask backend
  ──────────                ───────────                  ──────────────────
   email + password   ──▶  signInWithEmailAndPassword
-                           │  (only emails created
-                           │   in the Firebase console
-                           │   can succeed here)
+                           │
                            ▼
                         ID token  ───────────────────▶  POST /api/auth/firebase
                                                         │
-                                                        ├─ 1. verify the signature
-                                                        │     against Google's
-                                                        │     public keys
-                                                        ├─ 2. check the audience
-                                                        │     and the issuer
-                                                        ├─ 3. check the email is on
-                                                        │     the ACCESS LIST and
-                                                        │     is active
+                                                        ├─ 1. verify signature,
+                                                        │     audience and issuer
+                                                        ├─ 2. require a verified email
+                                                        ├─ 3. require an active access
+                                                        │     entry or, for password
+                                                        │     users only, an approval
+                                                        │     claim for provisioning
                                                         └─ 4. issue our own
                                                               HttpOnly session
                                                               cookie
@@ -40,18 +37,26 @@ portal. Both must pass.
 
 ### Why two gates?
 
-Firebase's **email/password** provider only accepts accounts you created in
-the Firebase console, so on its own it already behaves like an allowlist.
+Firebase's **email/password** provider can allow users to create their own
+accounts via the Firebase SDK or REST API, even if this portal has no sign-up
+page. Firebase's **Google** provider also permits sign-in by arbitrary Google
+accounts. Neither provider alone proves that an administrator approved access.
 
-Firebase's **Google** provider is the opposite: it will issue a valid token
-for *any* Google account on Earth. If you relied on Firebase alone, anyone
-with a Google account could reach your portal. The backend's access list is
-what closes that door.
+Both providers must supply a **verified email**. The MongoDB access list then
+controls authorization:
 
-| Sign-in method | May an unknown email sign in? | Why |
+| Sign-in method | May an unknown email sign in? | Rule |
 | --- | --- | --- |
-| Email/password (Firebase) | **Yes, the first time** | A successful sign-in proves an administrator created that Firebase account, so the access record is created automatically (see [§4](#4-the-access-list)). |
-| Google | **No** | A Google account proves nothing. The email must already be on the access list. |
+| Email/password (Firebase) | Only if explicitly approved | With auto-provisioning enabled, the token must contain an admin-set `transport_portal_approved_email` claim matching its verified email. Otherwise the email must already be on the access list. |
+| Google | **No** | The verified email must already be on the access list, even if the token carries the approval claim. |
+
+> **Migrating an existing deployment:** Earlier versions accepted unapproved
+> password sign-ups and did not require a verified email. Before reopening an
+> affected deployment, review the Firebase users, MongoDB access entries, UID
+> bindings and audit logs; deactivate unauthorized records. Rotate the app's
+> `JWT_SECRET` to invalidate sessions issued before the fix. Do not assume
+> that deploying the fix removes access records already created by the old
+> code. No such review or deployment happens automatically.
 
 ---
 
@@ -70,16 +75,19 @@ what closes that door.
 
 **Authentication → Users → Add user**
 
-For each person:
+For each password user, create their account and arrange for them to verify
+ownership of their email through Firebase's email-verification flow. A trusted
+administrator may instead mark it verified using the
+[Firebase Admin SDK](https://firebase.google.com/docs/auth/admin/manage-users#update_a_user)
+**only after independently confirming both mailbox ownership and control of
+that specific Firebase account**; an attacker may have registered the email
+first. Do not assume there is a verification checkbox in the console. An
+unverified address cannot sign in to the portal, even if it appears on the
+access list.
 
-1. Enter the email address.
-2. Enter a password (at least 6 characters; 12+ is better).
-3. Tick **"Add email verified"** — this makes the account immediately usable
-   and removes the "verify your email" step.
-4. **Create user**.
-
-Do this for every member of the transport office and the head of the
-department.
+Add every authorized user to MongoDB with `backend.manage_access`, or use the
+optional admin approval claim described in [§4](#4-the-access-list) for
+password accounts. Google users always need an access-list entry.
 
 ### 2.3 Restrict the domains
 
@@ -93,8 +101,9 @@ srmtrpai.firebaseapp.com
 localhost
 ```
 
-Anything not on this list is refused by Firebase before the sign-in even
-starts. This is a useful second lock on the Google provider.
+These domains control the Firebase web OAuth/redirect flow; they are **not**
+an access list and do not prevent password sign-up through the Firebase API.
+Keep the backend authorization checks enabled.
 
 ---
 
@@ -111,16 +120,18 @@ the sign-in.
 | 4 | `iss` equals `https://securetoken.google.com/<project-id>` | `401` |
 | 5 | The token has not expired | `401` |
 | 6 | The provider is in `FIREBASE_ALLOWED_PROVIDERS` | `403` |
-| 7 | The email is on the access list and active | `403` |
-| 8 | The email is not bound to a *different* Firebase UID | `403` |
+| 7 | The token contains a verified email | `403` |
+| 8 | The email has an active access-list entry, or is an approved password account eligible for auto-provisioning | `403` |
+| 9 | The email is not bound to a *different* Firebase UID | `403` |
 
-Only after all eight does the backend mint its own session cookie.
+Only after these checks does the backend mint its own session cookie.
 
-**No service account is needed.** The signing keys are Google's *public*
-certificates, fetched from
-`https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com`
-and cached for five minutes (so Google's key rotation is picked up
-automatically). There is therefore **no private key to store, rotate or leak**.
+**No service account is needed for token verification.** Google's *public*
+JSON Web Key Set is fetched from the endpoint advertised by Firebase's OpenID
+configuration:
+`https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com`.
+Keys are cached for five minutes and refreshed if a token's key ID is missing.
+There is therefore **no private key to store, rotate or leak** for verification.
 
 ---
 
@@ -138,6 +149,10 @@ The access list is the `users` collection in MongoDB. Each record holds:
 | `last_sign_in_at` | Updated on every successful sign-in. |
 
 ### Managing it
+
+The CLI reads `MONGO_URI` and `MONGO_DB_NAME` from the environment, and it
+**loads `.env` automatically** — so once `.env` holds the real Atlas
+connection string, no export is needed:
 
 ```bash
 # see who has access
@@ -157,6 +172,19 @@ python -m backend.manage_access activate transport.office@srmtrp.edu.in
 python -m backend.manage_access unlink transport.office@srmtrp.edu.in
 ```
 
+> **Which database it touches.** `MONGO_DB_NAME` decides the database; if it
+> is not set, the name is taken from the path of `MONGO_URI`, falling back to
+> `transport_db`. Set it explicitly so the access list and the application
+> cannot end up in different databases.
+
+> **Connection troubleshooting.** During database initialization, the CLI
+> reports configuration/DNS problems, connection failures, authentication
+> failures, and permission denials without printing the connection string.
+> A connection failure does **not** establish whether the credentials are
+> valid. Check DNS, TLS, network access and the Atlas IP access list; for an
+> authentication failure, also check URL-encoding of the credentials. The
+> database user must be able to create the application's indexes.
+
 Output looks like this:
 
 ```
@@ -167,29 +195,58 @@ principal@srmtrp.edu.in  head_admin         yes     google.com    linked
 
 ### Auto-provisioning
 
-`FIREBASE_AUTO_PROVISION` (default `true`) means the first time somebody
-signs in with **email/password**, an access record is created for them with
-the role in `FIREBASE_DEFAULT_ROLE` (default `transport_office` — least
-privilege).
+`FIREBASE_AUTO_PROVISION` (default `true`) permits an unknown **password**
+identity to receive an access record only when its Firebase ID token has
+`email_verified: true` and an administrator-set `transport_portal_approved_email`
+custom claim matching that verified address. Its new role is
+`FIREBASE_DEFAULT_ROLE` (default `transport_office`). A password account
+created in Firebase is not, by itself, proof of administrator approval.
+Google users never auto-provision, and changing an email requires fresh approval.
 
-This is safe *because* only someone with access to the Firebase console can
-create a Firebase email/password account. If you would rather require an
-explicit entry for everybody:
+The simplest approach is to add each verified user's email to MongoDB with the
+access-list CLI; no custom claim is required for an existing active entry.
+To require an explicit entry for everyone, set:
 
 ```bash
 FIREBASE_AUTO_PROVISION=false
 ```
 
-…or set the default role higher for a first administrator:
+#### Optional: approve a password user for auto-provisioning
+
+A trusted Firebase administrator can set the claim with the Firebase Admin
+SDK. First independently confirm that the account belongs to the person and
+its email is verified. **Do not grant this claim automatically on sign-up.**
+Sign in with an account authorized to manage Firebase Authentication, then
+use your existing Python virtual environment on your own machine:
 
 ```bash
-FIREBASE_DEFAULT_ROLE=head_admin
+python -m pip install firebase-admin==7.7.0
+gcloud auth application-default login
+read -r -p "Verified Firebase account email to approve: " APPROVED_EMAIL
+export APPROVED_EMAIL
+python - <<'PY'
+import os
+import firebase_admin
+from firebase_admin import auth
+
+firebase_admin.initialize_app(options={"projectId": "srmtrpai"})
+user = auth.get_user_by_email(os.environ["APPROVED_EMAIL"].strip())
+if not user.email_verified or user.disabled:
+    raise SystemExit("Account must be verified and enabled before approval.")
+claims = dict(user.custom_claims or {})
+claims["transport_portal_approved_email"] = user.email.strip().lower()
+auth.set_custom_user_claims(user.uid, claims)
+print("Approval saved. The user must sign in again to get a fresh token.")
+PY
+unset APPROVED_EMAIL
 ```
 
-> **Google sign-in never auto-provisions**, whatever this setting says.
-> Firebase cannot list Google accounts, so there is no way to know whether a
-> Google account was deliberately added. Those emails must be on the list
-> already.
+Custom-claim updates replace the entire claim object; the example preserves
+other claims, but concurrent updates can still race. Removing this claim later
+**does not** deactivate an access-list record already created. To revoke
+portal access, deactivate the MongoDB entry and manage the Firebase account as
+well. Keep the default role at `transport_office`; assign `head_admin`
+explicitly only to trusted administrators.
 
 ---
 
@@ -202,8 +259,9 @@ After a successful exchange the backend issues its own session:
 - **HttpOnly**, `SameSite=Lax`, `Secure` in production.
 - Contains the email and the role, so the role cannot be changed by the
   browser.
-- The **Firebase ID token is discarded** — it is never stored, never written
-  to `localStorage`, and is not readable by JavaScript.
+- The browser obtains a Firebase ID token and sends it for exchange. The
+  backend does not persist that token; the Firebase SDK manages its own
+  browser authentication state until sign-out.
 
 Signing out clears the cookie and records the event in the audit log.
 
@@ -234,7 +292,7 @@ drops the local-account section.
 | `FIREBASE_MEASUREMENT_ID` | `G-7MXBNH3N7D` | Analytics measurement id. |
 | `FIREBASE_AUTH_ENABLED` | `true` | Master switch for Firebase sign-in. Only effective when a project id is set. |
 | `FIREBASE_ALLOWED_PROVIDERS` | `password,google.com` | Which providers are accepted. |
-| `FIREBASE_AUTO_PROVISION` | `true` | Auto-create the access record on a first email/password sign-in. |
+| `FIREBASE_AUTO_PROVISION` | `true` | Auto-create an access record only for a verified password account with the admin-set approval claim. |
 | `FIREBASE_DEFAULT_ROLE` | `transport_office` | The role given to an auto-provisioned account. |
 | `LEGACY_PASSWORD_LOGIN_ENABLED` | `true` | Keep the local MongoDB password login. |
 
@@ -290,15 +348,15 @@ curl -s http://localhost:5000/api/auth/config | jq
 
 1. Open the portal. The **"Sign in with Google"** button appears below the
    form.
-2. Sign in with a Firebase email/password account that is **not** on the
-   access list → you are admitted and a `transport_office` record is created
-   automatically.
+2. Sign in with a verified Firebase password account that is **not** on the
+   access list and has no approval claim → access is denied. With the
+   admin-set approval claim and auto-provisioning enabled, the account is
+   admitted and receives the configured default role.
 3. Sign in with a **Google** account that is **not** on the access list →
-   you are refused with *"This email address is not authorised for the
-   transport portal."*
-4. Add that Google email to the access list
-   (`python -m backend.manage_access add <email>`) and try again → you are
-   admitted.
+   access is denied, even if an approval claim exists.
+4. Add that verified Google email to the access list
+   (`python -m backend.manage_access add <email>`) and try again → access is
+   granted. An unverified account is denied even when its email is listed.
 
 ### 8.3 Audit trail
 
@@ -325,7 +383,8 @@ python -m backend.manage_access list    # who has access
 | "Sign-in with Firebase is not available on this deployment." | `FIREBASE_PROJECT_ID` or `FIREBASE_APP_ID` missing | Set both in `.env` and restart |
 | `auth/operation-not-allowed` | The provider is not enabled in the Firebase console | Enable Email/Password or Google under **Sign-in method** |
 | `auth/unauthorized-domain` | The domain is not authorised | Add the host to **Authorised domains** |
-| "This email address is not authorised" (Google) | Not on the access list | `python -m backend.manage_access add <email>` |
+| "This email address is not authorised" | No active access entry or approved password auto-provisioning | Add the verified email to the access list, or follow the approval-claim steps above. |
+| "Verify your email address before signing in" | Firebase did not assert `email_verified: true` | Complete email verification; then sign in again for a fresh token. |
 | "This account has been deactivated" | The record exists but `active` is false | `python -m backend.manage_access activate <email>` |
 | "This email is already bound to a different Firebase account" | The Firebase user was deleted and re-created | `python -m backend.manage_access unlink <email>` |
 | "The authentication service is temporarily unavailable." | Google’s key endpoint could not be reached | Check the server's outbound internet access |

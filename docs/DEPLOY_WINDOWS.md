@@ -181,6 +181,34 @@ git config user.email "you@example.com"
 cp .env.example .env
 ```
 
+> **`.env` is loaded automatically.** The application and access-list CLI
+> read the repository-root `.env`; values already exported in the shell take
+> precedence. Edit `.env` privately, rather than putting credentials into a
+> shell command or chat. The app requires `MONGO_URI` (not `MONGODB_URI`)
+> and the value must be the raw Atlas connection string, not a Markdown link:
+>
+> ```text
+> MONGO_URI=mongodb+srv://USER:URL_ENCODED_PASSWORD@ATLAS_HOST/?retryWrites=true&w=majority
+> MONGO_DB_NAME=srmtrpai
+> ```
+>
+> Use the rotated credential, percent-encoding reserved characters in the
+> username and password. `.env` is Git-ignored but is still a plaintext local
+> file; protect it and never share it. Use Secret Manager for Cloud Run.
+>
+> **Use the same database everywhere.** The unmodified Cloud Build config
+> sets `MONGO_DB_NAME=srmtrpai`; `.env.example` uses a different local default,
+> so change the local value before managing the production access list. If
+> `MONGO_DB_NAME` is unset, the app uses the URI path or `transport_db`.
+>
+> **Keep previews isolated.** If `.env` points to Atlas, the preview runner
+> refuses to connect to it by default. After activating the virtual
+> environment, force an in-memory preview with:
+>
+> ```bash
+> MONGO_URI=mongomock://transport_preview python scripts/run_preview.py
+> ```
+
 Create the virtual environment. **On Windows the scripts live in `Scripts/`,
 not `bin/`** — this is the single most common Git Bash mistake:
 
@@ -194,8 +222,8 @@ pip install -r backend/requirements.txt
 Verify:
 
 ```bash
-python -m pytest backend/tests -q    # expect: 115 passed
-python -m backend.manage_access list
+python -m pytest backend/tests -q    # all tests should pass
+python -m backend.manage_access --help   # checks the CLI without connecting to MongoDB
 ```
 
 > The detector (Torch, Ultralytics, OpenCV) is an **optional extra**. Install
@@ -249,7 +277,9 @@ gcloud services enable \
   cloudbuild.googleapis.com \
   run.googleapis.com \
   artifactregistry.googleapis.com \
-  secretmanager.googleapis.com
+  secretmanager.googleapis.com \
+  cloudresourcemanager.googleapis.com \
+  iam.googleapis.com
 ```
 
 Create the container repository the build pushes to:
@@ -275,47 +305,110 @@ maps them like this:
 | `firebase-api-key` | `FIREBASE_API_KEY` | the Firebase web API key |
 
 ```bash
-# --- the rotated MongoDB credential ---
-printf '%s' "mongodb+srv://USER:PASSWORD@cluster.mongodb.net/?retryWrites=true&w=majority" \
-  | gcloud secrets create mongo-uri --data-file=- --replication-policy=automatic
+# Disable command tracing so pasted values do not appear in the terminal.
+set +x
+
+# --- rotated MongoDB credential: paste at the hidden prompt, not in the command ---
+read -r -s -p "Rotated Atlas connection string (hidden): " MONGO_URI
+printf '\n'
+if [ -n "$MONGO_URI" ]; then
+  printf '%s' "$MONGO_URI" | gcloud secrets create mongo-uri --data-file=- --replication-policy=automatic
+else
+  echo "No URI entered; mongo-uri was not created." >&2
+fi
+unset MONGO_URI
 
 # --- a strong session-signing key (generated, never typed by hand) ---
 printf '%s' "$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" \
   | gcloud secrets create jwt-secret --data-file=- --replication-policy=automatic
 
-# --- detector device keys ---
-printf '%s' "detector-key-one,detector-key-two" \
-  | gcloud secrets create device-keys --data-file=- --replication-policy=automatic
+# --- comma-separated detector device keys ---
+read -r -s -p "Detector device keys (hidden): " DEVICE_API_KEYS
+printf '\n'
+if [ -n "$DEVICE_API_KEYS" ]; then
+  printf '%s' "$DEVICE_API_KEYS" | gcloud secrets create device-keys --data-file=- --replication-policy=automatic
+else
+  echo "No device keys entered; device-keys was not created." >&2
+fi
+unset DEVICE_API_KEYS
 
-# --- the Firebase web API key (Firebase console > Project settings > Web API Key) ---
-printf '%s' "AIzaSy...your-key..." \
-  | gcloud secrets create firebase-api-key --data-file=- --replication-policy=automatic
+# --- Firebase web API key (Project settings > General > Your apps) ---
+read -r -s -p "Firebase web API key (hidden): " FIREBASE_API_KEY
+printf '\n'
+if [ -n "$FIREBASE_API_KEY" ]; then
+  printf '%s' "$FIREBASE_API_KEY" | gcloud secrets create firebase-api-key --data-file=- --replication-policy=automatic
+else
+  echo "No key entered; firebase-api-key was not created." >&2
+fi
+unset FIREBASE_API_KEY
 ```
 
-> `printf '%s'` (not `echo`) writes the value **without a trailing newline** —
-> a stray newline in `MONGO_URI` or `JWT_SECRET` is a classic source of
-> "authentication failed" errors that are hard to see.
->
-> To rotate a secret later, add a new version rather than recreating it:
+> The hidden prompts keep values out of shell history. `printf '%s'` (not
+> `echo`) writes them without a trailing newline. If `mongo-uri` already
+> exists, rotate the Atlas user first and add a new version instead:
 >
 > ```bash
-> printf '%s' "new-value" | gcloud secrets add-version jwt-secret --data-file=-
+> set +x
+> read -r -s -p "New Atlas connection string (hidden): " MONGO_URI
+> printf '\n'
+> if [ -n "$MONGO_URI" ]; then
+>   printf '%s' "$MONGO_URI" | gcloud secrets versions add mongo-uri --data-file=-
+> else
+>   echo "No URI entered; no version was added." >&2
+> fi
+> unset MONGO_URI
 > ```
+>
+> Redeploy the backend afterward so Cloud Run instances pick up the new
+> secret version.
 
-Give the Cloud Build service account permission to read those secrets:
+**Set up both service identities.** Cloud Build deploys the service, but the
+Cloud Run **runtime service account** reads the secrets. They may be different
+accounts. New projects do not necessarily use the legacy Cloud Build account.
 
-```bash
-PROJECT_NUMBER=$(gcloud projects describe srmtrpai --format='value(projectNumber)')
-PROJECT_EMAIL="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
+1. Run `gcloud builds get-default-service-account` and note the account email.
+   If a custom build account is configured, use that account instead. For an
+   existing Cloud Run service, find its runtime account with:
 
-gcloud projects add-iam-policy-binding srmtrpai \
-  --member "serviceAccount:${PROJECT_EMAIL}" \
-  --role "roles/secretmanager.secretAccessor"
+   ```bash
+   gcloud run services describe srm-trp-transport --region asia-south1 \
+     --format='value(spec.template.spec.serviceAccountName)'
+   ```
 
-gcloud projects add-iam-policy-binding srmtrpai \
-  --member "serviceAccount:${PROJECT_EMAIL}" \
-  --role "roles/run.admin"
-```
+   A new service normally uses the project's Compute Engine default account
+   unless another service identity is selected. Confirm the actual runtime
+   identity in the Google Cloud console; do not guess if the account is absent
+   or a custom identity is configured.
+
+2. Substitute those **account emails** below (these are not database
+   credentials), then grant the runtime identity access to only the four
+   required secrets:
+
+   ```bash
+   BUILD_SA="BUILD_SERVICE_ACCOUNT_EMAIL"
+   RUN_SA="CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT_EMAIL"
+
+   for secret in mongo-uri jwt-secret device-keys firebase-api-key; do
+     gcloud secrets add-iam-policy-binding "$secret" \
+       --member="serviceAccount:$RUN_SA" \
+       --role="roles/secretmanager.secretAccessor"
+   done
+
+   gcloud projects add-iam-policy-binding srmtrpai \
+     --member="serviceAccount:$BUILD_SA" --role="roles/run.admin"
+   gcloud artifacts repositories add-iam-policy-binding srm-trp \
+     --location=asia-south1 --member="serviceAccount:$BUILD_SA" \
+     --role="roles/artifactregistry.writer"
+   gcloud projects add-iam-policy-binding srmtrpai \
+     --member="serviceAccount:$BUILD_SA" --role="roles/logging.logWriter"
+   gcloud iam service-accounts add-iam-policy-binding "$RUN_SA" \
+     --member="serviceAccount:$BUILD_SA" --role="roles/iam.serviceAccountUser"
+   ```
+
+The person submitting the build also needs the appropriate Cloud Build and
+service-account permissions. See Google's guides for
+[Cloud Build deployment permissions](https://cloud.google.com/build/docs/deploying-builds/deploy-cloud-run#grant-permissions)
+and [Cloud Run secret access](https://cloud.google.com/run/docs/configuring/services/secrets#make-secret-accessible).
 
 ### 2.4 Firebase console setup (the sign-in part)
 
@@ -330,15 +423,20 @@ the Firebase console, not in Git.
    - `srmtrpai.firebaseapp.com`
    - `localhost` (for local development)
    - your own domain, if you have one
-3. **Authentication → Users → Add user** — for every person who signs in with
-   a password: enter the email, set a password, and tick
-   **"Add email verified"**.
+3. **Authentication → Users → Add user** — create each password account.
+   Arrange email verification through Firebase, or have a trusted admin mark
+   the address verified through the Firebase Admin SDK only after confirming
+   mailbox ownership **and control of that Firebase account**. An attacker
+   could have registered the address first. The backend rejects unverified
+   emails.
 4. **Project settings → General → Your apps → Web API Key** — copy the API
    key for the `firebase-api-key` secret above.
 
-Google accounts cannot be curated in the Firebase console, so every
-authorised Google email must be added to the **access list** by hand
-([§3.3](#33-seed-the-access-list)).
+Add authorised Google and password emails to the **access list** by hand
+([§3.3](#33-seed-the-access-list)). Alternatively, an administrator can
+approve a verified password account for auto-provisioning using the custom
+claim described in [`docs/AUTHENTICATION.md`](AUTHENTICATION.md#auto-provisioning).
+A password sign-up by itself never grants portal access.
 
 Full explanation: [`docs/AUTHENTICATION.md`](AUTHENTICATION.md).
 
@@ -359,6 +457,9 @@ git pull origin main
 # Build the image and deploy it in one step
 gcloud builds submit --config deploy/cloudbuild.yaml
 ```
+
+The image is tagged with Cloud Build's unique `BUILD_ID` (and `latest`), so a
+manual submission does not depend on the trigger-only `COMMIT_SHA` value.
 
 Watch it in the browser (or follow the log in the terminal):
 
@@ -395,20 +496,20 @@ service `srm-trp-transport` in `asia-south1`.
 
 ### 3.3 Seed the access list
 
-The access list lives in MongoDB and decides who may sign in. It is managed
-with the CLI, from your machine, against the same database the backend uses:
+The access list lives in MongoDB and decides who may sign in. The CLI loads
+`.env` automatically, so first ensure that file contains the **rotated**
+`MONGO_URI`, a nonempty `JWT_SECRET`, and the same `MONGO_DB_NAME` as Cloud
+Run (`srmtrpai` in the unmodified build configuration). Exported shell values
+will override `.env` values. Then:
 
 ```bash
 cd /c/Users/you/frontend
 source .venv/Scripts/activate
 
-export MONGO_URI="mongodb+srv://USER:PASSWORD@cluster.mongodb.net/?retryWrites=true&w=majority"
-export JWT_SECRET="local-only-secret-not-used-by-the-cli"
-
-# See who is allowed
+# See who is allowed (the CLI also creates any missing application indexes)
 python -m backend.manage_access list
 
-# Allow a Google account (must exist before the person first signs in)
+# Allow a verified Google or password account
 python -m backend.manage_access add principal@srmtrp.edu.in
 
 # Give someone a different role
@@ -422,11 +523,35 @@ python -m backend.manage_access activate   someone@srmtrp.edu.in
 python -m backend.manage_access unlink someone@srmtrp.edu.in
 ```
 
-> Password accounts created in the Firebase console are **auto-provisioned**
-> on first sign-in with the default role (`transport_office`). Google
-> accounts are **never** auto-provisioned — if the email is not on the access
-> list, Google sign-in is refused even though Firebase accepted the
-> credential.
+To avoid storing the URI in a local plaintext file, you can instead use a
+session-only environment value. Run this before the CLI commands above, then
+clear it afterward:
+
+```bash
+set +x
+read -r -s -p "Rotated Atlas connection string (hidden): " MONGO_URI
+printf '\n'
+export MONGO_URI
+export MONGO_DB_NAME=srmtrpai
+# The CLI requires a nonempty JWT_SECRET but does not sign sessions.
+export JWT_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+
+# Run the needed python -m backend.manage_access commands here.
+
+unset MONGO_URI JWT_SECRET
+```
+
+Atlas must permit your workstation's public IP for the CLI connection. Cloud
+Run has a separate outbound network path: for production, arrange a fixed
+Cloud Run egress IP or private connectivity and allow that path in Atlas as
+well. Do not assume that allowing your workstation also allows Cloud Run. See
+[Cloud Run's static outbound IP guide](https://cloud.google.com/run/docs/configuring/static-outbound-ip).
+
+> All Firebase users must have verified email addresses. An unknown password
+> account is auto-provisioned only when a Firebase administrator has set its
+> `transport_portal_approved_email` custom claim to that verified address and
+> auto-provisioning is enabled. Google accounts are **never** auto-provisioned;
+> their verified email must already be on the access list.
 
 ### 3.4 Alternative: deploy the backend to a plain Docker host
 
@@ -443,7 +568,7 @@ docker run -d --name srm-trp -p 8080:8080 --env-file .env.production \
 
 `.env.production` must contain at least:
 
-```bash
+```text
 ENVIRONMENT=production
 MONGO_URI=mongodb+srv://...
 MONGO_DB_NAME=srmtrpai
@@ -490,7 +615,7 @@ curl -s https://srmtrpai.web.app/api/auth/config
 Expected:
 
 ```json
-{"mode":"firebase","firebase":{"enabled":true,"providers":["password","google.com"],"auto_provision":true},"legacy_password_login":false}
+{"mode":"firebase","firebase":{"enabled":true,"providers":["password","google.com"],"auto_provision":true},"legacy_password_login":true}
 ```
 
 Then sign in at **https://srmtrpai.web.app/** with an account you created in
@@ -513,14 +638,17 @@ firebase deploy --only hosting
 
 ```bash
 gcloud run revisions list --service srm-trp-transport --region asia-south1
-gcloud run revisions activate REVISION_ID --service srm-trp-transport --region asia-south1
+# Replace REVISION_ID with the full name of a known-good revision.
+gcloud run services update-traffic srm-trp-transport --region asia-south1 \
+  --to-revisions=REVISION_ID=100
 ```
 
-**Roll back the frontend:**
-
-```bash
-firebase hosting:rollback
-```
+**Roll back the frontend:** In Firebase console → **Hosting & Serverless →
+Hosting → Release history**, open the menu for the known-good release and
+select **Roll back**. See
+[Firebase's rollback instructions](https://firebase.google.com/docs/hosting/manage-hosting-resources#roll-back).
+This repository's Hosting rewrite is not pinned to a Cloud Run revision, so
+rolling back Hosting does not roll back the backend.
 
 ---
 
@@ -535,7 +663,7 @@ firebase hosting:rollback
 | `python: command not found` | the Python installer did not add it to `PATH` | re-run the installer with *Modify* |
 | Docker build fails with `/bin/sh^M: not found` | CRLF line endings | see the CRLF warning in [§3.1](#31-backend--cloud-run) |
 | `firebase deploy` asks for a project | `.firebaserc` was not cloned | `firebase use --add` |
-| `gcloud builds submit` fails on secrets | the build service account cannot read them | see [§2.3](#23-one-time-google-cloud-setup) |
+| Deployment fails on secrets | the Cloud Run runtime identity lacks secret access | see [§2.3](#23-one-time-google-cloud-setup) |
 | `MONGO_URI` fails to authenticate | the secret has a trailing newline | recreate with `printf '%s'`, not `echo` |
 | Google sign-in says *unauthorized domain* | the hosting domain is not authorised | [§2.4](#24-firebase-console-setup-the-sign-in-part) |
 | A Google account is refused | it is not on the access list | [§3.3](#33-seed-the-access-list) |
@@ -544,10 +672,10 @@ firebase hosting:rollback
 
 ## 7. Before you go live
 
-- [ ] **Rotate the leaked MongoDB credential** that was previously committed
-      to Git history, and purge the old credential from the history. This is
-      a production blocker — see
-      [§19 of the upgrade specification](UPGRADE_SPECIFICATION.md#19-outstanding-work-and-known-risks).
+- [ ] **Revoke or rotate the MongoDB credential leaked in Git history** and
+      purge the history. A new credential does not prove that an old one was
+      revoked. Rotate any other credential exposed in chat or logs separately.
+      See [§19 of the upgrade specification](UPGRADE_SPECIFICATION.md#19-outstanding-work-and-known-risks).
 - [ ] `JWT_SECRET` is 32+ random characters.
 - [ ] `COOKIE_SECURE=true` (the default when `ENVIRONMENT=production`).
 - [ ] `DEVICE_API_KEYS` holds the real detector keys.

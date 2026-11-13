@@ -33,6 +33,9 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
+
+from pymongo.errors import ConfigurationError, ConnectionFailure, OperationFailure
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -64,9 +67,50 @@ def _database():
     uri = os.getenv("MONGO_URI", "").strip()
     if not uri:
         raise SystemExit("MONGO_URI is not set. Add it to your .env or export it.")
+
+    # Config also parses the URI to choose a default database. Check it first
+    # so malformed bracket/IPv6 syntax does not result in an unsafe traceback.
+    try:
+        urlsplit(uri)
+    except ValueError:
+        raise SystemExit(
+            "MongoDB connection string is malformed. Check its format and "
+            "URL-encode special characters in the credentials."
+        ) from None
+
     config = Config.from_env()
-    client = create_mongo_client(uri)
-    return get_database(config, client)
+    try:
+        client = create_mongo_client(uri)
+        return get_database(config, client)
+    except ConfigurationError:
+        # PyMongo may raise this while parsing the URI or looking up SRV DNS.
+        raise SystemExit(
+            "MongoDB connection configuration or DNS lookup failed. Check "
+            "MONGO_URI, SRV DNS, and URL-encoding of credentials."
+        ) from None
+    except ConnectionFailure:
+        raise SystemExit(
+            "Could not establish a usable MongoDB connection. Check network, "
+            "TLS, DNS, and the Atlas IP access list. This does not verify "
+            "whether the credentials are valid."
+        ) from None
+    except OperationFailure as error:
+        # Authentication is normally code 18; Atlas can also use code 8000.
+        message = str(error).lower()
+        if error.code == 18 or "authentication failed" in message or "bad auth" in message:
+            raise SystemExit(
+                "MongoDB authentication failed. Check the database user and "
+                "password, including URL-encoding of special characters."
+            ) from None
+        if error.code == 13:
+            raise SystemExit(
+                "MongoDB denied database access. Check MONGO_DB_NAME and the "
+                "database user's permissions, including permission to create indexes."
+            ) from None
+        raise SystemExit(
+            "MongoDB rejected database initialization. Check database permissions "
+            "and index state; consult Atlas logs without sharing credentials."
+        ) from None
 
 
 def _print_entries(entries: list[dict]) -> None:

@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 """Run the SRM TRP Transport app locally for a browser preview.
 
-The preview uses an in-memory MongoDB (``mongomock``) unless ``MONGO_URI``
-points at a real server, so it never touches production data. The fake demo
-dataset is seeded into the same database handle the app serves from.
+The preview uses an in-memory MongoDB (``mongomock``) by default. It refuses
+an external database unless explicitly allowed, because the application also
+loads ``MONGO_URI`` from the repository's ``.env``. The fake demo dataset is
+seeded into the same database handle the app serves from.
 
 Usage:
     python scripts/run_preview.py [--port 5055] [--host 0.0.0.0] [--no-seed]
 
 Environment overrides:
-    MONGO_URI          use a real MongoDB instead of the in-memory one
-    JWT_SECRET         signing key for the preview session (auto-generated if unset)
-    PREVIEW_PASSWORD   password for the seeded demo accounts (generated per run if unset)
+    MONGO_URI             database URI (defaults to in-memory)
+    ALLOW_REAL_PREVIEW_DB explicitly allow an external database (default false)
+    ALLOW_DEMO_SEED       also required to seed an external database
+    JWT_SECRET            signing key for the preview session (auto-generated if unset)
+    PREVIEW_PASSWORD      password for the seeded demo accounts (generated per run if unset)
     PREVIEW_HEAD_ADMIN_EMAIL / PREVIEW_TRANSPORT_EMAIL
+
+Never allow an external preview database to point at production data. Even
+with --no-seed, the application may create indexes or modify data.
 """
 from __future__ import annotations
 
@@ -92,8 +98,20 @@ def main() -> int:
 
     mongo_uri = os.getenv("MONGO_URI", "mongomock://transport_preview").strip()
     using_memory = mongo_uri.startswith("mongomock://")
-    jwt_secret = os.getenv("JWT_SECRET") or secrets.token_urlsafe(48)
+    # Check before constructing a client or creating indexes. MONGO_URI may
+    # have been loaded from .env, not deliberately set for the preview.
+    if not using_memory and not _bool("ALLOW_REAL_PREVIEW_DB", False):
+        print(
+            "Refusing to connect the preview to an external database. Set "
+            "MONGO_URI=mongomock://transport_preview for an isolated preview.",
+            file=sys.stderr,
+        )
+        return 2
+    if not using_memory and not args.no_seed and not _bool("ALLOW_DEMO_SEED", False):
+        print("Refusing to seed an external database without ALLOW_DEMO_SEED=true", file=sys.stderr)
+        return 2
 
+    jwt_secret = os.getenv("JWT_SECRET") or secrets.token_urlsafe(48)
     config = build_config(mongo_uri, jwt_secret)
     client = create_mongo_client(mongo_uri)
     db = get_database(config, client)
@@ -103,9 +121,6 @@ def main() -> int:
     office_email = os.getenv("PREVIEW_TRANSPORT_EMAIL", "transport.office@example.invalid")
 
     if not args.no_seed:
-        if not using_memory and os.getenv("ALLOW_DEMO_SEED", "").lower() not in {"1", "true", "yes", "on"}:
-            print("Refusing to seed a non-memory database without ALLOW_DEMO_SEED=true", file=sys.stderr)
-            return 2
         counts = seed_demo_data(
             db,
             config,
@@ -123,7 +138,7 @@ def main() -> int:
     print("=" * 72)
     print(" SRM TRP Transport — local preview")
     print(f" URL          : http://{args.host}:{args.port}/")
-    print(f" Database     : {'in-memory (mongomock)' if using_memory else 'MongoDB at ' + mongo_uri.split('@')[-1]}")
+    print(f" Database     : {'in-memory (mongomock)' if using_memory else 'external MongoDB (URI hidden)'}")
     print(f" Head admin   : {head_email}")
     print(f" Transport    : {office_email}")
     print(f" Password     : {password}   (fake demo data only — change it for anything real)")

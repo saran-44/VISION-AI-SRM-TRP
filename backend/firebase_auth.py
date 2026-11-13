@@ -8,26 +8,15 @@ needed.
 
 Two independent checks protect the portal:
 
-1. **Credential check (Firebase).**  Only a credential that Firebase accepts
-   can produce a valid ID token. For the email/password provider this means
-   the email was explicitly created in the Firebase console.
-2. **Authorisation check (this module + the ``users`` collection).**  A
-   Firebase token is *not* by itself an invitation. Google sign-in will happily
-   mint a valid token for any Google account on earth, so the email must also
-   be present and active in the ``users`` collection.
-
-Provider semantics:
-
-===========  =========================================================
-Provider     Authorisation behaviour
-===========  =========================================================
-``password`` A successful sign-in proves an administrator created that
-             Firebase account, so the authorisation record may be
-             created automatically (see ``FIREBASE_AUTO_PROVISION``).
-``google.com`` Carries no such proof, so the authorisation record must
-             already exist. Pre-seed the email with
-             ``python -m backend.manage_access add <email>``.
-===========  =========================================================
+1. **Credential check (Firebase).** Only a credential that Firebase accepts
+   can produce a valid ID token. Firebase password accounts can also be
+   created by client-side sign-up, so sign-in alone is not administrator
+   approval.
+2. **Authorisation check (access module + the ``users`` collection).** The
+   token must carry a verified email, and the email must be active in the
+   access list. An otherwise unknown password user may be auto-provisioned
+   only with the administrator-set approval claim. Google users always need
+   a pre-existing access-list entry.
 """
 from __future__ import annotations
 
@@ -40,10 +29,10 @@ from jwt import PyJWKClient
 
 logger = logging.getLogger(__name__)
 
-# Google's public signing keys for Firebase ID tokens. These are public
-# certificates, refreshed automatically by PyJWKClient when they rotate.
-GOOGLE_SECURE_TOKEN_CERTS = (
-    "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"
+# Firebase's OpenID discovery document advertises this JSON Web Key Set.
+# PyJWKClient expects JWKS, not Google's separate x509 certificate endpoint.
+GOOGLE_SECURE_TOKEN_JWKS = (
+    "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"
 )
 
 #: The Firebase sign-in providers this application understands.
@@ -51,9 +40,10 @@ PROVIDER_PASSWORD = "password"
 PROVIDER_GOOGLE = "google.com"
 DEFAULT_PROVIDERS = (PROVIDER_PASSWORD, PROVIDER_GOOGLE)
 
-#: Providers whose successful authentication implies that an administrator
-#: provisioned the account, so the authorisation record may be auto-created.
-SELF_PROVING_PROVIDERS = frozenset({PROVIDER_PASSWORD})
+#: A trusted administrator sets this Firebase custom claim to the approved
+#: email before an unknown password account may be auto-provisioned. Matching
+#: the email also prevents a later account email change from reusing approval.
+PORTAL_APPROVAL_CLAIM = "transport_portal_approved_email"
 
 _jwk_client: PyJWKClient | None = None
 _jwk_lock = threading.Lock()
@@ -74,7 +64,7 @@ def _signing_key_client() -> PyJWKClient:
         if _jwk_client is None:
             # lifespan caches the key set for five minutes, which is enough to
             # pick up Google's key rotation without hammering the endpoint.
-            _jwk_client = PyJWKClient(GOOGLE_SECURE_TOKEN_CERTS, lifespan=300)
+            _jwk_client = PyJWKClient(GOOGLE_SECURE_TOKEN_JWKS, lifespan=300)
         return _jwk_client
 
 
@@ -92,9 +82,16 @@ def verify_id_token(id_token: str, project_id: str) -> dict[str, Any]:
 
     try:
         signing_key = _signing_key_client().get_signing_key_from_jwt(id_token)
+    except jwt.PyJWKClientConnectionError as exc:
+        # This is a PyJWTError too, but an unavailable key service is not an
+        # invalid credential. Report a retryable failure rather than a 401.
+        logger.warning("Could not fetch the Firebase signing keys: %s", exc)
+        raise FirebaseAuthError(
+            "The authentication service is temporarily unavailable.", status=503
+        ) from exc
     except jwt.PyJWTError as exc:
         raise FirebaseAuthError("The Firebase ID token could not be verified.") from exc
-    except Exception as exc:  # network / key-set problems
+    except Exception as exc:  # unexpected key-set problems
         logger.warning("Could not fetch the Firebase signing keys: %s", exc)
         raise FirebaseAuthError(
             "The authentication service is temporarily unavailable.", status=503
@@ -159,7 +156,8 @@ def email_of(claims: dict[str, Any]) -> str:
 
 
 def is_email_verified(claims: dict[str, Any]) -> bool:
-    return bool(claims.get("email_verified"))
+    # Do not treat a string such as "false" as proof of verification.
+    return claims.get("email_verified") is True
 
 
 def firebase_uid(claims: dict[str, Any]) -> str:
