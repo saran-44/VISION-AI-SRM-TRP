@@ -1,6 +1,6 @@
 # SRM TRP Transport — Upgrade Status Report
 
-**Repository:** `saran-44/frontend` (imported from `hemanathanmd01/Clg-bus-project`)
+**Repository:** `saran-44/VISION-AI-SRM-TRP` (formerly `saran-44/frontend`, imported from `hemanathanmd01/Clg-bus-project`)
 **Original report date:** 2026-11-12
 **Specification:** [`docs/UPGRADE_SPECIFICATION.md`](docs/UPGRADE_SPECIFICATION.md)
 

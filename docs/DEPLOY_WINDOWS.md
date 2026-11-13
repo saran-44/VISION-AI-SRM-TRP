@@ -1,8 +1,9 @@
 # Windows Git Bash: recover tools, configure Firebase and Atlas, and deploy
 
-This is the ordered runbook for the **existing** `saran-44/frontend` clone,
-Firebase/Google Cloud project **`srmtrpai`**, Cloud Run region **`asia-south1`**,
-and initial portal administrator **`814725105014@trp.srmtrichy.edu.in`**.
+This is the ordered runbook for the **existing** repository clone (formerly
+`saran-44/frontend`, now `saran-44/VISION-AI-SRM-TRP`), Firebase/Google Cloud
+project **`srmtrpai`**, Cloud Run region **`asia-south1`**, and initial portal
+administrator **`814725105014@trp.srmtrichy.edu.in`**.
 It is written for Git Bash on Windows and can also be imported into Claude.
 
 > **Read this first.** No real Firebase, Atlas, Cloud Run or Hosting deployment
@@ -148,7 +149,10 @@ git status --short
 git branch --show-current
 ```
 
-The remote should be `https://github.com/saran-44/frontend.git` and the status
+The repository's current canonical URL is
+`https://github.com/saran-44/VISION-AI-SRM-TRP.git`; GitHub redirects its former
+`https://github.com/saran-44/frontend.git` URL to the same repository. Either
+remote is acceptable if it resolves to the correct repository. The status
 should show **no local changes or untracked files that matter**. If the folder
 is elsewhere, `cd` to your actual existing clone instead. If there are local
 changes, stop and back them up or commit them appropriately; do not overwrite

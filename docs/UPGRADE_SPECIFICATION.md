@@ -11,7 +11,8 @@
 > The companion [Windows runbook](DEPLOY_WINDOWS.md) contains the detailed,
 > ordered operational commands; import both files for the complete context.
 >
-> **Repository:** `https://github.com/saran-44/frontend`
+> **Repository:** `https://github.com/saran-44/VISION-AI-SRM-TRP`
+> (the former `saran-44/frontend` URL redirects here)
 >
 > **Document version:** 3.0 — detection, cameras, golden-glass theme,
 > Firebase authentication, Hosting and first-deployment safeguards. Verify the
