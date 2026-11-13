@@ -163,10 +163,10 @@ Only after these Hosting/network fixes have been merged into `main`, and after
 inspecting/backing up your changes, run:
 
 ```bash
-git fetch origin
-git switch main
-git pull --ff-only origin main
-git log -1 --oneline
+git fetch origin &&
+git switch main &&
+git pull --ff-only origin main &&
+git log -1 --oneline &&
 git status --short
 ```
 
@@ -332,6 +332,9 @@ gcloud artifacts repositories create srm-trp \
 ```bash
 gcloud iam service-accounts create srm-trp-run \
   --display-name="SRM TRP Cloud Run runtime" --project="$PROJECT_ID"
+```
+
+```bash
 gcloud iam service-accounts create srm-trp-build \
   --display-name="SRM TRP Cloud Build deployer" --project="$PROJECT_ID"
 ```
@@ -369,13 +372,13 @@ review the configuration with your network administrator instead.
 
 ```bash
 gcloud compute networks create srm-trp-vpc --subnet-mode=custom \
-  --bgp-routing-mode=regional --project="$PROJECT_ID"
+  --bgp-routing-mode=regional --project="$PROJECT_ID" &&
 gcloud compute networks subnets create srm-trp-subnet --network=srm-trp-vpc \
   --region="$REGION" --range=10.42.0.0/24 --enable-private-ip-google-access \
-  --project="$PROJECT_ID"
+  --project="$PROJECT_ID" &&
 gcloud compute routers create srm-trp-router --network=srm-trp-vpc \
-  --region="$REGION" --project="$PROJECT_ID"
-gcloud compute addresses create srm-trp-nat-ip --region="$REGION" --project="$PROJECT_ID"
+  --region="$REGION" --project="$PROJECT_ID" &&
+gcloud compute addresses create srm-trp-nat-ip --region="$REGION" --project="$PROJECT_ID" &&
 gcloud compute routers nats create srm-trp-nat --router=srm-trp-router \
   --region="$REGION" --nat-custom-subnet-ip-ranges=srm-trp-subnet \
   --nat-external-ip-pool=srm-trp-nat-ip --project="$PROJECT_ID"
@@ -409,24 +412,18 @@ runtime identity receives secret access in §8, not project-wide secret access.
 ```bash
 gcloud artifacts repositories add-iam-policy-binding srm-trp --location="$REGION" \
   --project="$PROJECT_ID" --member="serviceAccount:$BUILD_SA" \
-  --role=roles/artifactregistry.writer --condition=None
-
+  --role=roles/artifactregistry.writer --condition=None &&
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-  --member="serviceAccount:$BUILD_SA" --role=roles/run.admin --condition=None
-
+  --member="serviceAccount:$BUILD_SA" --role=roles/run.admin --condition=None &&
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-  --member="serviceAccount:$BUILD_SA" --role=roles/logging.logWriter --condition=None
-
+  --member="serviceAccount:$BUILD_SA" --role=roles/logging.logWriter --condition=None &&
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-  --member="serviceAccount:$BUILD_SA" --role=roles/compute.networkViewer --condition=None
-
+  --member="serviceAccount:$BUILD_SA" --role=roles/compute.networkViewer --condition=None &&
 gcloud compute networks subnets add-iam-policy-binding srm-trp-subnet \
   --region="$REGION" --project="$PROJECT_ID" \
-  --member="serviceAccount:$BUILD_SA" --role=roles/compute.networkUser
-
+  --member="serviceAccount:$BUILD_SA" --role=roles/compute.networkUser &&
 gcloud storage buckets add-iam-policy-binding "gs://$BUILD_BUCKET" \
-  --member="serviceAccount:$BUILD_SA" --role=roles/storage.objectViewer
-
+  --member="serviceAccount:$BUILD_SA" --role=roles/storage.objectViewer &&
 gcloud iam service-accounts add-iam-policy-binding "$RUN_SA" --project="$PROJECT_ID" \
   --member="serviceAccount:$BUILD_SA" --role=roles/iam.serviceAccountUser
 ```
@@ -634,8 +631,17 @@ name exists, inspect it rather than deleting it:
 
 ```bash
 gcloud secrets create mongo-uri --replication-policy=automatic --project="$PROJECT_ID"
+```
+
+```bash
 gcloud secrets create jwt-secret --replication-policy=automatic --project="$PROJECT_ID"
+```
+
+```bash
 gcloud secrets create device-keys --replication-policy=automatic --project="$PROJECT_ID"
+```
+
+```bash
 gcloud secrets create firebase-api-key --replication-policy=automatic --project="$PROJECT_ID"
 ```
 
@@ -654,7 +660,7 @@ set -o pipefail
 
 ```bash
 python -c 'import secrets,sys; sys.stdout.write(secrets.token_urlsafe(48))' | \
-  gcloud secrets versions add jwt-secret --data-file=- --project="$PROJECT_ID"
+  gcloud secrets versions add jwt-secret --data-file=- --project="$PROJECT_ID" &&
 python -c 'import secrets,sys; sys.stdout.write(secrets.token_urlsafe(48))' | \
   gcloud secrets versions add device-keys --data-file=- --project="$PROJECT_ID"
 ```
