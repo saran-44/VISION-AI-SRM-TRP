@@ -239,3 +239,27 @@ def test_concurrent_table_operations_commit_independently(db):
     with ThreadPoolExecutor(max_workers=8) as pool:
         assert len(list(pool.map(write_and_read, range(30)))) == 30
     assert db.buses.count_documents({}) == 30
+
+
+def test_schema_version_error_names_the_database_role_and_observed_versions(app, db, config):
+    """A wrong project, an unapplied migration and a bad read look identical in
+    logs unless the message states what was actually read."""
+    from sqlalchemy import update
+
+    from backend.db import get_database, schema_version
+
+    with db.engine.begin() as conn:
+        conn.execute(update(schema_version).values(version=2))
+    try:
+        with pytest.raises(RuntimeError) as error:
+            get_database(config, db.engine)
+    finally:
+        # Restore the shared test database so later tests still start.
+        with db.engine.begin() as conn:
+            conn.execute(update(schema_version).values(version=1))
+
+    message = str(error.value)
+    assert "Database schema version is missing or incompatible" in message
+    assert "expected=[1]" in message
+    assert "found=[2]" in message
+    assert "database=" in message and "role=" in message

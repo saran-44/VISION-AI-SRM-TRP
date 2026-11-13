@@ -19,7 +19,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON, Boolean, Column, DateTime, Float, Integer, MetaData, String, Table,
-    Text, and_, create_engine, delete, func, insert, or_, select, update,
+    Text, and_, create_engine, delete, func, insert, or_, select, text, update,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import DBAPIError, OperationalError, SQLAlchemyError
@@ -295,7 +295,20 @@ def get_database(config: Config, engine=None):
         with engine.connect() as conn:
             versions = conn.execute(select(schema_version.c.version)).scalars().all()
             if versions != [SCHEMA_VERSION]:
-                raise RuntimeError("Database schema version is missing or incompatible; apply the documented migration")
+                # An unapplied migration, a partially applied one and a connection
+                # to the wrong project are indistinguishable from this failure
+                # alone, so name the database, the role and what was read. None of
+                # these values is a secret; the password and URL are never logged.
+                try:
+                    database, role = conn.execute(
+                        text("select current_database(), current_user")
+                    ).one()
+                except SQLAlchemyError:
+                    database = role = "unknown"
+                raise RuntimeError(
+                    "Database schema version is missing or incompatible; apply the documented migration "
+                    f"(database={database}, role={role}, expected=[{SCHEMA_VERSION}], found={versions!r})"
+                )
             # Check runtime SELECT permission and that all tables exist without
             # touching or changing real rows.
             for table in TABLES.values():
