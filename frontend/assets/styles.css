@@ -35,25 +35,25 @@
 
         /* Specific Element Overrides for Dark Mode */
         body.dark-theme th {
-            background-color: #0f172a;
+            background-color: var(--surface-sunken, #0f172a);
         }
 
         body.dark-theme tr:hover td {
-            background-color: #334155;
+            background-color: var(--surface-muted, #334155);
         }
 
         body.dark-theme .action-btn {
-            background-color: #334155;
+            background-color: var(--surface-muted, #334155);
         }
 
         body.dark-theme .btn-outline:hover {
-            background-color: #334155;
-            border-color: #475569;
+            background-color: var(--surface-muted, #334155);
+            border-color: var(--border-strong, #475569);
         }
 
         body.dark-theme .camera-container {
-            background-color: #0f172a;
-            border-color: #334155;
+            background-color: #160d2b;
+            border-color: var(--border-strong, #334155);
         }
 
         * {
@@ -176,7 +176,7 @@
         }
 
         .main-content::-webkit-scrollbar-thumb {
-            background-color: #cbd5e1;
+            background-color: var(--border-strong, #cbd5e1);
             border-radius: 10px;
         }
 
@@ -440,13 +440,13 @@
             position: relative;
             width: 100%;
             height: 250px;
-            background-color: #f1f5f9;
+            background-color: var(--surface-sunken, #f1f5f9);
             border-radius: 1rem;
             overflow: hidden;
             display: flex;
             justify-content: center;
             align-items: center;
-            border: 2px dashed #cbd5e1;
+            border: 2px dashed var(--border-strong, #cbd5e1);
         }
 
         .camera-overlay {
@@ -563,13 +563,13 @@
         }
 
         .number-plate {
-            background-color: #fbbf24;
-            color: #000;
+            background-color: var(--accent, #fbbf24);
+            color: #1a1130;
             padding: 0.8rem 2rem;
             border-radius: 0.5rem;
             font-size: 2.5rem;
             font-weight: 800;
-            border: 4px solid #1e293b;
+            border: 4px solid #1a1130;
             margin: 1rem 0;
             letter-spacing: 3px;
             font-family: monospace;
@@ -622,8 +622,8 @@
         }
 
         .btn-outline:hover {
-            background-color: #f8fafc;
-            border-color: #cbd5e1;
+            background-color: var(--surface-muted, #f8fafc);
+            border-color: var(--border-strong, #cbd5e1);
         }
 
         /* Table Styles */
@@ -651,7 +651,7 @@
             font-size: 0.85rem;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            background-color: #f8fafc;
+            background-color: var(--surface-muted, #f8fafc);
         }
 
         th:first-child {
@@ -707,7 +707,7 @@
             width: 32px;
             height: 32px;
             border-radius: 0.5rem;
-            background-color: #f1f5f9;
+            background-color: var(--surface-muted, #f1f5f9);
             color: var(--text-muted);
             border: none;
             cursor: pointer;
@@ -728,7 +728,7 @@
         }
 
         tr:hover td {
-            background-color: #f8fafc;
+            background-color: var(--surface-muted, #f8fafc);
         }
 
         tr:last-child td {
@@ -891,12 +891,12 @@
             }
 
             .middle-grid>div:first-child::-webkit-scrollbar-thumb {
-                background: #cbd5e1;
+                background: var(--border-strong, #cbd5e1);
                 border-radius: 4px;
             }
 
             body.dark-theme .middle-grid>div:first-child::-webkit-scrollbar-thumb {
-                background: #475569;
+                background: var(--text-muted, #475569);
             }
 
             .middle-grid>div:first-child>.card {
@@ -1055,7 +1055,7 @@
             height: auto;
             display: block;
             object-fit: contain;
-            background-color: #f1f5f9;
+            background-color: var(--surface-sunken, #f1f5f9);
         }
 
         .bus-details-list {
@@ -1233,13 +1233,13 @@ body.dark-theme {
 
 .camera-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; }
 .camera-tile { padding: 1.1rem; }
-.camera-container { height: 170px; border-style: solid; border-width: 1px; border-color: var(--border); background: #0f172a; }
+.camera-container { height: 170px; border-style: solid; border-width: 1px; border-color: var(--border); background: #160d2b; }
 .camera-placeholder {
     width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center;
-    justify-content: center; gap: .5rem; color: #cbd5e1;
-    background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
+    justify-content: center; gap: .5rem; color: rgba(246, 241, 255, .75);
+    background: linear-gradient(135deg, #160d2b 0%, #33145f 100%);
 }
-.camera-placeholder i { font-size: 2.6rem; color: #93c5fd; }
+.camera-placeholder i { font-size: 2.6rem; color: #e0b84a; }
 .camera-placeholder span { font-size: .9rem; font-weight: 600; }
 .camera-stream { width: 100%; height: 100%; object-fit: cover; }
 .stream-badge { font-size: .72rem; font-weight: 700; }
