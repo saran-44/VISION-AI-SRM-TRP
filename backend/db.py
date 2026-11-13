@@ -474,6 +474,50 @@ class Database:
             },
         }
 
+    def rename_bus(self, oid: str, old_number: str, changes: dict[str, Any]) -> int:
+        """Atomically update a bus and cascade bus_number rename to drivers and bus_states."""
+        new_number = changes["bus_number"]
+        now = changes["updated_at"]
+        with self.buses.guard(), self.engine.begin() as conn:
+            conn.execute(update(buses).where(buses.c._id == oid).values(**changes))
+            drv_res = conn.execute(
+                update(drivers)
+                .where(drivers.c.bus_number == old_number)
+                .values(bus_number=new_number, updated_at=now)
+            )
+            old_state = conn.execute(
+                select(bus_states).where(bus_states.c.bus_number == old_number)
+            ).mappings().first()
+            if old_state is not None:
+                existing_new = conn.execute(
+                    select(bus_states).where(bus_states.c.bus_number == new_number)
+                ).mappings().first()
+                if existing_new is None:
+                    conn.execute(
+                        update(bus_states)
+                        .where(bus_states.c._id == old_state["_id"])
+                        .values(bus_number=new_number, updated_at=now)
+                    )
+                else:
+                    old_key = (old_state["last_timestamp"], old_state["last_event_id"])
+                    new_key = (existing_new["last_timestamp"], existing_new["last_event_id"])
+                    if old_key > new_key:
+                        conn.execute(
+                            update(bus_states)
+                            .where(bus_states.c._id == existing_new["_id"])
+                            .values(
+                                direction=old_state["direction"],
+                                last_timestamp=old_state["last_timestamp"],
+                                last_event_id=old_state["last_event_id"],
+                                gate=old_state["gate"],
+                                camera_id=old_state["camera_id"],
+                                demo=old_state["demo"],
+                                updated_at=now,
+                            )
+                        )
+                    conn.execute(delete(bus_states).where(bus_states.c._id == old_state["_id"]))
+            return int(drv_res.rowcount or 0)
+
 
 def get_database(config: Config, engine=None):
     owned_engine = engine is None

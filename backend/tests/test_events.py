@@ -754,3 +754,41 @@ def test_analytics_sql_aggregation_buckets_by_local_hour_and_gate(client, db, us
     assert res["per_gate"][0] == {"gate": "Gate 1", "count": 2}
     assert res["per_bus"][0] == {"bus_number": "BUS-A", "count": 2}
     assert sum(item["count"] for item in res["per_hour"]) == 3
+
+
+def test_delete_bus_with_assigned_driver_returns_409_and_succeeds_after_reassignment(client, db, users):
+    bus_a = register_bus(client, users, "BUS-DEL-1")
+    bus_b = register_bus(client, users, "BUS-DEL-2")
+    login_transport_office(client, users)
+    drv = client.post(
+        "/api/drivers",
+        json={"name": "Assigned Driver", "bus_number": "BUS-DEL-1"},
+    )
+    assert drv.status_code == 201
+    drv_id = drv.get_json()["driver"]["id"]
+
+    blocked = client.delete(f"/api/buses/{bus_a['id']}")
+    assert blocked.status_code == 409
+
+    # Reassign driver to another bus, then deletion succeeds.
+    assert client.put(f"/api/drivers/{drv_id}", json={"bus_number": "BUS-DEL-2"}).status_code == 200
+    assert client.delete(f"/api/buses/{bus_a['id']}").status_code == 200
+    assert db.buses.find_one({"_id": bus_b["id"]}) is not None
+
+
+def test_rename_bus_cascades_to_assigned_drivers_and_bus_states(client, db, users):
+    bus = register_bus(client, users, "BUS-OLD-NAME")
+    post_event(client, event_payload(bus_number="BUS-OLD-NAME", direction="IN"))
+    login_transport_office(client, users)
+    drv = client.post(
+        "/api/drivers",
+        json={"name": "Cascade Driver", "bus_number": "BUS-OLD-NAME"},
+    )
+    assert drv.status_code == 201
+    drv_id = drv.get_json()["driver"]["id"]
+
+    renamed = client.put(f"/api/buses/{bus['id']}", json={"bus_number": "BUS-NEW-NAME"})
+    assert renamed.status_code == 200
+    assert db.drivers.find_one({"_id": drv_id})["bus_number"] == "BUS-NEW-NAME"
+    assert db.bus_states.find_one({"bus_number": "BUS-NEW-NAME"})["direction"] == "IN"
+    assert db.bus_states.find_one({"bus_number": "BUS-OLD-NAME"}) is None

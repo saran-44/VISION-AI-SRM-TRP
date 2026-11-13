@@ -1098,13 +1098,20 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         if "bus_number" in changes:
             changes["plate_key"] = plate_key(changes["bus_number"])
         changes["updated_at"] = naive_now()
+        reassigned = 0
         try:
-            db.buses.update_one({"_id": oid}, {"$set": changes})
+            if "bus_number" in changes and changes["bus_number"] != before["bus_number"]:
+                reassigned = db.rename_bus(oid, before["bus_number"], changes)
+            else:
+                db.buses.update_one({"_id": oid}, {"$set": changes})
         except IntegrityError:
             return jsonify({"error": "A bus with this number already exists"}), 409
         after = db.buses.find_one({"_id": oid})
         invalidate_stats_cache(db)
-        record_audit(db, g.current_user, "update", "buses", str(oid), before=before, after=after, flask_request=request)
+        audit_after = dict(after) if after else {}
+        if reassigned:
+            audit_after["drivers_reassigned"] = reassigned
+        record_audit(db, g.current_user, "update", "buses", str(oid), before=before, after=audit_after, flask_request=request)
         return jsonify({"bus": public_doc(after)})
 
     @app.delete("/api/buses/<bus_id>")
@@ -1114,6 +1121,14 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         before = db.buses.find_one({"_id": oid}) if oid else None
         if not before:
             return jsonify({"error": "Not found"}), 404
+        assigned = db.drivers.count_documents({"bus_number": before["bus_number"]})
+        if assigned > 0:
+            return (
+                jsonify({
+                    "error": f"Reassign or remove {assigned} assigned driver(s) before deleting this bus"
+                }),
+                409,
+            )
         db.buses.delete_one({"_id": oid})
         invalidate_stats_cache(db)
         record_audit(db, g.current_user, "delete", "buses", str(oid), before=before, flask_request=request)
