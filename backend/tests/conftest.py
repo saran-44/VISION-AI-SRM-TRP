@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import sys
+import os
+import re
+from urllib.parse import urlparse
 from dataclasses import replace
 from pathlib import Path
 
@@ -27,8 +30,7 @@ def build_config(**overrides) -> Config:
         environment="testing",
         debug=False,
         testing=True,
-        mongo_uri="mongomock://transport",
-        mongo_db_name="transport_test",
+        database_url=os.getenv("TEST_DATABASE_URL", "sqlite:///:memory:"),
         jwt_secret="test-only-secret-value-" + ("x" * 32),
         jwt_ttl_minutes=15,
         cookie_secure=False,
@@ -37,9 +39,51 @@ def build_config(**overrides) -> Config:
         rate_limit_enabled=False,
         # A Firebase project id so the Firebase sign-in paths are exercised.
         # The "not configured" behaviour is tested with an explicit override.
-        firebase_project_id="srmtrpai",
+        firebase_project_id="vision-ai-srmtrp",
     )
     return replace(base, **overrides) if overrides else base
+
+
+@pytest.fixture(scope="session", autouse=True)
+def prepare_postgres_test_database():
+    url = os.getenv("TEST_DATABASE_URL", "")
+    if not url:
+        yield
+        return
+    parts = urlparse(url)
+    if (os.getenv("ALLOW_TEST_DATABASE_RESET") != "true" or
+        parts.scheme not in {"postgresql", "postgres"} or
+        parts.hostname not in {"localhost", "127.0.0.1", "::1"} or
+        not re.fullmatch(r"/[A-Za-z0-9_]+_test", parts.path) or
+        parts.query or parts.fragment):
+        raise RuntimeError("PostgreSQL tests require ALLOW_TEST_DATABASE_RESET=true and a local *_test database with no URL options")
+    # libpq can otherwise take PGHOSTADDR from the environment even when the
+    # URL names localhost, silently redirecting destructive tests elsewhere.
+    old_hostaddr = os.environ.get("PGHOSTADDR")
+    os.environ["PGHOSTADDR"] = "::1" if parts.hostname == "::1" else "127.0.0.1"
+    import psycopg
+    sql = (ROOT / "backend/sql/001_initial.sql").read_text()
+    with psycopg.connect(url, autocommit=True) as conn:
+        # A deliberately disposable local database only. Never point tests at Supabase.
+        conn.execute("DROP SCHEMA IF EXISTS transport_portal CASCADE")
+        conn.execute(sql)
+    try:
+        yield
+    finally:
+        if old_hostaddr is None:
+            os.environ.pop("PGHOSTADDR", None)
+        else:
+            os.environ["PGHOSTADDR"] = old_hostaddr
+
+
+@pytest.fixture(autouse=True)
+def clean_postgres_test_database(prepare_postgres_test_database):
+    url = os.getenv("TEST_DATABASE_URL", "")
+    if url:
+        import psycopg
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute("TRUNCATE transport_portal.users, transport_portal.buses, transport_portal.drivers, transport_portal.events, transport_portal.audit_logs")
+    yield
 
 
 @pytest.fixture()

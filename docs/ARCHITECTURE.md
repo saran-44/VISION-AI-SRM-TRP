@@ -11,7 +11,7 @@
                     │   ├── exports: CSV + XLSX               │
                     │   └── live: /api/stream (SSE)            │
                     │                                          │
-                    │            MongoDB (indexes on startup)  │
+                    │            Supabase PostgreSQL (private schema)  │
                     └──────────────────────────────────────────┘
 ```
 
@@ -20,7 +20,7 @@
 | Module | Responsibility |
 | --- | --- |
 | `config.py` | Reads every setting from the environment; validates CORS origins, camera stream URLs and production secret strength. |
-| `db.py` | Mongo client factory, index creation, UTC helpers, `_id` → `id` serializer. |
+| `db.py` | PostgreSQL engine, typed table access, schema-version check, UTC helpers and `_id` → `id` serializer. |
 | `schemas.py` | Pydantic models for every request/response body and query filter. |
 | `auth.py` | Argon2 hashing, JWT issue/verify, HttpOnly cookie helpers, role and device-key decorators. |
 | `services.py` | Event ingestion and flag rules, stats/analytics computation, CSV/XLSX writers, audit records, camera configuration. |
@@ -59,3 +59,17 @@ with their licences, so the Content-Security-Policy can stay on `script-src 'sel
 | `transport_office` | manage, drivers, buses, driver details | read + write drivers and buses |
 
 Both roles are enforced server-side by `require_roles` / `require_page_roles`.
+
+## Database and security boundary
+
+The private `transport_portal` PostgreSQL schema is installed once from
+`backend/sql/001_initial.sql`; startup only checks the schema version and
+read access. A dedicated server-side role has DML permissions for the four
+application tables and append/read access to audit logs. Review ambient
+`PUBLIC` privileges in the Supabase project separately. The schema must not
+be exposed through the Supabase Data API: Firebase tokens are verified by
+Flask, and Flask enforces verified-email/access-list/role checks. Supabase RLS
+is not relied upon as a substitute for those checks. Each connection uses
+bound SQL parameters, a small pool and disabled prepared statements. SQLite
+in memory is supported only for disposable previews and tests. Existing MongoDB
+data requires a separate, reviewed import and is not silently copied.

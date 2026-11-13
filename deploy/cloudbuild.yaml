@@ -1,7 +1,7 @@
 # Google Cloud Build pipeline for the SRM TRP Transport backend.
 # Complete docs/DEPLOY_WINDOWS.md first: it creates the dedicated build and
-# runtime identities, secrets, Direct VPC egress and Cloud NAT. In particular,
-# Atlas must allow the NAT address before the first deployment can start.
+# runtime identities, secrets, Direct VPC egress and Cloud NAT. If Supabase
+# network restrictions are enabled, allow the NAT address before deployment.
 #
 #   gcloud builds submit --config deploy/cloudbuild.yaml .
 #
@@ -83,6 +83,6 @@ steps:
       - httpGet.path=/api/health,httpGet.port=8080,initialDelaySeconds=0,timeoutSeconds=5,periodSeconds=10,failureThreshold=24
       - --set-env-vars
       # Use a custom delimiter so the provider list keeps its comma.
-      - ^|^ENVIRONMENT=production|MONGO_DB_NAME=srmtrpai|APP_TIMEZONE=Asia/Kolkata|FIREBASE_PROJECT_ID=$PROJECT_ID|FIREBASE_AUTH_DOMAIN=$PROJECT_ID.firebaseapp.com|FIREBASE_STORAGE_BUCKET=srmtrpai.firebasestorage.app|FIREBASE_MESSAGING_SENDER_ID=734375891811|FIREBASE_APP_ID=1:734375891811:web:6851938bef332bc0e53956|FIREBASE_MEASUREMENT_ID=G-7MXBNH3N7D|FIREBASE_ALLOWED_PROVIDERS=password,google.com|FIREBASE_AUTO_PROVISION=false|LEGACY_PASSWORD_LOGIN_ENABLED=false
+      - ^|^ENVIRONMENT=production|PGSSLROOTCERT=/secrets/supabase-ca.crt|APP_TIMEZONE=Asia/Kolkata|FIREBASE_PROJECT_ID=$PROJECT_ID|FIREBASE_AUTH_DOMAIN=$PROJECT_ID.firebaseapp.com|FIREBASE_STORAGE_BUCKET=vision-ai-srmtrp.firebasestorage.app|FIREBASE_MESSAGING_SENDER_ID=235811571442|FIREBASE_APP_ID=1:235811571442:web:342e488e0ac2ee75b0f26b|FIREBASE_MEASUREMENT_ID=G-S4HS9TGV4H|FIREBASE_ALLOWED_PROVIDERS=password,google.com|FIREBASE_AUTO_PROVISION=false|LEGACY_PASSWORD_LOGIN_ENABLED=false
       - --set-secrets
-      - MONGO_URI=mongo-uri:latest,JWT_SECRET=jwt-secret:latest,DEVICE_API_KEYS=device-keys:latest,FIREBASE_API_KEY=firebase-api-key:latest
+      - DATABASE_URL=database-url:latest,JWT_SECRET=jwt-secret:latest,DEVICE_API_KEYS=device-keys:latest,FIREBASE_API_KEY=firebase-api-key:latest,/secrets/supabase-ca.crt=supabase-ca:latest

@@ -33,9 +33,10 @@ session token and the role on each request.
 
 ## Retention and sharing
 
-- Event, driver, bus and audit data stays in the MongoDB deployment operated by
-  the transport department. It is not sent to third-party services by this
-  application.
+- Event, driver, bus, access-list and audit data is stored in the configured
+  Supabase PostgreSQL project. Supabase hosts that data, Firebase handles
+  authentication, and Google Cloud hosts the application; review provider
+  regions, contracts, access controls and retention with the data owner.
 - Exports (CSV/Excel) are generated on demand and are downloaded to the
   requesting administrator's device. Treat them as personal data: store them
   securely and delete them when no longer needed.

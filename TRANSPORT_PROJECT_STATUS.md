@@ -4,16 +4,15 @@
 **Original report date:** 2026-11-12
 **Specification:** [`docs/UPGRADE_SPECIFICATION.md`](docs/UPGRADE_SPECIFICATION.md)
 
-> **Deployment update:** The current code includes Firebase Hosting/Cloud Run
-> routing and `__session` cookie fixes, verified-email/access-list checks,
-> restrictive Cloud Build settings, Direct VPC/NAT startup safeguards and an
-> administrator email-verification helper. Follow
-> [`docs/DEPLOY_WINDOWS.md`](docs/DEPLOY_WINDOWS.md) for the ordered setup.
-> The live project, account, Atlas, Hosting and Cloud Run deployment have not
-> been validated. Credential rotation, sensitive-history cleanup, account and
-> session review, and model/data licence review remain production blockers.
-> The rest of this report is historical; older test counts and earlier-round
-> feature descriptions below do not represent a live production verification.
+> **Current migration update:** The backend now targets a private Supabase
+> PostgreSQL schema and Firebase project `vision-ai-srmtrp`. The SQL migration,
+> least-privilege role and Git Bash steps are in
+> [`docs/DEPLOY_WINDOWS.md`](docs/DEPLOY_WINDOWS.md). No live Supabase, Firebase,
+> Hosting or Cloud Run integration has been verified; old MongoDB data is not
+> automatically imported. Previously exposed credentials still require
+> verified revocation. Everything below is a **historical report**: its MongoDB,
+> Firebase project identifiers, commands, test counts and status claims are
+> obsolete and must not be used for a current deployment.
 
 > **Update — round 2 (detection, cameras, Firebase, golden glass theme).**
 > The two items that were *PARTIAL* in the first round are now **DONE**:

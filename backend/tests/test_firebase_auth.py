@@ -52,8 +52,8 @@ def _claims(email: str, provider: str = PROVIDER_PASSWORD, uid: str = FIREBASE_U
         "email_verified": True,
         # The existing provisioning tests use an administrator-approved email.
         PORTAL_APPROVAL_CLAIM: email.strip().lower(),
-        "iss": "https://securetoken.google.com/srmtrpai",
-        "aud": "srmtrpai",
+        "iss": "https://securetoken.google.com/vision-ai-srmtrp",
+        "aud": "vision-ai-srmtrp",
         "firebase": {
             "sign_in_provider": provider,
             "identities": {provider: [email]},
@@ -65,7 +65,7 @@ def _rebuild(app, **overrides):
     """Rebuild the app with different settings, reusing the same database."""
     config = replace(app.config["TRANSPORT_CONFIG"], **overrides)
     application = app_module.create_app(
-        config, mongo_client=app.extensions["transport_db"].client
+        config, database_engine=app.extensions["transport_db"].engine
     )
     application.config.update(TESTING=True)
     return application
@@ -115,7 +115,7 @@ def test_auth_config_is_public(client):
 
 
 def test_auth_config_reports_firebase_when_configured(app, users):
-    application = _rebuild(app, firebase_project_id="srmtrpai")
+    application = _rebuild(app, firebase_project_id="vision-ai-srmtrp")
     payload = application.test_client().get("/api/auth/config").get_json()
     assert payload["mode"] == "firebase"
     assert payload["firebase"]["enabled"] is True
@@ -285,7 +285,7 @@ def test_firebase_login_rejects_a_deactivated_user(firebase_client, users, db):
 def test_firebase_login_rejects_a_provider_that_is_not_allowed(app, users, monkeypatch):
     config = replace(
         app.config["TRANSPORT_CONFIG"],
-        firebase_project_id="srmtrpai",
+        firebase_project_id="vision-ai-srmtrp",
         firebase_allowed_providers=(PROVIDER_PASSWORD,),
     )
     application = app_module.create_app(config)
@@ -303,7 +303,7 @@ def test_firebase_login_rejects_a_provider_that_is_not_allowed(app, users, monke
 def test_firebase_login_honours_auto_provision_being_off(app, users, monkeypatch):
     application = _rebuild(
         app,
-        firebase_project_id="srmtrpai",
+        firebase_project_id="vision-ai-srmtrp",
         firebase_auto_provision=False,
     )
     monkeypatch.setattr(app_module, "verify_firebase_id_token", _stub_verifier)
@@ -330,7 +330,7 @@ def test_firebase_login_rejects_a_different_firebase_account_for_the_same_email(
         "firebase_uid": "the-original-uid",
         "created_at": naive_now(),
     })
-    application = _rebuild(app, firebase_project_id="srmtrpai")
+    application = _rebuild(app, firebase_project_id="vision-ai-srmtrp")
     monkeypatch.setattr(app_module, "verify_firebase_id_token", _stub_verifier)
     response = application.test_client().post(
         "/api/auth/firebase",

@@ -1,7 +1,7 @@
 # Firebase: browser configuration, authentication and Hosting
 
 This document describes the checked-in integration. For the complete, ordered
-Windows installation, project setup, Atlas networking, private administrator
+Windows installation, project setup, Supabase networking, private administrator
 onboarding, Cloud Run/Hosting deploy and verification instructions, use
 **[DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md)**. The architecture and upgrade
 context are in [UPGRADE_SPECIFICATION.md](UPGRADE_SPECIFICATION.md), and the
@@ -11,20 +11,20 @@ access model is in [AUTHENTICATION.md](AUTHENTICATION.md).
 > against the live Firebase project from this workspace. Confirm them in
 > Firebase Console → Project settings → General → Your apps, or with
 > `firebase apps:sdkconfig`, before deploying. No live Firebase sign-in,
-> Cloud Run deployment, Atlas connection, or Hosting rewrite has been tested
+> Cloud Run deployment, Supabase connection, or Hosting rewrite has been tested
 > by the author of these changes.
 
 ## 1. Project configuration
 
 | Item | Value currently expected by the repository |
 | --- | --- |
-| Firebase / Google Cloud project ID | `srmtrpai` |
-| Web app ID | `1:734375891811:web:6851938bef332bc0e53956` |
-| Messaging sender ID | `734375891811` |
-| Firebase auth domain | `srmtrpai.firebaseapp.com` |
-| Storage bucket | `srmtrpai.firebasestorage.app` |
-| Measurement ID | `G-7MXBNH3N7D` |
-| Web API key | Provided at runtime, not committed |
+| Firebase / Google Cloud project ID | `vision-ai-srmtrp` |
+| Web app ID | `1:235811571442:web:342e488e0ac2ee75b0f26b` |
+| Messaging sender ID | `235811571442` |
+| Firebase auth domain | `vision-ai-srmtrp.firebaseapp.com` |
+| Storage bucket | `vision-ai-srmtrp.firebasestorage.app` |
+| Measurement ID | `G-S4HS9TGV4H` |
+| Web API key | Supplied public web identifier in `.env.example`; build reads it from Secret Manager |
 
 Firebase web API keys are **public project identifiers**, not a substitute for
 security rules or authentication. The backend publishes the configured browser
@@ -43,7 +43,7 @@ password login is disabled.
 
 Do not assume the default Hosting site has the same ID as the project. New
 Firebase projects can have no default site until it is created. Inspect
-`firebase hosting:sites:list --project=srmtrpai --json` for `DEFAULT_SITE`
+`firebase hosting:sites:list --project=vision-ai-srmtrp --json` for `DEFAULT_SITE`
 and compare its `defaultUrl` and the web app's actual `authDomain`. If there
 is no default site, follow the conditional creation steps in the Windows
 runbook; if the existing site or app config differs, review and update the
@@ -71,8 +71,8 @@ See [Firebase's default-site documentation](https://firebase.google.com/docs/hos
    Open the link before `--check`; clear the password from the shell afterward.
    Never put credentials in command arguments or chat. A command-line Firebase
    REST request can fail with browser-referrer-only API-key restrictions.
-4. Review the existing MongoDB users/UID bindings and add the verified account
-   to the intended `srmtrpai` database as `head_admin`, as described in the
+4. Review the PostgreSQL access entries/UID bindings and add the verified account
+   to the intended Supabase database as `head_admin`, as described in the
    runbook. A Firebase user alone does not grant portal access.
 
 The checked-in Cloud Build settings enable both `password` and `google.com`,
@@ -82,8 +82,9 @@ Firebase ID token, a **verified email**, and an active backend access-list
 entry with a compatible Firebase UID. Arbitrary Google or self-registered
 password users are denied. The authenticated browser exchanges the Firebase
 ID token for a short-lived application session; the Firebase SDK manages its
-own browser authentication state until sign-out. There is no Supabase identity
-system.
+own browser authentication state until sign-out. Supabase provides PostgreSQL
+storage; the application does not use Supabase Auth or expose the private
+schema through its browser Data API.
 
 Google sign-in primarily uses a popup. The code also consumes a redirect
 result if a blocked popup triggers the redirect fallback. With a `web.app`
@@ -134,7 +135,7 @@ backend marks API and HTML responses `no-store`.
 
 Firebase Hosting currently limits backend requests to **60 seconds**, even
 though Cloud Run is configured for 300 seconds. A cold start waiting on NAT or
-Atlas can time out at the Hosting edge before the backend becomes ready;
+Supabase can time out at the Hosting edge before the backend becomes ready;
 retry after inspecting service health. Long-running detection and camera/SSE
 streams may be interrupted and require explicit production testing or another
 architecture. See [Firebase's serverless limits](https://firebase.google.com/docs/hosting/serverless-overview).
@@ -145,14 +146,14 @@ with an authorized and unauthorized account before production.
 
 ## 5. Deploy and production gates
 
-The Windows runbook creates a dedicated build and runtime identity, four
-Secret Manager values, an Atlas-scoped database user, and Direct VPC egress
+The Windows runbook creates a dedicated build and runtime identity, five
+Secret Manager values, a dedicated PostgreSQL database user, and Direct VPC egress
 with a static Cloud NAT IP **before** the first Cloud Run startup. It then
 submits `deploy/cloudbuild.yaml` and deploys Hosting. It also covers costs,
 IAM, tool installation, safe Git updates, rollback and verification.
 
 Before production, verify both leaked Atlas credentials are revoked, review
-previously provisioned Firebase/MongoDB accounts and sessions, rotate the JWT
+previously provisioned Firebase/PostgreSQL accounts and sessions, rotate the JWT
 key, coordinate a sensitive Git-history purge **after** credential rotation,
 and resolve the provenance/licence of `best.pt`. Do not rely on a mock test,
 an ignore file, or a normal new Git commit as proof those tasks are complete.

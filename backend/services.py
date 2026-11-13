@@ -7,12 +7,10 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from bson import ObjectId
 from openpyxl import Workbook
-from pymongo import ASCENDING, DESCENDING
 
 from .config import Config
-from .db import iso_utc, public_doc, utc_naive
+from .db import ASCENDING, DESCENDING, iso_utc, public_doc, utc_naive
 from .schemas import AnalyticsFilter, EventCreate, EventFilter, normalize_bus_number
 
 FLAG_LABELS = {

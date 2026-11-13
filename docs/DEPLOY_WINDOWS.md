@@ -1,58 +1,39 @@
-# Windows Git Bash: recover tools, configure Firebase and Atlas, and deploy
+# Windows Git Bash: Supabase, Firebase and Cloud Run
 
-This is the ordered runbook for the **existing** repository clone (formerly
-`saran-44/frontend`, now `saran-44/VISION-AI-SRM-TRP`), Firebase/Google Cloud
-project **`srmtrpai`**, Cloud Run region **`asia-south1`**, and initial portal
-administrator **`814725105014@trp.srmtrichy.edu.in`**.
-It is written for Git Bash on Windows and can also be imported into Claude.
+This runbook targets repository `saran-44/VISION-AI-SRM-TRP`, Firebase/Google
+Cloud project **`vision-ai-srmtrp`**, region **`asia-south1`**, Cloud Run
+service **`srm-trp-transport`**, and initial administrator
+**`814725105014@trp.srmtrichy.edu.in`**. It uses **Supabase PostgreSQL for
+data** and **Firebase Authentication for sign-in**. It does not use Supabase
+Auth or a Supabase service-role key.
 
-> **Read this first.** No real Firebase, Atlas, Cloud Run or Hosting deployment
-> has been verified by the author of this guide. Use it first in a controlled
-> environment. Do not put live personal data into the portal or declare it
-> production-ready until the [security checklist](#11-production-gates) is
-> complete and an authorized administrator has tested the real services.
+> **Before starting**
 >
-> A password was previously shared in chat. **Do not use that password.** If
-> it was already configured, reset it to a different, unique strong password.
-> Rotate **both** previously exposed Atlas credentials and verify the old
-> credentials are revoked. Never paste a password, connection string, ID
-> token, Firebase service-account key, or session cookie into chat, Git,
-> terminal command arguments, screenshots, or logs.
->
-> These commands create billable Google Cloud resources, including a Cloud NAT
-> gateway, reserved IP, Cloud Build, Cloud Run and Secret Manager resources.
-> Check pricing, budget and billing first. Run the numbered steps in order;
-> **stop if a command fails** rather than continuing. The Google Cloud/Firebase
-> operator must have permission to enable APIs, create network and IAM
-> resources, manage secrets, build/deploy and administer Firebase Auth.
+> - No actual Supabase project, Firebase sign-in, Hosting rewrite or Cloud Run
+>   deployment has been verified by the author. Confirm project ownership,
+>   billing, permissions, backups and privacy requirements first.
+> - **Old MongoDB data is not imported.** The new schema starts empty. If old
+>   users, buses, drivers, events or audits are needed, stop and plan a tested
+>   migration with the data owner before cutover. Back up the source; preserve
+>   IDs, timestamps and audit history, reconcile row counts and verify every
+>   access entry/UID. Switching Firebase projects changes identity context;
+>   do not automatically trust or unlink old Firebase UID bindings.
+> - Do not reuse a password previously shared in chat. Rotate/revoke both
+>   exposed Atlas credentials and verify revocation, even if Atlas is no longer
+>   used. Rotate any compromised app JWT secret; retire old reachable revisions.
+> - Never paste database passwords, database URLs, ID tokens, service-account
+>   keys, device keys or session cookies into chat, command arguments, logs or
+>   Git. The Firebase **web** API key is a public browser identifier, not a
+>   database password or a Supabase service-role key.
+> - Cloud Run, Cloud Build, Artifact Registry, Secret Manager, VPC, reserved IP
+>   and Cloud NAT may incur charges. The commands below change real resources.
+>   Run each block in order and **stop on any error**; inspect an existing
+>   resource before reusing it rather than deleting or replacing it.
 
-## 0. What will be deployed
+## 1. Install tools and update the existing checkout
 
-| Component | Destination | Important boundary |
-| --- | --- | --- |
-| Login HTML, CSS, JS, images and vendor libraries | Firebase Hosting | Static files are served directly. |
-| Authenticated pages and `/api/**` | Cloud Run `srm-trp-transport` | Unmatched Hosting paths rewrite to the Flask service in `asia-south1`. |
-| Protected page templates | Container only | `frontend/pages/` is excluded from Hosting uploads so Flask checks roles. |
-| Portal session | HttpOnly `__session` cookie | Firebase Hosting forwards this specific cookie to Cloud Run. |
-| User access list | Atlas database `srmtrpai`, collection `users` | Firebase identity **and** a verified email **and** an active access entry are required. |
-| Outbound backend traffic | Direct VPC egress + Cloud NAT | The NAT's reserved IP must be on the Atlas IP access list before the first deploy. |
-
-The production build disables legacy local-password login and Firebase
-self-provisioning. Both Firebase password and Google providers can be used, but
-**every** identity must already be explicitly listed in MongoDB; an arbitrary
-Google account is denied. Creating a Firebase Auth user is not sufficient by
-itself. The public Cloud Run endpoint is intentionally invocable by Hosting;
-protected routes still require application authorization.
-
-## 1. Install or repair the Windows toolchain
-
-Git Bash itself does not install Node.js, Python, Firebase CLI, or `gcloud`.
-If a tool was just installed, **close every Git Bash window and open a new one**
-so it receives the updated Windows `PATH`.
-
-### 1.1 Install missing tools
-
-In Git Bash, locate `winget`:
+Install Git for Windows, Python 3.11, Node 20+, Google Cloud CLI and the
+Firebase CLI. If missing, Git Bash on Windows can use `winget.exe`:
 
 ```bash
 WINGET=winget.exe
@@ -60,662 +41,436 @@ if ! command -v "$WINGET" >/dev/null 2>&1; then
   WINGET="$(cygpath -u "$LOCALAPPDATA")/Microsoft/WindowsApps/winget.exe"
 fi
 "$WINGET" --version
-```
-
-If that fails, install/update **App Installer** from Microsoft Store, or use
-the vendors' Windows installers. Run the following **only for tools that are
-missing**; approve the installers' prompts:
-
-```bash
+# Run only the installers for tools you do not already have:
 "$WINGET" install --exact --id OpenJS.NodeJS.LTS --source winget
 "$WINGET" install --exact --id Python.Python.3.11 --source winget
 "$WINGET" install --exact --id Google.CloudSDK --source winget
 ```
 
-The [Google Cloud CLI Windows installer](https://cloud.google.com/sdk/docs/install-sdk)
-can be used if the `winget` package fails. Accept its bundled Python option.
-Docker Desktop is **not** needed: Cloud Build builds the container remotely.
-
-Close and reopen Git Bash, then check:
+Close all Git Bash windows and reopen one after installing. Check the tools and
+install the Firebase CLI:
 
 ```bash
-git --version
-node --version
-npm --version
-py -3.11 --version
-gcloud --version
-```
-
-Use Node **20 or newer** for the CLI version below. If the Microsoft Store
-`python.exe` alias opens the Store or reports Python was not found, do not use
-that alias to create the environment: use `py -3.11` as shown. If `py` is also
-missing, find the real Python 3.11 installation with `where.exe python` or the
-Windows **Manage app execution aliases** settings, and use its full
-`python.exe` path to create the venv in §2.2.
-
-If Node is installed but not found in the new Git Bash window, a common
-per-machine path is:
-
-```bash
-export PATH="/c/Program Files/nodejs:$PATH"
-hash -r
-node --version && npm --version
-```
-
-If `gcloud` is installed but not found, the usual **per-user** installer path
-contains `google-cloud-sdk/bin`, not just `Cloud SDK/bin`:
-
-```bash
-GCLOUD_BIN="$(cygpath -u "$LOCALAPPDATA")/Google/Cloud SDK/google-cloud-sdk/bin"
-export PATH="$GCLOUD_BIN:$PATH"
-hash -r
-gcloud --version
-```
-
-If that folder does not exist, locate the actual `google-cloud-sdk/bin` folder
-in Windows and add that folder instead. These `export PATH` changes apply only
-to the current window; use Windows Environment Variables for a permanent fix.
-
-### 1.2 Install the Firebase CLI before logging in
-
-```bash
+git --version && node --version && npm --version && py -3.11 --version && gcloud --version
 npm install -g firebase-tools@15.36.0
 firebase --version
 ```
 
-If npm succeeds but Git Bash cannot find `firebase`, convert npm's Windows
-prefix before using it as a POSIX path:
+If a freshly installed command is not found, locate its actual installation;
+common fallbacks are below (only use the ones that exist):
 
 ```bash
+export PATH="/c/Program Files/nodejs:$PATH"
+export PATH="$(cygpath -u "$LOCALAPPDATA")/Google/Cloud SDK/google-cloud-sdk/bin:$PATH"
 NPM_PREFIX="$(npm config get prefix)"
 export PATH="$(cygpath -u "$NPM_PREFIX"):$PATH"
 hash -r
-firebase --version
+node --version && npm --version && gcloud --version && firebase --version
 ```
 
-Do not paste a literal `/c/Users/you/...` path. If installation or a version
-check fails, fix it before continuing. The pinned Firebase CLI was tested with
-this repository's Hosting configuration; update it deliberately later.
+If the Windows Store Python alias opens the Store, use `py -3.11` or the real
+Python executable, not the alias. Docker Desktop is not required for Cloud
+Build. Reopen a shell after installation rather than assuming old PATH values.
 
-## 2. Safely update the existing clone and install Python dependencies
-
-### 2.1 Inspect first; do not clone over the existing folder
+Inspect the **existing** clone; replace `~/frontend` with its real path if
+necessary. Never clone over it, hard-reset work, or overwrite `.env`:
 
 ```bash
 cd ~/frontend
-git rev-parse --show-toplevel
-git remote -v
-git status --short
-git branch --show-current
+git rev-parse --show-toplevel && git remote -v && git status --short && git branch --show-current
 ```
 
-The repository's current canonical URL is
-`https://github.com/saran-44/VISION-AI-SRM-TRP.git`; GitHub redirects its former
-`https://github.com/saran-44/frontend.git` URL to the same repository. Either
-remote is acceptable if it resolves to the correct repository. The status
-should show **no local changes or untracked files that matter**. If the folder
-is elsewhere, `cd` to your actual existing clone instead. If there are local
-changes, stop and back them up or commit them appropriately; do not overwrite
-`.env`, use `git reset --hard`, or delete the clone. Git ignores `.env`, so an
-empty status does not mean that the local `.env` is absent.
-
-Only after these Hosting/network fixes have been merged into `main`, and after
-inspecting/backing up your changes, run:
+Back up or commit your local changes first. The Git status does **not** show
+ignored `.env` files. **After these Supabase changes have been reviewed and
+merged to `main`**, fast-forward your clean checkout:
 
 ```bash
-git fetch origin &&
-git switch main &&
-git pull --ff-only origin main &&
-git log -1 --oneline &&
-git status --short
+git fetch origin && git switch main && git pull --ff-only origin main && git log -1 --oneline
+git grep -n 'CREATE SCHEMA transport_portal' -- backend/sql/001_initial.sql
+git grep -n 'vision-ai-srmtrp' -- .firebaserc
 ```
 
-If switching or the fast-forward pull fails, stop and resolve the local branch
-state without a destructive reset. Confirm that the updated files are present:
+If they have not been merged, use a reviewed checkout of the branch containing
+these changes instead; do not assume `main` already contains them. If Git
+refuses the fast-forward or a verification command finds nothing, stop.
 
 ```bash
-git grep -n '"serviceId": "srm-trp-transport"' -- firebase.json
-git grep -n 'COOKIE_NAME = "__session"' -- backend/auth.py
-git grep -n 'srm-trp-vpc' -- deploy/cloudbuild.yaml
-```
-
-All three commands must find a match. The previous merged `main` version did
-not have the necessary Hosting fixes; do not deploy that old version.
-
-### 2.2 Create/activate a Windows venv
-
-```bash
-if [ ! -f .venv/Scripts/activate ]; then
-  py -3.11 -m venv .venv
-fi
+if [ ! -f .venv/Scripts/activate ]; then py -3.11 -m venv .venv; fi
 source .venv/Scripts/activate
-python --version
-python -m pip install --upgrade pip
-python -m pip install -r backend/requirements.txt
+python --version && python -m pip install --upgrade pip && python -m pip install -r backend/requirements.txt
+unset TEST_DATABASE_URL ALLOW_TEST_DATABASE_RESET
+python -m pytest -q
 python -m backend.manage_access --help
-python -m pytest backend/tests -q
 ```
 
-`python --version` must show Python 3.11 inside the venv. If an old venv uses a
-different interpreter, stop and back it up/recreate it rather than assuming it
-is correct. Windows uses `.venv/Scripts/activate`, **not** `.venv/bin/activate`.
-These tests use local mocks; passing them does not verify Firebase or Atlas.
+These default tests use disposable in-memory SQLite; they do not connect to
+Supabase. GitHub CI also exercises a local PostgreSQL service. If a different
+Python version appears inside the venv, stop and repair the venv.
 
-## 3. Log in and confirm the actual project, app and Hosting site
-
-```bash
-firebase login
-firebase projects:list
-gcloud auth login
-gcloud config set project srmtrpai
-gcloud config set compute/region asia-south1
-gcloud auth list
-gcloud projects describe srmtrpai --format='value(projectId,projectNumber)'
-gcloud billing projects describe srmtrpai --format='value(billingEnabled)'
-```
-
-Firebase and gcloud each open a browser. Confirm the correct Google accounts,
-project ID, and billing access. Billing must be enabled and Firebase must be
-on a plan that permits the Cloud Run/Hosting integration. If permissions are
-insufficient, ask your project administrator to grant them; do not change to a
-different project to make a command succeed.
-
-First inspect Hosting, before enabling Firebase Authentication or creating a
-web app (either action can create a default site implicitly):
+## 2. Sign in and verify Firebase/Google Cloud
 
 ```bash
-firebase hosting:sites:list --project=srmtrpai --json
-```
-
-Check the JSON for a `DEFAULT_SITE` and its actual `defaultUrl`. Firebase
-projects created after October 15, 2026 may not yet have a default Hosting
-site. **Only if there is no default site**, create the desired one:
-
-```bash
-firebase hosting:sites:create srmtrpai --project=srmtrpai
-firebase hosting:sites:get srmtrpai --project=srmtrpai --json
-```
-
-If the site ID is already taken, or an existing default site uses another ID,
-stop and use its actual URL/auth domain after reviewing the configuration;
-`https://srmtrpai.web.app` is not guaranteed in that case. Do not run
-`firebase init` in this existing repository: it can replace the checked-in
-Hosting configuration. [Firebase default-site documentation](https://firebase.google.com/docs/hosting/default-site).
-
-Now inspect the existing web app:
-
-```bash
-firebase apps:list WEB --project=srmtrpai
-firebase apps:sdkconfig WEB 1:734375891811:web:6851938bef332bc0e53956 --project=srmtrpai
-```
-
-If that app ID is absent, stop and inspect the actual app list in Firebase
-Console; do not create a duplicate without the project owner's approval. The
-build currently expects web app ID `1:734375891811:web:6851938bef332bc0e53956`,
-sender ID `734375891811`, and auth domain `srmtrpai.firebaseapp.com`. Compare
-these and the other fields with **Project settings → General → Your apps →
-SDK setup and configuration**. The web API key is a public browser identifier,
-but do not paste the whole configuration or any credential into chat. If the
-IDs or auth domain differ, **stop and update/review `deploy/cloudbuild.yaml`
-and Firebase authorized domains** before deploying; do not assume the values
-are correct.
-
-## 4. Firebase Console: set up the initial administrator
-
-1. Open <https://console.firebase.google.com/>, select **srmtrpai**, then
-   **Build → Authentication** (the console may label this **Security →
-   Authentication**). Click **Get started** if prompted.
-2. Open **Sign-in method → Add new provider → Email/Password**, enable
-   **Email/Password**, and save. Enable **Google** as well if you want the
-   configured Google button; select the project support email and save. Google
-   sign-in is still restricted by the backend access list.
-3. Under **Settings → Authorized domains**, confirm the actual Hosting domain
-   and its `firebaseapp.com` auth domain are listed. Add the actual
-   `srmtrpai.web.app` domain if applicable. Add `localhost` only if needed for
-   local development. Authorized domains are **not** a user allowlist.
-4. Open **Users** and search for
-   `814725105014@trp.srmtrichy.edu.in`.
-   - If absent, select **Add user**, enter that email, and privately enter a
-     **new strong password that was never shared in chat**. Save it securely.
-   - If present, **do not create a duplicate or assume the existing account is
-     yours**. Independently establish ownership of the mailbox and control of
-     the specific Firebase account/UID. Use the row's menu to send a password
-     reset email where available, follow the link privately, and choose a new
-     password. If ownership cannot be established, stop and investigate with
-     the Firebase administrator before granting `head_admin`.
-5. Under **Templates**, review the **Email verification** and **Password
-   reset** templates and sender. Adding a user does not guarantee the email is
-   verified. The portal currently has no built-in verification/reset button;
-   §7 sends and checks the verification email using Firebase's REST API.
-
-No account or role is created by these instructions until you perform them.
-
-## 5. Google Cloud: APIs, identities, repository and static egress
-
-The following names are used by the checked-in build file. They assume a
-**new, standalone VPC in the same project**, not a Shared VPC. If any resource
-already exists, stop, inspect its project, region and configuration, and reuse
-it only if appropriate; do not delete or replace an existing production setup.
-
-```bash
-export PROJECT_ID=srmtrpai REGION=asia-south1
+firebase login && firebase projects:list
+gcloud auth login && gcloud auth list
+gcloud config set project vision-ai-srmtrp && gcloud config set compute/region asia-south1
+export PROJECT_ID=vision-ai-srmtrp REGION=asia-south1
 export PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
 export RUN_SA="srm-trp-run@${PROJECT_ID}.iam.gserviceaccount.com"
 export BUILD_SA="srm-trp-build@${PROJECT_ID}.iam.gserviceaccount.com"
 export BUILD_BUCKET="${PROJECT_ID}-build-src-${PROJECT_NUMBER}"
-printf 'Project: %s  Number: %s  Region: %s\n' "$PROJECT_ID" "$PROJECT_NUMBER" "$REGION"
+printf 'Project: %s; number: %s; region: %s\n' "$PROJECT_ID" "$PROJECT_NUMBER" "$REGION"
+gcloud billing projects describe "$PROJECT_ID" --format='value(billingEnabled)'
 ```
 
-Stop if the project number is blank or the project is wrong. If a new shell is
-opened later, rerun these exports and reactivate `.venv`.
+Stop if the account, project, project number or billing is wrong. The operator
+needs permission to enable APIs, create IAM/network/secrets resources, submit
+builds, deploy Cloud Run and administer Firebase. If opening a new shell,
+reactivate the venv and re-export the variables above.
 
-### 5.1 Enable APIs
+Check the actual web app and Hosting site instead of assuming a default site:
 
 ```bash
-gcloud services enable \
-  cloudbuild.googleapis.com run.googleapis.com artifactregistry.googleapis.com \
-  secretmanager.googleapis.com compute.googleapis.com iam.googleapis.com \
-  logging.googleapis.com storage.googleapis.com cloudresourcemanager.googleapis.com \
-  --project="$PROJECT_ID"
+firebase hosting:sites:list --project="$PROJECT_ID" --json
+firebase apps:list WEB --project="$PROJECT_ID"
+firebase apps:sdkconfig WEB 1:235811571442:web:342e488e0ac2ee75b0f26b --project="$PROJECT_ID"
 ```
 
-### 5.2 Create the artifact repository and service accounts
+Compare with Firebase Console → Project settings → General → Your apps:
+project `vision-ai-srmtrp`, auth domain `vision-ai-srmtrp.firebaseapp.com`,
+storage bucket `vision-ai-srmtrp.firebasestorage.app`, sender `235811571442`,
+app ID above and measurement ID `G-S4HS9TGV4H`. `.env.example` contains the
+supplied public web API key. If the real values differ, stop and review the
+configuration before deployment. Do not create a duplicate web app.
 
-Run each create command only if the named resource does not already exist:
+If **no default Hosting site exists**, create one only after confirming the
+site ID is available and approved:
 
 ```bash
-gcloud artifacts repositories create srm-trp \
-  --repository-format=docker --location="$REGION" \
-  --description="SRM TRP Transport backend images" --project="$PROJECT_ID"
+firebase hosting:sites:create vision-ai-srmtrp --project="$PROJECT_ID"
+firebase hosting:sites:get vision-ai-srmtrp --project="$PROJECT_ID" --json
 ```
 
-```bash
-gcloud iam service-accounts create srm-trp-run \
-  --display-name="SRM TRP Cloud Run runtime" --project="$PROJECT_ID"
-```
+If an existing default site has a different ID, use its real URL and review
+Firebase auth-domain settings rather than assuming `vision-ai-srmtrp.web.app`.
+Do not run `firebase init` over the checked-in `firebase.json`.
+
+In Firebase Console → **Authentication**:
+
+1. Enable **Email/Password**, and optionally **Google** with a support email.
+2. Under **Settings → Authorized domains**, add the actual Hosting domain and
+   confirm the configured auth domain. Domains are not a user allowlist.
+3. Under **Users**, find `814725105014@trp.srmtrichy.edu.in`. If absent, create
+   it with a new strong private password. If present, independently establish
+   control of both the mailbox and that specific account/UID before recovery;
+   do not assume that an existing account is yours.
+4. Review the email-verification and password-reset templates. A Firebase user
+   alone does not grant portal access. Section 5 verifies the email privately.
+
+## 3. Google Cloud networking, identities and IAM
+
+The checked-in build deliberately uses Direct VPC egress and Cloud NAT to
+provide a stable outbound IPv4 address. This is useful if Supabase network
+restrictions are enabled, but it costs money even if those restrictions are off.
+The following assumes a new standalone VPC in this project; for an existing
+network, Shared VPC or overlapping CIDRs, consult your network administrator.
+Do not delete or silently replace existing resources.
 
 ```bash
-gcloud iam service-accounts create srm-trp-build \
-  --display-name="SRM TRP Cloud Build deployer" --project="$PROJECT_ID"
+gcloud services enable cloudbuild.googleapis.com run.googleapis.com artifactregistry.googleapis.com \
+  secretmanager.googleapis.com compute.googleapis.com iam.googleapis.com logging.googleapis.com \
+  storage.googleapis.com cloudresourcemanager.googleapis.com --project="$PROJECT_ID"
+```
+
+Run each creation only if the resource is absent; if it exists, inspect its
+owner, project, location and settings before explicitly reusing it:
+
+```bash
+gcloud artifacts repositories create srm-trp --repository-format=docker --location="$REGION" \
+  --description='SRM TRP Transport backend images' --project="$PROJECT_ID"
+gcloud iam service-accounts create srm-trp-run --display-name='SRM TRP Cloud Run runtime' --project="$PROJECT_ID"
+gcloud iam service-accounts create srm-trp-build --display-name='SRM TRP Cloud Build deployer' --project="$PROJECT_ID"
+gcloud storage buckets create "gs://$BUILD_BUCKET" --project="$PROJECT_ID" --location="$REGION" \
+  --uniform-bucket-level-access --public-access-prevention
 ```
 
 ```bash
 gcloud artifacts repositories describe srm-trp --location="$REGION" --project="$PROJECT_ID"
 gcloud iam service-accounts describe "$RUN_SA" --project="$PROJECT_ID"
 gcloud iam service-accounts describe "$BUILD_SA" --project="$PROJECT_ID"
+gcloud storage buckets describe "gs://$BUILD_BUCKET" --raw --format='value(name,projectNumber,location)'
 ```
 
-Create a private source-staging bucket. Bucket names are globally unique; if
-this name is already taken, **verify that it belongs to this project** before
-reusing it, or choose another private bucket and keep `BUILD_BUCKET` consistent.
-Source archives can persist in this bucket; restrict access and set an
-appropriate retention/lifecycle policy.
+The bucket's project number must match `$PROJECT_NUMBER`. Source archives can
+persist there; restrict access and configure an appropriate lifecycle.
+
+Create the network only after confirming `10.42.0.0/24` does not conflict:
 
 ```bash
-gcloud storage buckets create "gs://$BUILD_BUCKET" --project="$PROJECT_ID" \
-  --location="$REGION" --uniform-bucket-level-access --public-access-prevention
-```
-
-```bash
-gcloud storage buckets describe "gs://$BUILD_BUCKET" --raw \
-  --format='value(name,projectNumber,location)'
-```
-
-The reported project number must equal `$PROJECT_NUMBER` before you grant
-access or upload source.
-
-### 5.3 Create a VPC, subnet, router and reserved NAT IP
-
-These one-time commands create a `/24` subnet; confirm `10.42.0.0/24` does not
-conflict with any future peering/on-premises ranges. For an existing network,
-review the configuration with your network administrator instead.
-
-```bash
-gcloud compute networks create srm-trp-vpc --subnet-mode=custom \
-  --bgp-routing-mode=regional --project="$PROJECT_ID" &&
-gcloud compute networks subnets create srm-trp-subnet --network=srm-trp-vpc \
-  --region="$REGION" --range=10.42.0.0/24 --enable-private-ip-google-access \
-  --project="$PROJECT_ID" &&
-gcloud compute routers create srm-trp-router --network=srm-trp-vpc \
-  --region="$REGION" --project="$PROJECT_ID" &&
+gcloud compute networks create srm-trp-vpc --subnet-mode=custom --bgp-routing-mode=regional --project="$PROJECT_ID" &&
+gcloud compute networks subnets create srm-trp-subnet --network=srm-trp-vpc --region="$REGION" \
+  --range=10.42.0.0/24 --enable-private-ip-google-access --project="$PROJECT_ID" &&
+gcloud compute routers create srm-trp-router --network=srm-trp-vpc --region="$REGION" --project="$PROJECT_ID" &&
 gcloud compute addresses create srm-trp-nat-ip --region="$REGION" --project="$PROJECT_ID" &&
-gcloud compute routers nats create srm-trp-nat --router=srm-trp-router \
-  --region="$REGION" --nat-custom-subnet-ip-ranges=srm-trp-subnet \
-  --nat-external-ip-pool=srm-trp-nat-ip --project="$PROJECT_ID"
+gcloud compute routers nats create srm-trp-nat --router=srm-trp-router --region="$REGION" \
+  --nat-custom-subnet-ip-ranges=srm-trp-subnet --nat-external-ip-pool=srm-trp-nat-ip --project="$PROJECT_ID"
 ```
 
-Read the reserved public IPv4 address, then add its `/32` entry to Atlas in §6:
-
 ```bash
-NAT_IP="$(gcloud compute addresses describe srm-trp-nat-ip --region="$REGION" \
-  --project="$PROJECT_ID" --format='value(address)')"
-printf 'Cloud Run NAT entry for Atlas: %s/32\n' "$NAT_IP"
-gcloud compute routers nats describe srm-trp-nat --router=srm-trp-router \
-  --region="$REGION" --project="$PROJECT_ID"
+NAT_IP="$(gcloud compute addresses describe srm-trp-nat-ip --region="$REGION" --project="$PROJECT_ID" --format='value(address)')"
+[ -n "$NAT_IP" ] && printf 'Cloud Run outbound IPv4: %s/32\n' "$NAT_IP"
+gcloud compute routers nats describe srm-trp-nat --router=srm-trp-router --region="$REGION" --project="$PROJECT_ID"
 ```
 
-Stop if the IP is blank. Cloud NAT is outbound only: the workstation's public
-IP is a **different** entry. Google documents that Direct VPC/NAT can take
-more than a minute to become ready at cold start. This build uses a 120-second
-target retry window and an HTTP startup probe, but the first real deployment
-must still be validated. PyMongo's operation deadline does not strictly bound
-SRV/TXT DNS during client construction, so resolver/OS delays may extend the
-window. See [Google's static outbound IP guide](https://cloud.google.com/run/docs/configuring/static-outbound-ip).
+The NAT IP is different from your Windows workstation's public IP. Both paths
+must be allowed if the Supabase database has network restrictions.
 
-### 5.4 Grant the build identity only the needed access
-
-The build account needs project-level `run.admin` for first service creation
-and public-invoker configuration. This is powerful; restrict who can submit
-builds as this identity and review/narrow the grant after initial setup. The
-runtime identity receives secret access in §8, not project-wide secret access.
+Grant the build identity the access needed for initial creation/deployment:
 
 ```bash
-gcloud artifacts repositories add-iam-policy-binding srm-trp --location="$REGION" \
-  --project="$PROJECT_ID" --member="serviceAccount:$BUILD_SA" \
-  --role=roles/artifactregistry.writer --condition=None &&
-gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-  --member="serviceAccount:$BUILD_SA" --role=roles/run.admin --condition=None &&
-gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-  --member="serviceAccount:$BUILD_SA" --role=roles/logging.logWriter --condition=None &&
-gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-  --member="serviceAccount:$BUILD_SA" --role=roles/compute.networkViewer --condition=None &&
-gcloud compute networks subnets add-iam-policy-binding srm-trp-subnet \
-  --region="$REGION" --project="$PROJECT_ID" \
+gcloud artifacts repositories add-iam-policy-binding srm-trp --location="$REGION" --project="$PROJECT_ID" \
+  --member="serviceAccount:$BUILD_SA" --role=roles/artifactregistry.writer --condition=None &&
+gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:$BUILD_SA" --role=roles/run.admin --condition=None &&
+gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:$BUILD_SA" --role=roles/logging.logWriter --condition=None &&
+gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:$BUILD_SA" --role=roles/compute.networkViewer --condition=None &&
+gcloud compute networks subnets add-iam-policy-binding srm-trp-subnet --region="$REGION" --project="$PROJECT_ID" \
   --member="serviceAccount:$BUILD_SA" --role=roles/compute.networkUser &&
-gcloud storage buckets add-iam-policy-binding "gs://$BUILD_BUCKET" \
-  --member="serviceAccount:$BUILD_SA" --role=roles/storage.objectViewer &&
+gcloud storage buckets add-iam-policy-binding "gs://$BUILD_BUCKET" --member="serviceAccount:$BUILD_SA" --role=roles/storage.objectViewer &&
 gcloud iam service-accounts add-iam-policy-binding "$RUN_SA" --project="$PROJECT_ID" \
   --member="serviceAccount:$BUILD_SA" --role=roles/iam.serviceAccountUser
 ```
 
-Allow the **human operator** who will submit builds to act as the build
-identity. The following assumes `gcloud auth list` showed a human Google user,
-not a service account. Confirm the displayed email before running the grant:
+The project-level `run.admin` grant is powerful; restrict who may submit builds
+as this identity and narrow it after initial setup. Confirm that the following
+account is the intended **human user** before granting it act-as permission:
 
 ```bash
 DEPLOYER_EMAIL="$(gcloud config get-value account 2>/dev/null)"
 printf 'Build-submitting Google user: %s\n' "$DEPLOYER_EMAIL"
-```
-
-```bash
 gcloud iam service-accounts add-iam-policy-binding "$BUILD_SA" --project="$PROJECT_ID" \
   --member="user:$DEPLOYER_EMAIL" --role=roles/iam.serviceAccountUser
 ```
 
-The submitter also needs Cloud Build create/read, Service Usage consumer, and
-source-bucket upload permissions. A project owner typically has them; use
-least-privilege IAM grants if not. Google normally grants its **Cloud Run
-service agent** `roles/run.serviceAgent` automatically, including the network
-permissions needed in a same-project VPC. If your organization removed that
-grant or uses Shared VPC, follow [Google's Direct VPC IAM instructions](https://cloud.google.com/run/docs/configuring/vpc-direct-vpc#set-up-iam-permissions)
-rather than granting service-agent roles to the runtime account. IAM changes
-can take several minutes to propagate.
+The submitter also needs Cloud Build create/read, Service Usage consumer and
+source-bucket upload permissions. Google normally grants the Cloud Run service
+agent the network permissions for a same-project VPC. IAM changes may take
+several minutes. Review organization policy and Shared VPC requirements if
+these commands fail.
 
-## 6. MongoDB Atlas: rotate credentials and permit both network paths
+## 4. Prepare the Supabase database securely
 
-Open <https://cloud.mongodb.com/> and select the correct Atlas organization,
-project and cluster. Atlas UI labels can vary slightly by version.
+In the **correct Supabase project**:
 
-1. Go to **Security → Database & Network Access → Database Users** (or
-   **Database Access**). Atlas console users and database users are different.
-2. Identify **both** database credentials exposed earlier. Plan any required
-   cutover, then rotate or delete/revoke each exposed database user/password;
-   verify the old credentials no longer work. Update other dependent services
-   securely. Do not reuse either exposed password.
-3. Select **Add New Database User → Password**. Create a **separate**
-   application database user with a new long random password. Under **User
-   Privileges**, choose **Add Default Privileges / Grant Specific Privileges**,
-   then role `readWrite`, database `srmtrpai`, all application collections.
-   Do **not** choose Atlas admin or `readWriteAnyDatabase`. If offered, restrict
-   the user to the intended cluster. Save the password in a password manager.
-4. Go to **Security → Database & Network Access → IP Access List** (or
-   **Network Access**). Add **Current IP Address** for this workstation, and
-   add the exact `NAT_IP/32` printed in §5.3 for Cloud Run. Wait for both
-   entries to become active. Remove unintended broad entries such as
-   `0.0.0.0/0`; do not use allow-from-anywhere as the production default.
-5. Go to **Database → your cluster → Connect → Drivers**. Note only the
-   cluster host after the `@` and before the `/` in the SRV example, such as
-   `cluster-name.example.mongodb.net`. Do not paste the full connection string
-   or real credentials into chat. Retain the cluster's TLS/SRV defaults.
+1. Verify the project and database, backups, region and budget. In **Connect**,
+   choose **Session pooler**, and note the exact pooler **host** and project
+   reference. The shared session pooler supports IPv4 and port `5432`; direct
+   connections commonly require IPv6 or the IPv4 add-on. Do not invent a host
+   or paste a connection URL into chat.
+2. Under **Database settings → SSL configuration**, download the project's
+   server root CA certificate to a private, stable location on your Windows
+   machine. You will enter its Windows path (e.g. using forward slashes) in the
+   script. Enable SSL enforcement if appropriate. The app uses
+   `sslmode=verify-full`, so both the server certificate and host are verified.
+3. Review **Network Restrictions**. If enabled, add the **workstation's actual
+   current public IPv4/32** and the Cloud NAT `NAT_IP/32` from section 3; wait
+   for the changes to apply. Pooler and direct database connections are both
+   subject to these restrictions. If restrictions are disabled, any network
+   can reach the endpoint subject to authentication; decide a tighter policy
+   with the project owner. Do not replace existing allowlists blindly.
+4. Check that no unrelated `transport_portal` schema already exists. This
+   migration intentionally fails if it does; it never drops or clears a schema.
+   In Supabase **SQL Editor**, paste the entire contents of
+   `backend/sql/001_initial.sql`, review them, and run it **once** as the
+   database administrator. You may open the local file with:
 
-The workstation and Cloud Run are separate network clients. Allowing only the
-workstation does not allow Cloud Run. `readWrite` on `srmtrpai` must permit
-the app to create its indexes. [Atlas database-user documentation](https://www.mongodb.com/docs/atlas/security-add-mongodb-users/).
+   ```bash
+   notepad.exe "$(cygpath -w "$PWD/backend/sql/001_initial.sql")"
+   ```
 
-### 6.1 Construct the URI privately in the current Git Bash window
+   The script creates private tables and indexes in a transaction and revokes
+   API-role access. Do **not** add `transport_portal` to Supabase's exposed
+   Data API schemas. If the SQL fails, stop and inspect the transaction/error;
+   do not drop an existing schema to make it pass.
+5. If you already have `.env`, first make a private, verified backup **outside**
+   the repository. The following copies it without printing its contents:
 
-The prompts take a host, username, and **raw** new password; the Python code
-percent-encodes username and password, so characters such as `@`, `/`, `:` and
-`%` are handled. Do not paste a Markdown link. Keep the terminal private.
+   ```bash
+   if [ -e .env ]; then
+     BACKUP_DIR="$HOME/srm-trp-private-backups"
+     BACKUP_FILE="$BACKUP_DIR/env-before-supabase-$(date +%Y%m%d-%H%M%S)"
+     mkdir -p "$BACKUP_DIR" && [ ! -e "$BACKUP_FILE" ] && \
+       cp -p -- .env "$BACKUP_FILE" && cmp -s -- .env "$BACKUP_FILE" && \
+       printf 'Backup verified at %s\n' "$BACKUP_FILE"
+   fi
+   ```
+
+   Review the backup and decide how to retain the old settings. **Only after
+   verifying it and choosing to move the original**, the following moves the
+   old file into the same private backup directory, without overwriting:
+
+   ```bash
+   if [ -e .env ]; then
+     ORIGINAL_FILE="$HOME/srm-trp-private-backups/env-original-$(date +%Y%m%d-%H%M%S)"
+     [ -n "${BACKUP_FILE:-}" ] && [ -f "$BACKUP_FILE" ] && cmp -s -- .env "$BACKUP_FILE" && \
+       [ ! -e "$ORIGINAL_FILE" ] && mv -- .env "$ORIGINAL_FILE" && \
+       printf 'Original moved to %s\n' "$ORIGINAL_FILE"
+   fi
+   ```
+
+   Protect both copies with Windows user ACLs. If any command fails, stop.
+   Then create the dedicated application login and a **new** `.env`:
+
+   ```bash
+   set +x
+   if [ -e .env ]; then
+     echo 'STOP: .env already exists. Back it up and move it aside deliberately; it will not be overwritten.' >&2
+   else
+     python scripts/configure_supabase.py
+   fi
+   ```
+
+   When prompted, enter the exact session-pooler host, project reference,
+   downloaded CA's **Windows** path and the Supabase database administrator
+   password (hidden), then type `CREATE`. The script creates role
+   `transport_portal_app`, grants it access only to the application schema
+   tables (audit logs are append/read only), generates a separate random role
+   password and JWT/device secrets, writes the ignored `.env`, and tests the
+   dedicated login. It does not overwrite an existing `.env` or role. Review
+   any ambient Postgres `PUBLIC` grants in your project separately.
+
+   If an `.env` already exists, keep a secure backup outside the repository;
+   only move the old file aside after verifying the backup and deciding how to
+   preserve its settings. Never paste it into chat. A partial failure may leave
+   a `.env` and/or role behind: **inspect both** before retrying or rotating
+   anything. Protect `.env` with your Windows user ACLs; `chmod` alone is not
+   a reliable Windows permission boundary. The script hides driver details in
+   errors, so check TLS, network, schema, role and credentials privately.
+
+## 5. Verify the administrator and grant portal access
+
+The verification helper signs in to Firebase and sends/checks a verification
+email. It does not grant portal access. Keep the terminal private:
 
 ```bash
 set +x
-read -r -p 'Atlas cluster host only (no scheme, username, or slash): ' ATLAS_HOST
-read -r -p 'New Atlas database username: ' ATLAS_USER
-read -r -s -p 'New Atlas database password (hidden): ' ATLAS_PASSWORD
-printf '\n'
-export ATLAS_HOST ATLAS_USER ATLAS_PASSWORD
-MONGO_URI="$(python - <<'PY'
-import os, re
-from urllib.parse import quote
-
-host = os.environ.get('ATLAS_HOST', '').strip()
-user = os.environ.get('ATLAS_USER', '')
-password = os.environ.get('ATLAS_PASSWORD', '')
-if not re.fullmatch(r'[A-Za-z0-9.-]+\.mongodb\.net', host) or not user or not password:
-    raise SystemExit('Invalid/empty Atlas host, username or password; no URI created.')
-print('mongodb+srv://' + quote(user, safe='') + ':' + quote(password, safe='')
-      + '@' + host + '/?retryWrites=true&w=majority')
-PY
-)"
-unset ATLAS_HOST ATLAS_USER ATLAS_PASSWORD
-if [ -n "$MONGO_URI" ]; then
-  export MONGO_URI MONGO_DB_NAME=srmtrpai
-  echo 'URI prepared privately for this shell; it has not been printed.'
-else
-  echo 'STOP: no URI was created.' >&2
-fi
-```
-
-Do not run the next steps if the last line reports `STOP`. If your Atlas setup
-uses a custom/private endpoint or connection options, consult Atlas's exact
-Drivers instructions rather than forcing this public-SRV example. The URI is
-kept in process memory/environment for this session, not encrypted on disk;
-other programs running as your Windows user may be able to inspect it. A
-pre-existing `.env` is loaded automatically, but exported values take
-precedence. Never commit an onboarding file or `.env`.
-
-## 7. Verify the Firebase email and seed the administrator
-
-### 7.1 Request a real verification email
-
-In Firebase Console **Project settings → General → Your apps**, copy the
-**web API key for the confirmed `srmtrpai` web app**. With the venv active and
-in the repository root, use hidden prompts. The helper authenticates with
-Firebase, requests a verification link, and never prints its password, ID token
-or refresh token. This does not grant portal access.
-
-```bash
-set +x
-read -r -s -p 'Firebase web API key (hidden): ' FIREBASE_WEB_API_KEY
-printf '\n'
+FIREBASE_WEB_API_KEY="$(python -c 'from dotenv import dotenv_values; print(dotenv_values(".env")["FIREBASE_API_KEY"])')"
 read -r -s -p 'New Firebase administrator password (hidden): ' FIREBASE_USER_PASSWORD
 printf '\n'
 export FIREBASE_WEB_API_KEY FIREBASE_USER_PASSWORD
 python scripts/send_firebase_verification.py 814725105014@trp.srmtrichy.edu.in
 ```
 
-Open the email in **that account's mailbox**, follow Firebase's verification
-link, then return to the **same** Git Bash window and check the freshly signed
-in identity:
+Open the verification email in that person's mailbox, follow the link, then
+check it in the same shell:
 
 ```bash
 python scripts/send_firebase_verification.py 814725105014@trp.srmtrichy.edu.in --check
-```
-
-After the check, clear both values even if it failed:
-
-```bash
 unset FIREBASE_USER_PASSWORD FIREBASE_WEB_API_KEY
 ```
 
-The check must say the email is verified. If it fails, stop: check spam, the
-Firebase email template/quota, project/API-key restrictions and the password.
-A browser-referrer-only web API key can reject this command-line REST flow;
-use an appropriately restricted temporary API key or an approved Admin SDK
-verification-link workflow rather than weakening a production key. Do not mark
-an email verified by hand unless a trusted administrator independently
-confirmed both mailbox ownership and control of that specific Firebase account.
-If a temporary API key was used for the helper, it must **not** accidentally
-replace the app's confirmed web key in §8.
+The result must report verified email. Clear those variables even if the helper
+fails. A browser-referrer-only API key may reject this command-line request;
+use an approved temporary key or trusted Firebase Admin workflow without
+weakening the production key. Do not mark an email verified without verifying
+both mailbox ownership and control of that specific Firebase account.
 
-### 7.2 Review existing access and add the initial administrator
-
-Use the **same MongoDB database** as Cloud Run. The access CLI validates a
-nonempty `JWT_SECRET` but does not sign sessions; generate a temporary local
-value, not the runtime signing key:
+Review the PostgreSQL access list before granting anything:
 
 ```bash
-export MONGO_DB_NAME=srmtrpai ENVIRONMENT=production
-export JWT_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
 python -m backend.manage_access list
 ```
 
-If initialization reports a network/TLS/DNS error, it does **not** establish
-whether the password is correct. Check the workstation Atlas IP entry, cluster
-state, TLS, URI encoding and network first. If it reports auth/permission
-failure, check the new database user, role and URI. Do not print the URI while
-troubleshooting.
-
-**Before granting or reactivating access**, review the list, Firebase Auth
-users, and Atlas **Database → Browse Collections → `srmtrpai` → `users`**.
-Compare any existing `firebase_uid` for this email with the verified account's
-UID in Firebase. Investigate and deactivate unauthorized entries. `add` on an
-existing email updates its role and **reactivates** it; it does not replace an
-existing UID. `unlink` is appropriate only after an administrator verifies the
-intended replacement identity.
-
-Once the account and UID are trusted:
+For a fresh database it should be empty. If there are existing entries,
+review their roles, active state and Firebase UID bindings first. `add` and
+`set-role` reactivate an existing entry; `unlink` permits a different UID to
+bind. Use them only after verifying account ownership and authorization.
+After verification, grant the intended administrator:
 
 ```bash
-python -m backend.manage_access add 814725105014@trp.srmtrichy.edu.in --role head_admin
+python -m backend.manage_access add 814725105014@trp.srmtrichy.edu.in --role head_admin &&
 python -m backend.manage_access list
 ```
 
-Confirm the exact email is **active** and has role `head_admin`. Keep the
-`MONGO_URI` variable in this shell for §8. Later user access can be managed
-with `python -m backend.manage_access --help`; never grant a role merely
-because a person registered with Firebase.
+Confirm the exact email is active and `head_admin`. All other users also need
+explicit entries in the production build. Firebase self-registration and
+Google identity alone do not grant portal access.
 
-## 8. Secret Manager: create/rotate values and grant the runtime access
+## 6. Store runtime values in Secret Manager
 
-The following four names are referenced by `deploy/cloudbuild.yaml`:
+The build expects five secret names:
 
-| Secret | Runtime variable | Purpose |
-| --- | --- | --- |
-| `mongo-uri` | `MONGO_URI` | The newly rotated Atlas application URI |
-| `jwt-secret` | `JWT_SECRET` | Random application session-signing secret |
-| `device-keys` | `DEVICE_API_KEYS` | Random device ingestion key(s) |
-| `firebase-api-key` | `FIREBASE_API_KEY` | Confirmed Firebase web API key |
+| Secret | Runtime use |
+| --- | --- |
+| `database-url` | `DATABASE_URL`, dedicated role's Supabase PostgreSQL URL |
+| `supabase-ca` | mounted file `/secrets/supabase-ca.crt`, referenced by `PGSSLROOTCERT` |
+| `jwt-secret` | `JWT_SECRET` |
+| `device-keys` | `DEVICE_API_KEYS` |
+| `firebase-api-key` | public Firebase web key supplied to the backend |
 
-First list **metadata only**. If a secret already exists, check that it belongs
-to this deployment and is not shared with an unrelated service. Adding a
-version changes `latest` for future starts of any service using that secret.
+List metadata first. If any name already exists, inspect its consumers and
+rotation plan; changing `latest` affects future starts of other revisions.
+Create only absent names; do not delete unrelated secrets:
 
 ```bash
 gcloud secrets list --project="$PROJECT_ID" --format='table(name,createTime)'
-```
-
-Create **only the names that are absent**; if a create command reports that a
-name exists, inspect it rather than deleting it:
-
-```bash
-gcloud secrets create mongo-uri --replication-policy=automatic --project="$PROJECT_ID"
-```
-
-```bash
-gcloud secrets create jwt-secret --replication-policy=automatic --project="$PROJECT_ID"
-```
-
-```bash
-gcloud secrets create device-keys --replication-policy=automatic --project="$PROJECT_ID"
-```
-
-```bash
+gcloud secrets create database-url --replication-policy=automatic --project="$PROJECT_ID" &&
+gcloud secrets create supabase-ca --replication-policy=automatic --project="$PROJECT_ID" &&
+gcloud secrets create jwt-secret --replication-policy=automatic --project="$PROJECT_ID" &&
+gcloud secrets create device-keys --replication-policy=automatic --project="$PROJECT_ID" &&
 gcloud secrets create firebase-api-key --replication-policy=automatic --project="$PROJECT_ID"
 ```
 
-After all four exist and their use has been reviewed, add **new versions**.
-This deliberately rotates the JWT signing key and the device key. It makes
-existing sessions invalid after all traffic is on the new revision and old
-reachable revisions have been retired. If existing devices are in use, plan a
-secure key cutover; a new random key is created here, not displayed.
+If a name exists, the chain stops. Review it and create only the remaining
+absent names before continuing. The next block sends values from `.env` to
+Secret Manager **without printing them**. It rotates the runtime JWT/device
+keys to the values generated in section 4; plan a device/session cutover.
 
 ```bash
 set +x
 set -o pipefail
-[ -n "$MONGO_URI" ] && printf '%s' "$MONGO_URI" | \
-  gcloud secrets versions add mongo-uri --data-file=- --project="$PROJECT_ID"
-```
-
-```bash
-python -c 'import secrets,sys; sys.stdout.write(secrets.token_urlsafe(48))' | \
-  gcloud secrets versions add jwt-secret --data-file=- --project="$PROJECT_ID" &&
-python -c 'import secrets,sys; sys.stdout.write(secrets.token_urlsafe(48))' | \
-  gcloud secrets versions add device-keys --data-file=- --project="$PROJECT_ID"
-```
-
-Privately re-enter the **confirmed Firebase web app key** from §3 (not a
-separate temporary verification-helper key), then create the secret version:
-
-```bash
-read -r -s -p 'Confirmed Firebase web app API key (hidden): ' FIREBASE_WEB_API_KEY
-printf '\n'
-[ -n "$FIREBASE_WEB_API_KEY" ] && printf '%s' "$FIREBASE_WEB_API_KEY" | \
-  gcloud secrets versions add firebase-api-key --data-file=- --project="$PROJECT_ID"
-```
-
-After confirming the command succeeded, clear the shell variable:
-
-```bash
-unset FIREBASE_WEB_API_KEY
-```
-
-`printf '%s'` avoids a trailing newline. Stop if a value was empty or a
-version-add command failed. Authorized device provisioning must retrieve the
-device key through a secure channel; never print it into chat. If you replace
-an Atlas password later, update `mongo-uri` and redeploy the backend. The
-runtime identity needs access to each secret:
-
-```bash
-BINDING_FAILED=0
-for SECRET in mongo-uri jwt-secret device-keys firebase-api-key; do
-  if ! gcloud secrets add-iam-policy-binding "$SECRET" --project="$PROJECT_ID" \
-    --member="serviceAccount:$RUN_SA" --role=roles/secretmanager.secretAccessor \
-    --condition=None; then
-    BINDING_FAILED=1
+FAILED=0
+for PAIR in DATABASE_URL:database-url JWT_SECRET:jwt-secret DEVICE_API_KEYS:device-keys FIREBASE_API_KEY:firebase-api-key; do
+  ENV_NAME="${PAIR%%:*}"
+  SECRET_NAME="${PAIR#*:}"
+  if ! python -c 'import sys; from dotenv import dotenv_values; v=dotenv_values(".env").get(sys.argv[1]); assert v, "Missing value"; sys.stdout.write(v)' "$ENV_NAME" | \
+       gcloud secrets versions add "$SECRET_NAME" --data-file=- --project="$PROJECT_ID"; then
+    FAILED=1
     break
   fi
 done
-if [ "$BINDING_FAILED" -ne 0 ]; then
-  echo 'STOP: at least one secret IAM grant failed.' >&2
-else
-  echo 'All four secret IAM grants succeeded.'
-fi
+CA_PATH="$(python -c 'from dotenv import dotenv_values; print(dotenv_values(".env")["PGSSLROOTCERT"])')"
+[ "$FAILED" -eq 0 ] && [ -n "$CA_PATH" ] && \
+  gcloud secrets versions add supabase-ca --data-file="$CA_PATH" --project="$PROJECT_ID" && \
+  echo 'All secret versions uploaded.'
 ```
 
-Check that **each** binding succeeded before continuing. Secret Manager and
-IAM changes may take a few minutes to propagate. Existing Cloud Run revisions
-that used an old JWT key must no longer be reachable if that key was
-compromised; renaming a cookie alone does not revoke a copied JWT.
+If any operation fails, stop; check which versions were created before
+retrying. Secret values and `.env` stay private. Securely distribute the device
+key to authorized devices through a separate controlled channel.
 
-## 9. Deploy backend, then Hosting
+Grant the runtime service account access to each specific secret:
 
-This operation changes the real Google Cloud/Firebase project. The build uses
-its dedicated identity, sets all-traffic Direct VPC egress **on the first
-revision**, and uses the four Secret Manager values. Its `--set-env-vars` and
-`--set-secrets` replace the corresponding settings on an existing Cloud Run
-service; inspect and plan a cutover first if that service already exists.
+```bash
+FAILED=0
+for SECRET in database-url supabase-ca jwt-secret device-keys firebase-api-key; do
+  if ! gcloud secrets add-iam-policy-binding "$SECRET" --project="$PROJECT_ID" \
+      --member="serviceAccount:$RUN_SA" --role=roles/secretmanager.secretAccessor --condition=None; then
+    FAILED=1
+    break
+  fi
+done
+[ "$FAILED" -eq 0 ] && echo 'All runtime secret grants succeeded.'
+```
+
+Stop if the final success message is absent. Review earlier JWT versions and
+retire old reachable revisions as appropriate; renaming a cookie does not
+revoke a copied token. Rotate/update `database-url` and redeploy after any
+PostgreSQL password change.
+
+## 7. Deploy Cloud Run, then Hosting
+
+The build config replaces its declared Cloud Run environment variables and
+secrets. Inspect any existing service, IAM, secret references and traffic
+before deployment; do not blindly overwrite a production service.
 
 ```bash
 cd ~/frontend
@@ -724,171 +479,100 @@ git status --short
 gcloud meta list-files-for-upload
 ```
 
-Review the upload list **before** submitting. `.gcloudignore` includes the
-application, Dockerfile and `best.pt`, while excluding `.env`, JSON keys,
-tests and common personal data. Ignore rules are not a credential scanner;
-stop if any secret, onboarding document, real driver/bus register or personal
-media appears. Confirm your local checkout is the reviewed merged code.
+Review the upload list. It should contain application code, the Dockerfile and
+`best.pt`, not `.env`, database dumps, JSON credentials or personal records.
+Ignore files and the selective secret scanner are not complete audits.
 
 ```bash
-gcloud builds submit . --project="$PROJECT_ID" \
-  --config=deploy/cloudbuild.yaml \
+gcloud builds submit . --project="$PROJECT_ID" --config=deploy/cloudbuild.yaml \
   --gcs-source-staging-dir="gs://$BUILD_BUCKET/source"
 ```
 
-Wait for **SUCCESS**. The build uses the unique Cloud Build `BUILD_ID` image
-tag and deploys that image to Cloud Run. It may take several minutes to install
-the vision stack. A failed build means **stop**, inspect the Cloud Build and
-Cloud Run logs, and do not deploy Hosting as if the backend succeeded. For
-builds triggered automatically, configure the same dedicated identity on the
-trigger: a trigger's service account overrides the YAML `serviceAccount`.
-
-Check the service and its actual URL:
+Wait for **SUCCESS**; stop and investigate on failure. The dedicated build
+identity pushes a BUILD_ID-tagged image and deploys it. A Cloud Build trigger
+must have the intended service account configured on the trigger itself.
 
 ```bash
 gcloud run services describe srm-trp-transport --region="$REGION" --project="$PROJECT_ID"
-RUN_URL="$(gcloud run services describe srm-trp-transport --region="$REGION" \
-  --project="$PROJECT_ID" --format='value(status.url)')"
-printf 'Cloud Run URL: %s\n' "$RUN_URL"
-curl -fsS "$RUN_URL/api/health"
+RUN_URL="$(gcloud run services describe srm-trp-transport --region="$REGION" --project="$PROJECT_ID" --format='value(status.url)')"
+[ -n "$RUN_URL" ] && printf 'Cloud Run URL: %s\n' "$RUN_URL" && curl -fsS "$RUN_URL/api/health"
 ```
 
-In Cloud Run → service → **Networking / Revisions**, confirm Direct VPC
-`srm-trp-vpc`, subnet `srm-trp-subnet`, **all traffic**, runtime identity
-`$RUN_SA`, and the HTTP startup probe. `/api/health` is served only after the
-app has initialized MongoDB, so it is useful for startup; it is not a
-continuous database health monitor. Public invocation is required for this
-Hosting rewrite; application authentication still protects data routes.
+Confirm the runtime identity, mounted CA, PostgreSQL URL secret, startup probe,
+Direct VPC/subnet and all-traffic egress in Cloud Run. Health is available only
+after database startup checks, but it is not a continuous DB health monitor.
+Public Cloud Run invocation is required for this Hosting rewrite; protected
+routes still require application authorization.
 
-Finally publish Hosting, using the verified default site:
+Only after Cloud Run succeeds, publish Hosting to the verified default site:
 
 ```bash
-firebase deploy --only hosting --project=srmtrpai
+firebase deploy --only hosting --project="$PROJECT_ID"
 ```
 
-A successful deployment publishes static files and the Cloud Run rewrite. It
-does not create the Firebase account, Atlas access entry or network resources
-for you. When finished with the Atlas session, clear local environment values:
+`frontend/pages/` is excluded from Hosting: static files otherwise take
+priority over rewrites and could bypass Flask page authorization. Firebase
+Hosting forwards only the `__session` cookie. Check the real deployed
+configuration rather than relying on the emulator.
+
+## 8. Verify and operate
+
+Use the **actual** Hosting URL from section 2. The following only applies if
+its default URL really is `https://vision-ai-srmtrp.web.app`:
 
 ```bash
-unset MONGO_URI JWT_SECRET
-```
-
-## 10. Verify the complete connection
-
-The commands below assume the default site really is `srmtrpai`; otherwise use
-the actual site URL you verified in §3 and update the Firebase configuration.
-
-```bash
-curl -fsS https://srmtrpai.web.app/api/health
-curl -fsS https://srmtrpai.web.app/api/auth/config
-curl -fsS https://srmtrpai.web.app/api/config/firebase | \
+HOSTING_URL=https://vision-ai-srmtrp.web.app
+curl -fsS "$HOSTING_URL/api/health"
+curl -fsS "$HOSTING_URL/api/auth/config"
+curl -fsS "$HOSTING_URL/api/config/firebase" | \
   python -c 'import json,sys; d=json.load(sys.stdin); print("enabled:", d.get("enabled"), "project:", d.get("projectId"), "has API key:", bool(d.get("config", {}).get("apiKey")))'
-curl -sS -o /dev/null -w 'Unauthenticated /api/auth/me: %{http_code}\n' \
-  https://srmtrpai.web.app/api/auth/me
-curl -sS -o /dev/null -w 'Unauthenticated /dashboard: %{http_code}\n' \
-  https://srmtrpai.web.app/dashboard
-curl -sS -L -o /dev/null -w 'Direct template URL: %{http_code}\n' \
-  https://srmtrpai.web.app/pages/dashboard.html
+curl -sS -o /dev/null -w 'Unauthenticated /api/auth/me: %{http_code}\n' "$HOSTING_URL/api/auth/me"
+curl -sS -o /dev/null -w 'Unauthenticated /dashboard: %{http_code}\n' "$HOSTING_URL/dashboard"
+curl -sS -L -o /dev/null -w 'Direct template URL: %{http_code}\n' "$HOSTING_URL/pages/dashboard.html"
 ```
 
-Expected: health `status: ok`; Firebase config enabled for `srmtrpai` with
-`has API key: True`; `/api/auth/config` reports Firebase enabled, providers
-`password` and `google.com`, `auto_provision: false`,
-`legacy_password_login: false`; unauthenticated `me` is **401**, dashboard
-redirects to login, and a direct page-template URL is not served as a static
-protected page (normally **404**).
+Expect health `ok`, Firebase project `vision-ai-srmtrp`, enabled API key,
+`auto_provision: false`, `legacy_password_login: false`, unauthenticated `me`
+**401**, a login redirect for the dashboard, and no directly served protected
+template (normally **404**). Then test in a private browser:
 
-Then, in a private browser window:
+1. Sign in as the verified administrator, refresh `/dashboard`, and check
+   data operations. Inspect cookie attributes (`Secure`, `HttpOnly`,
+   `SameSite=Lax`, name `__session`) without copying its value.
+2. Sign out; protected routes should fail afterward. Test an independently
+   verified but unapproved account, an unverified account, an inactive account
+   and wrong-role access; all must be denied as appropriate.
+3. Test the real browser camera/detector only after privacy and model-rights
+   approval. Google popup/redirect flows must be tested in real browsers;
+   cross-origin storage restrictions can break redirect fallback.
 
-1. Open `https://srmtrpai.web.app/`, sign in as
-   `814725105014@trp.srmtrichy.edu.in` using the **new private password**,
-   and confirm the head-admin dashboard and data requests work.
-2. Refresh `/dashboard` directly. In browser developer tools, verify a
-   `Secure`, `HttpOnly`, `SameSite=Lax` cookie named `__session` exists; do
-   **not** copy its value. Test sign-out and confirm protected requests are
-   denied afterward.
-3. Test an independently verified but **unapproved** Firebase/Google account:
-   it must be refused. Test that unverified, inactive, and wrong-role accounts
-   are refused as appropriate. Do not use a real unauthorized person's
-   account for testing.
-4. Test the operator webcam over HTTPS, and the real detector/Atlas integration
-   only after rights, privacy and production approvals are complete. If using
-   Google redirect sign-in from `web.app`, test the actual browsers and follow
-   [Firebase's redirect guidance](https://firebase.google.com/docs/auth/web/redirect-best-practices)
-   for same-origin auth helpers and OAuth redirect URIs; otherwise allow the popup.
-
-Firebase Hosting has a **60-second request timeout** even though Cloud Run is
-configured for 300 seconds. A cold start waiting for NAT/Atlas can time out at
-Hosting before the service is ready; inspect service health and retry. Long
-camera/SSE streams and slow detection requests may be interrupted and need
-real testing or an alternative streaming/processing architecture. See
-[Firebase's Hosting serverless limits](https://firebase.google.com/docs/hosting/serverless-overview).
-
-For logs (read privately; redact before sharing):
+Hosting limits backend requests to 60 seconds even though Cloud Run's timeout
+is 300 seconds. Cold starts or long SSE/camera/detection requests may exceed
+that limit. NAT can take time to become ready; inspect logs and retry rather
+than assuming a password error. Logs may contain personal information:
 
 ```bash
 gcloud builds list --project="$PROJECT_ID" --limit=5
-gcloud run services logs read srm-trp-transport --region="$REGION" \
-  --project="$PROJECT_ID" --limit=100
+gcloud run services logs read srm-trp-transport --region="$REGION" --project="$PROJECT_ID" --limit=100
 ```
 
-## 11. Production gates
+Before production, review backups and restore tests, retention, IAM, real
+accounts/UIDs, previous exposed credentials, old sessions, Git history,
+model/dataset licensing, CORS and distributed rate limiting. The default
+in-memory login limiter is per process, not a global control. Use approved
+procedures to remove sensitive Git history **after** credential rotation;
+normal commits do not erase forks, PRs or caches.
 
-- [ ] Rotate/revoke **both** exposed Atlas credentials and verify old access
-      no longer works; review Atlas users and network access.
-- [ ] Reset the password that appeared in chat if it was ever configured.
-- [ ] Review existing Firebase users, access entries, UID bindings, audit logs,
-      and old sessions from earlier versions; deactivate unauthorized entries.
-- [ ] Rotate `JWT_SECRET`, deploy the new revision, and retire old reachable
-      revisions/secret versions as appropriate. A captured JWT is not revoked
-      merely by the cookie-name change; users must sign in again.
-- [ ] Purge sensitive data from Git history **after rotation**. Coordinate a
-      repository-wide rewrite with all collaborators and GitHub Support; a
-      normal new commit does not erase old commits, pull requests, forks or
-      cached copies. Follow [GitHub's sensitive-data removal guide](https://docs.github.com/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository).
-      This guide does not perform that destructive history rewrite for you.
-- [ ] Resolve the provenance/licence of `best.pt` and the model's upstream
-      material before production use or distribution.
-- [ ] Verify the actual Firebase configuration, real email verification,
-      least-privilege Atlas user, static NAT IP, IAM, secrets, real login,
-      unauthorized-user denial, sign-out and camera/detector behavior.
-- [ ] Review budgets, backups, audit retention, privacy obligations, CORS,
-      and distributed rate limiting. The default in-memory rate limiter is per
-      process/instance and is not a global brute-force control.
-
-## 12. Troubleshooting, updates and rollback
-
-| Symptom | First checks |
-| --- | --- |
-| `node`, `npm`, `gcloud`, or `firebase` not found | Reopen Git Bash; use the PATH fallbacks in §1. Do not substitute a literal `you` path. |
-| Python opens Microsoft Store | Use `py -3.11` and `.venv/Scripts/activate`; repair Windows app execution aliases. |
-| `Permission denied` during build | Confirm the human submitter can act as `$BUILD_SA`; the builder has source-bucket read, Artifact Registry write, Cloud Run deploy and act-as-`$RUN_SA`; review organization policy. |
-| Cloud Run startup fails | Inspect Cloud Run logs privately; verify all four secrets and runtime grants, Direct VPC/NAT, Atlas `NAT_IP/32`, DNS/TLS, database user and index permissions. |
-| Local Atlas CLI cannot connect | Verify the **workstation** public IP entry as well as URI encoding and network/TLS; a TLS timeout does not prove credentials are wrong. |
-| `Verify your email` | Run §7.1 and follow the link; a Firebase user or reset password alone is not verification. |
-| `not authorised` or a different-UID error | Inspect the active `srmtrpai.users` entry and compare UID with the trusted Firebase account before adding or unlinking. |
-| Login returns to login / dashboard shows login page | Confirm updated `firebase.json`, Hosting deployment, `__session`, Cloud Run region/service, and clean URLs. Existing browser sessions must sign in again. |
-| Cloud Run health works but `/api/config/firebase` is disabled | Check the confirmed web app ID, project ID and `firebase-api-key` secret; redeploy after updating. |
-| Camera denied despite HTTPS | Check the browser permission and the actual page's `Permissions-Policy`; both Hosting and Flask should allow `camera=(self)`. |
-
-To update later, reactivate the venv, safely fast-forward your **clean** local
-`main`, inspect `gcloud meta list-files-for-upload`, and repeat the build and
-Hosting commands in §9. Re-export the project/bucket variables from §5. Never
-use `git reset --hard` to repair a checkout containing work.
-
-To roll back a Cloud Run revision, first review the security implications of
-restoring its old code, environment and signing key:
+For rollback, inspect the old revision's security and secret versions first;
+it may still point to MongoDB or an old Firebase project. Database changes are
+not rolled back automatically:
 
 ```bash
 gcloud run revisions list --service=srm-trp-transport --region="$REGION" --project="$PROJECT_ID"
-# Replace REVISION_ID with a specific known-good revision after review.
-gcloud run services update-traffic srm-trp-transport --region="$REGION" \
-  --project="$PROJECT_ID" --to-revisions=REVISION_ID=100
+# Only after review: replace REVISION_ID with the known-good revision.
+gcloud run services update-traffic srm-trp-transport --region="$REGION" --project="$PROJECT_ID" --to-revisions=REVISION_ID=100
 ```
 
-For Hosting, use **Firebase Console → Hosting & Serverless → Hosting → Release
-history → menu → Roll back**. The Hosting rewrite is not pinned to a Cloud Run
-revision, so rolling back one side does not roll back the other. A rollback to
-an old revision may restore a compromised secret or insecure behavior; do not
-assume it is safe.
+Hosting rollback is in Firebase Console → Hosting → release history. The
+Hosting rewrite is not pinned to a Cloud Run revision, so each side must be
+reviewed separately.

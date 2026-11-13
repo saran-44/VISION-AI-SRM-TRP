@@ -1,7 +1,7 @@
 """Send a Firebase password user's verification email without exposing tokens.
 
 This is an onboarding helper, not a portal login. A successful Firebase sign-in
-and verified email do not grant portal access: an active MongoDB access entry
+and verified email do not grant portal access: an active PostgreSQL access entry
 is still required. See docs/DEPLOY_WINDOWS.md for hidden-prompt usage.
 """
 from __future__ import annotations

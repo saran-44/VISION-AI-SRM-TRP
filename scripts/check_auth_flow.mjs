@@ -69,8 +69,8 @@ global.fetch = async (url, options = {}) => {
       ok: true,
       status: 200,
       json: async () => ({
-        config: { apiKey: 'test-key', projectId: 'srmtrpai', appId: 'app-id' },
-        projectId: 'srmtrpai',
+        config: { apiKey: 'test-key', projectId: 'vision-ai-srmtrp', appId: 'app-id' },
+        projectId: 'vision-ai-srmtrp',
         enabled: true,
         analytics: false,
       }),

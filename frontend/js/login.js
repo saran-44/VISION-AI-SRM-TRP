@@ -118,7 +118,7 @@ if (googleButton) {
     firebaseNote.hidden = !firebaseOn;
   }
 
-  // The legacy MongoDB password form stays available as a break-glass path
+  // The legacy local-password form stays available as a break-glass path
   // unless the deployment disables it explicitly.
   const legacyAllowed = config.legacy_password_login !== false;
   if (legacySection) {
