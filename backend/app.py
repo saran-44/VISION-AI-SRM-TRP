@@ -28,6 +28,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from .access import AccessDenied, resolve_identity
 from .auth import (
     COOKIE_NAME,
+    authenticate_request,
     clear_auth_cookie,
     create_access_token,
     public_user,
@@ -55,6 +56,7 @@ from .schemas import (
     plate_key,
 )
 from .services import (
+    build_event_query,
     camera_config,
     compute_analytics,
     compute_stats,
@@ -298,8 +300,6 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
     # ------------------------------------------------------------------ pages
     @app.get("/")
     def login_page():
-        from .auth import authenticate_request
-
         user, _ = authenticate_request()
         if user:
             return redirect("/dashboard" if user["role"] == "head_admin" else "/manage")
@@ -543,8 +543,6 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             return error
         query_payload = event_filter.model_dump()
         skip = (event_filter.page - 1) * event_filter.page_size
-        from .services import build_event_query
-
         query = build_event_query(event_filter, config)
         docs = list(db.events.find(query).sort(event_sort()).skip(skip).limit(event_filter.page_size))
         total = (
