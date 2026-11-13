@@ -239,3 +239,78 @@ def test_concurrent_table_operations_commit_independently(db):
     with ThreadPoolExecutor(max_workers=8) as pool:
         assert len(list(pool.map(write_and_read, range(30)))) == 30
     assert db.buses.count_documents({}) == 30
+
+
+def test_concurrent_bus_state_and_idempotency_writes_stay_monotonic(db, config):
+    from datetime import timedelta
+    from backend.schemas import EventCreate
+    from backend.services import ingest_event_with_status
+
+    base = naive_now() - timedelta(hours=1)
+    # Concurrent identical idempotency key deliveries produce exactly 1 event.
+    payload = EventCreate(
+        bus_number="BUS-CONC",
+        direction="IN",
+        gate="Gate 1",
+        camera_id="cam-1",
+        confidence=0.95,
+        timestamp=base.isoformat() + "Z",
+    )
+
+    def send_once(_idx):
+        return ingest_event_with_status(
+            db, payload, config, source="device", idempotency_key="conc-key-1"
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(send_once, range(8)))
+    assert sum(1 for _ev, created in results if created) == 1
+    assert db.events.count_documents({"bus_number": "BUS-CONC"}) == 1
+
+    # Out-of-order concurrent bus_states upserts always keep the newest timestamp.
+    latest = base + timedelta(minutes=10)
+    states = [
+        {
+            "bus_number": "BUS-MONO",
+            "direction": "IN" if idx != 3 else "OUT",
+            "last_timestamp": latest if idx == 3 else base + timedelta(minutes=idx),
+            "last_event_id": f"00000000000000000000000{idx}",
+            "gate": "Gate 1",
+            "camera_id": "cam-1",
+            "demo": False,
+            "updated_at": base,
+        }
+        for idx in range(8)
+    ]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(db.upsert_bus_state, states))
+    final = db.bus_states.find_one({"bus_number": "BUS-MONO"})
+    assert final["direction"] == "OUT"
+    assert final["last_timestamp"] == latest
+
+
+@pytest.mark.skipif(not os.getenv("TEST_DATABASE_URL"), reason="requires disposable local PostgreSQL")
+def test_002_hardening_migration_is_idempotent_and_analytics_runs_in_postgres(db):
+    import psycopg
+    from pathlib import Path
+
+    migration_sql = (Path(__file__).resolve().parents[1] / "sql/002_backend_hardening.sql").read_text()
+    with psycopg.connect(os.environ["TEST_DATABASE_URL"], autocommit=True) as conn:
+        conn.execute(migration_sql)
+        conn.execute(migration_sql)
+
+    ts = datetime(2026, 1, 1, 10, 30)
+    db.events.insert_one({
+        "bus_number": "BUS-PG-1",
+        "direction": "IN",
+        "gate": "Gate 1",
+        "camera_id": "cam-1",
+        "confidence": 0.9,
+        "timestamp": ts,
+        "created_at": ts,
+        "flag_reasons": [],
+        "flagged": False,
+    })
+    agg = db.aggregate_analytics({"direction": "IN"}, "Asia/Kolkata")
+    assert agg["totals"] == {"events": 1, "gates": 1, "buses": 1}
+    assert sum(agg["hour_counts"].values()) == 1

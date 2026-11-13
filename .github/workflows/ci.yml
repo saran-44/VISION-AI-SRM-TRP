@@ -80,12 +80,20 @@ jobs:
       - name: The checkpoint must load and report its classes
         run: |
           python - <<'PY'
-          from backend.vision import load_model, vision_status
+          import io
+          from PIL import Image
+          from backend.vision import decode_image, detect, load_model, normalize_plate, vision_status
           status = vision_status()
           assert status["model_present"], "best.pt is missing"
           assert status["available"], f"vision stack unavailable: {status['problems']}"
           model = load_model()
           assert model.names == {0: "red circle", 1: "sticker"}, model.names
+          buf = io.BytesIO()
+          Image.new("RGB", (640, 480), color=(255, 255, 255)).save(buf, format="JPEG")
+          img = decode_image(buf.getvalue())
+          result = detect(img, model=model)
+          assert result.frame_width == 640 and result.frame_height == 480
+          assert normalize_plate("..--TN 12 AB 1234__") == "TN 12 AB 1234"
           print("model OK:", model.names)
           print("ocr engine:", status["ocr_available"])
           PY
