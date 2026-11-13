@@ -110,41 +110,51 @@ The compat SDK bundles from `firebase@11.10.0` are vendored in
 these paths with browser/Firebase mocks. They are **not** live integration
 or OAuth tests.
 
-## 4. Hosting → Cloud Run
+## 4. Hosting → Render (free plan)
 
-`firebase.json` publishes `frontend/` but **excludes `frontend/pages/`**.
-Firebase Hosting gives static files priority over rewrites, so publishing the
-page templates would bypass Flask's page-role checks. The login page, assets,
-JavaScript and vendor libraries are static. Every unmatched path, including
-`/api/**` and `/dashboard`, is rewritten using `run.serviceId` to Cloud Run
-service `srm-trp-transport` in `asia-south1`; this is not an SPA fallback.
-Flask serves protected templates only after checking the session and role.
+`firebase.json` publishes `deploy/firebase/public`, a one-file placeholder, and
+redirects **every** path to the Render deployment with a `302`:
 
-The browser uses same-origin relative API URLs. Firebase Hosting forwards only
-the reserved `__session` cookie to a dynamic backend; the app uses that name
-for its `HttpOnly`, `SameSite=Lax`, production-`Secure` session cookie. Users
-of the former cookie must sign in again. Renaming a cookie alone does not
-invalidate copied JWTs: rotate `JWT_SECRET` and retire old reachable revisions
-when responding to a compromise.
+```json
+"redirects": [
+  { "source": "/:path*", "destination": "https://srm-trp-transport.onrender.com/:path*", "type": 302 },
+  { "source": "**",     "destination": "https://srm-trp-transport.onrender.com",        "type": 302 }
+]
+```
 
-Firebase Hosting and the backend both allow `camera=(self)` through
-`Permissions-Policy`. HTTPS and browser camera permission are also required.
-`/assets/**` and `/vendor/**` have a one-year immutable cache header; rename or
-version asset URLs when changing them to avoid stale browser content. The
-backend marks API and HTML responses `no-store`.
+The first rule keeps the path **and** the query string; the second catches
+anything the capture misses. `302` rather than `301` so the target stays
+changeable — see [DEPLOY_FIREBASE_REDIRECT.md](DEPLOY_FIREBASE_REDIRECT.md).
 
-Firebase Hosting currently limits backend requests to **60 seconds**, even
-though Cloud Run is configured for 300 seconds. A cold start waiting on NAT or
-Supabase can time out at the Hosting edge before the backend becomes ready;
-retry after inspecting service health. Long-running detection and camera/SSE
-streams may be interrupted and require explicit production testing or another
-architecture. See [Firebase's serverless limits](https://firebase.google.com/docs/hosting/serverless-overview).
+Why a redirect: Hosting rewrites can only target Cloud Run or Cloud Functions,
+and both require the Blaze plan. The app runs on Render Free, so Hosting
+contributes the branded HTTPS address (`vision-ai-srmtrp.web.app`) and the
+browser talks to Render directly. Nothing is served from Firebase: the Flask
+app still owns authentication, roles and every page template, so publishing
+`frontend/pages/` to a static host cannot bypass the role checks.
 
-The local Hosting emulator can check basic rewrites, but it does not prove a
-real Cloud Run proxy or deployment upload exclusions. Test an actual deployment
-with an authorized and unauthorized account before production.
+Consequences worth knowing:
 
-## 5. Deploy and production gates
+- The `__session` forwarding rule of the Hosting→Cloud Run boundary no longer
+  applies — the cookie is set and read on the Render origin. The app keeps the
+  reserved name, `HttpOnly`, `SameSite=Lax` and production `Secure`, and
+  `test_hosting_deployment.py` still guards that shape.
+- Sign-in happens on `srm-trp-transport.onrender.com`, so that host must be in
+  **Authentication → Settings → Authorized domains**. `web.app` in that list is
+  harmless but unused.
+- Firebase's 60-second backend limit, VPC egress and Cloud Run cold starts are
+  out of the picture; Render's own limits apply
+  ([DEPLOY_RENDER_FREE.md](DEPLOY_RENDER_FREE.md) §10).
+- The local Hosting emulator verifies the rules offline
+  (`firebase emulators:start --only hosting`); it does not prove the live
+  deployment's DNS, certificate or Firebase project bindings.
+
+## 5. Deploy and production gates (paid Cloud Run path, optional)
+
+The checked-in `firebase.json` targets the free redirect path above. Switching
+back to a Hosting→Cloud Run rewrite means restoring the `rewrites` block in
+`firebase.json` (CLI: `firebase init hosting` is still the wrong tool — edit the
+file) **and** upgrading the project to Blaze.
 
 The Windows runbook creates a dedicated build and runtime identity, five
 Secret Manager values, a dedicated PostgreSQL database user, and Direct VPC egress

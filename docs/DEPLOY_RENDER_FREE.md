@@ -30,14 +30,21 @@ Read [§10](#10-limits-of-the-free-plan) before putting real driver data in.
 | 11 | **Authorized domain** `…onrender.com` | Firebase Console → **Authentication → Settings → Authorized domains** | login from the Render URL |
 | 12 | Firebase **user** for the administrator | Firebase Console → **Authentication → Users** | the account |
 | 13 | Email **verified** + row in the access list | verification script + `backend.manage_access` | authorization |
+| 14 | *(optional)* Firebase **Hosting** redirect | `firebase deploy --only hosting` — [guide](DEPLOY_FIREBASE_REDIRECT.md) | the `…web.app` address |
 
 **You do NOT need** — for this free path only: a Google Cloud billing account,
-`gcloud`, `firebase-tools`, the Firebase CLI, Firebase Hosting, Docker Desktop,
-the **Supabase CLI** (`supabase init` / `supabase link` / `supabase db push`),
-or any Supabase API key (`sb_publishable_…`, anon or service-role). The schema is
-applied once through the **SQL Editor**, and the app talks to Postgres directly
-through the session pooler, never through the Supabase Data API. (The Cloud Run
-path is in [`DEPLOY_GITBASH_QUICKSTART.md`](DEPLOY_GITBASH_QUICKSTART.md).)
+`gcloud`, Docker Desktop, the **Supabase CLI** (`supabase init` / `supabase link`
+/ `supabase db push`), or any Supabase API key (`sb_publishable_…`, anon or
+service-role). The schema is applied once through the **SQL Editor**, and the
+app talks to Postgres directly through the session pooler, never through the
+Supabase Data API. (The Cloud Run path is in
+[`DEPLOY_GITBASH_QUICKSTART.md`](DEPLOY_GITBASH_QUICKSTART.md).)
+
+**Optional:** the Firebase CLI (`firebase-tools`) only if you also want the
+`vision-ai-srmtrp.web.app` address. On the Spark plan Hosting cannot rewrite to
+Cloud Run, so `firebase.json` **redirects** every path to the Render service —
+see [`DEPLOY_FIREBASE_REDIRECT.md`](DEPLOY_FIREBASE_REDIRECT.md). The app works
+fully without it: Render is the real address.
 
 Keep a private folder for the certificate and `.env`, e.g.
 `C:\Users\<you>\srm-trp-private\`.
@@ -338,6 +345,7 @@ deliberately ships without torch. See [§10](#10-limits-of-the-free-plan).
 | Change a role | `python -m backend.manage_access set-role <email> head_admin` |
 | Suspend access | `python -m backend.manage_access deactivate <email>` |
 | Rotate the JWT secret | change `JWT_SECRET` in Render → redeploy → all sessions end |
+| Publish the `…web.app` address | `firebase deploy --only hosting` — [guide](DEPLOY_FIREBASE_REDIRECT.md) |
 | Rotate the app DB password | SQL Editor: `alter role transport_portal_app password '<new>';` → update the password inside `DATABASE_URL` → redeploy |
 | Rotate a device key | change `DEVICE_API_KEYS` → redeploy → update the camera/gateway |
 | Add a camera | `CAMERA_STREAM_URLS` env var, JSON per [`CAMERAS.md`](CAMERAS.md) |

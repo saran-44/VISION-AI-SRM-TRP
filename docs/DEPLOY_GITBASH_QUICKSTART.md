@@ -52,9 +52,25 @@ export REPO=srm-trp
 export RUN_SA="srm-trp-run@${PROJECT_ID}.iam.gserviceaccount.com"
 ```
 
-The repository already pins these in `.firebaserc`, `firebase.json` and
+The repository already pins the project in `.firebaserc` and
 `deploy/cloudbuild.yaml`. Change them **only** if you deliberately use another
-Google Cloud project, and change all three files together.
+Google Cloud project, and change both files together.
+
+> The checked-in `firebase.json` does **not** contain a Cloud Run rewrite: it
+> targets the free Render deployment with a `302` redirect
+> ([DEPLOY_FIREBASE_REDIRECT.md](DEPLOY_FIREBASE_REDIRECT.md)). For this paid
+> path, add the rewrite back before deploying Hosting:
+>
+> ```json
+> "rewrites": [
+>   { "source": "**", "run": { "serviceId": "srm-trp-transport", "region": "asia-south1" } }
+> ],
+> "public": "frontend",
+> "ignore": ["firebase.json", "**/.*", "**/node_modules/**", "**/pages/**"]
+> ```
+>
+> Remove the `redirects` array at the same time, or Hosting will keep
+> redirecting to Render and never reach Cloud Run.
 
 ---
 
@@ -466,7 +482,7 @@ Troubleshooting:
 
 | Symptom | Cause / fix |
 | --- | --- |
-| Hosting returns 404 for everything | The Cloud Run service name/region does not match `firebase.json` (`srm-trp-transport`, `asia-south1`), or it is not public |
+| Hosting returns 404 for everything | The Cloud Run service name/region does not match the `rewrites` block (`srm-trp-transport`, `asia-south1`), it is not public, or the free-path `redirects` are still in `firebase.json` |
 | `PostgreSQL initialization failed after retries` | Wrong CA path, missing `supabase-ca` secret, network restrictions, or a paused project |
 | `schema version is missing or incompatible` | Step 3.2 migration was never run (or ran against another database) |
 | Login fails for a valid Firebase user | No active row in the access list (`python -m backend.manage_access list`) |
