@@ -83,6 +83,6 @@ steps:
       - httpGet.path=/api/health,httpGet.port=8080,initialDelaySeconds=0,timeoutSeconds=5,periodSeconds=10,failureThreshold=24
       - --set-env-vars
       # Use a custom delimiter so the provider list keeps its comma.
-      - ^|^ENVIRONMENT=production|PGSSLROOTCERT=/secrets/supabase-ca.crt|APP_TIMEZONE=Asia/Kolkata|FIREBASE_PROJECT_ID=$PROJECT_ID|FIREBASE_AUTH_DOMAIN=$PROJECT_ID.firebaseapp.com|FIREBASE_STORAGE_BUCKET=vision-ai-srmtrp.firebasestorage.app|FIREBASE_MESSAGING_SENDER_ID=235811571442|FIREBASE_APP_ID=1:235811571442:web:342e488e0ac2ee75b0f26b|FIREBASE_MEASUREMENT_ID=G-S4HS9TGV4H|FIREBASE_ALLOWED_PROVIDERS=password,google.com|FIREBASE_AUTO_PROVISION=false|LEGACY_PASSWORD_LOGIN_ENABLED=false
+      - ^|^ENVIRONMENT=production|PGSSLROOTCERT=/secrets/supabase-ca.crt|TRUSTED_PROXY_COUNT=0|APP_TIMEZONE=Asia/Kolkata|FIREBASE_PROJECT_ID=$PROJECT_ID|FIREBASE_AUTH_DOMAIN=$PROJECT_ID.firebaseapp.com|FIREBASE_STORAGE_BUCKET=vision-ai-srmtrp.firebasestorage.app|FIREBASE_MESSAGING_SENDER_ID=235811571442|FIREBASE_APP_ID=1:235811571442:web:342e488e0ac2ee75b0f26b|FIREBASE_MEASUREMENT_ID=G-S4HS9TGV4H|FIREBASE_ALLOWED_PROVIDERS=password,google.com|FIREBASE_AUTO_PROVISION=false|LEGACY_PASSWORD_LOGIN_ENABLED=false
       - --set-secrets
       - DATABASE_URL=database-url:latest,JWT_SECRET=jwt-secret:latest,DEVICE_API_KEYS=device-keys:latest,FIREBASE_API_KEY=firebase-api-key:latest,/secrets/supabase-ca.crt=supabase-ca:latest

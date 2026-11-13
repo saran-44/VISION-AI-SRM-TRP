@@ -84,18 +84,29 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         SECRET_KEY=os.urandom(32).hex(),
     )
     app.json.sort_keys = False
-    if config.trust_proxy_headers:
+    proxy_hops = config.trusted_proxy_count or (1 if config.trust_proxy_headers else 0)
+    if proxy_hops > 0:
         # Only trusted when an operator explicitly opts in, because the headers
         # are client-controlled when there is no proxy in front of the app.
-        # x_for=1 trusts exactly one hop, which is what Render/Railway/nginx
-        # append; x_proto=1 makes request.is_secure true for HSTS and cookies.
         from werkzeug.middleware.proxy_fix import ProxyFix
 
-        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=0, x_port=0, x_prefix=0)
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app,
+            x_for=proxy_hops,
+            x_proto=proxy_hops,
+            x_host=proxy_hops if config.trusted_proxy_count > 0 else 0,
+            x_port=0,
+            x_prefix=0,
+        )
     db = get_database_for_startup(config, database_engine)
     app.extensions["transport_db"] = db
 
-    limiter = Limiter(key_func=get_remote_address, app=app)
+    limiter = Limiter(
+        key_func=get_remote_address,
+        app=app,
+        in_memory_fallback_enabled=True,
+        swallow_errors=True,
+    )
     app.extensions["limiter"] = limiter
     sse_semaphore = threading.BoundedSemaphore(config.sse_max_connections)
     app.extensions["sse_semaphore"] = sse_semaphore

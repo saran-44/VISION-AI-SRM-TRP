@@ -345,9 +345,25 @@ def xlsx_bytes(rows: list[dict[str, Any]]) -> bytes:
     return buffer.getvalue()
 
 
+def sanitized_xff(flask_request) -> str | None:
+    if not flask_request:
+        return None
+    raw = flask_request.headers.get("X-Forwarded-For", "")
+    if not raw:
+        return None
+    cleaned = "".join(ch for ch in raw if 32 <= ord(ch) <= 126).strip()
+    return cleaned[:128] or None
+
+
 def record_audit(db, actor: dict[str, Any] | None, action: str, collection: str,
                  record_id: Any = None, before: dict | None = None,
                  after: dict | None = None, flask_request=None) -> None:
+    after_doc = public_doc(after)
+    if flask_request and action in {"login", "login_failed", "login_denied", "login_provisioned"}:
+        xff_raw = sanitized_xff(flask_request)
+        if xff_raw:
+            after_doc = dict(after_doc) if isinstance(after_doc, dict) else {}
+            after_doc["xff_raw"] = xff_raw
     entry = {
         "timestamp": naive_now(),
         "actor": actor.get("email", "system") if actor else "system",
@@ -356,7 +372,7 @@ def record_audit(db, actor: dict[str, Any] | None, action: str, collection: str,
         "collection": collection,
         "record_id": str(record_id) if record_id is not None else None,
         "before": public_doc(before),
-        "after": public_doc(after),
+        "after": after_doc,
         "ip": flask_request.remote_addr if flask_request else None,
         "user_agent": (
             flask_request.headers.get("User-Agent", "")[:200] if flask_request else None

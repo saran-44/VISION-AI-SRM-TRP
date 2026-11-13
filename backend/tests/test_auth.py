@@ -139,3 +139,63 @@ def test_login_email_is_normalised_to_lowercase(client, db, users):
     )
     response = login(client, "Mixed.Case@Example.Invalid", TRANSPORT_PASSWORD)
     assert response.status_code == 200
+
+
+def test_proxy_count_extracts_client_ip_for_rate_limit_and_audit(db, users):
+    limited_config = build_config(
+        rate_limit_enabled=True,
+        login_rate_limit="2 per minute",
+        trusted_proxy_count=2,
+    )
+    app = create_app(limited_config, database_engine=db.engine)
+    app.config.update(TESTING=True)
+    client = app.test_client()
+
+    for _ in range(2):
+        res = client.post(
+            "/api/auth/login",
+            json={"email": HEAD_ADMIN_EMAIL, "password": "wrong-password-value"},
+            headers={"X-Forwarded-For": "198.51.100.10, 10.0.0.1", "X-Forwarded-Proto": "https, https"},
+        )
+        assert res.status_code == 401
+
+    blocked = client.post(
+        "/api/auth/login",
+        json={"email": HEAD_ADMIN_EMAIL, "password": "wrong-password-value"},
+        headers={"X-Forwarded-For": "198.51.100.10, 10.0.0.1", "X-Forwarded-Proto": "https, https"},
+    )
+    assert blocked.status_code == 429
+
+    other_client = client.post(
+        "/api/auth/login",
+        json={"email": HEAD_ADMIN_EMAIL, "password": HEAD_ADMIN_PASSWORD},
+        headers={"X-Forwarded-For": "198.51.100.11, 10.0.0.1", "X-Forwarded-Proto": "https, https"},
+    )
+    assert other_client.status_code == 200
+    entry = db.audit_logs.find_one({"action": "login"})
+    assert entry["ip"] == "198.51.100.11"
+    assert entry["after"]["xff_raw"] == "198.51.100.11, 10.0.0.1"
+
+
+def test_rate_limit_blocks_firebase_login(db, users, monkeypatch):
+    from backend import app as app_module
+    from backend.firebase_auth import FirebaseAuthError
+
+    def invalid(_token, _project):
+        raise FirebaseAuthError("Invalid Firebase token")
+
+    limited_config = build_config(rate_limit_enabled=True, login_rate_limit="2 per minute")
+    app = create_app(limited_config, database_engine=db.engine)
+    app.config.update(TESTING=True)
+    monkeypatch.setattr(app_module, "verify_firebase_id_token", invalid)
+    client = app.test_client()
+
+    for _ in range(2):
+        assert client.post("/api/auth/firebase", json={"id_token": "x" * 30}).status_code == 401
+    assert client.post("/api/auth/firebase", json={"id_token": "x" * 30}).status_code == 429
+
+
+def test_limiter_configures_in_memory_fallback_and_swallow_errors(app):
+    limiter = app.extensions["limiter"]
+    assert limiter._swallow_errors is True
+    assert limiter._in_memory_fallback_enabled is True

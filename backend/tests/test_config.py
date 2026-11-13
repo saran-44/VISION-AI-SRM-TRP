@@ -149,3 +149,10 @@ def test_indexes_for_firebase_uid_and_audit_logs_defined(db):
     for sql_text in (initial_sql, hardening_sql):
         assert "users_firebase_uid" in sql_text
         assert "audit_collection_action_timestamp" in sql_text
+
+
+def test_trusted_proxy_count_validation_rejects_out_of_range():
+    with pytest.raises(RuntimeError, match="TRUSTED_PROXY_COUNT"):
+        build_config(trusted_proxy_count=-1).validate()
+    with pytest.raises(RuntimeError, match="TRUSTED_PROXY_COUNT"):
+        build_config(trusted_proxy_count=11).validate()

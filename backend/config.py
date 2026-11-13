@@ -122,6 +122,7 @@ class Config:
     # reverse proxy. Without it, login throttling and the audit log would key
     # on the proxy's address instead of the real client.
     trust_proxy_headers: bool = False
+    trusted_proxy_count: int = 0
     login_rate_limit: str = "5 per minute;20 per hour"
     rate_limit_enabled: bool = True
     rate_limit_storage_uri: str = "memory://"
@@ -169,6 +170,7 @@ class Config:
             cors_allowed_origins=cors_origins,
             device_api_keys=_csv("DEVICE_API_KEYS"),
             trust_proxy_headers=_bool("TRUST_PROXY_HEADERS", False),
+            trusted_proxy_count=_int("TRUSTED_PROXY_COUNT", 0),
             login_rate_limit=os.getenv("LOGIN_RATE_LIMIT", "5 per minute;20 per hour"),
             rate_limit_enabled=_bool("RATELIMIT_ENABLED", True),
             rate_limit_storage_uri=os.getenv("RATELIMIT_STORAGE_URI", "memory://"),
@@ -240,6 +242,8 @@ class Config:
             raise RuntimeError("EVENT_RETENTION_DAYS must be non-negative")
         if self.audit_retention_days < 0:
             raise RuntimeError("AUDIT_RETENTION_DAYS must be non-negative")
+        if not 0 <= self.trusted_proxy_count <= 10:
+            raise RuntimeError("TRUSTED_PROXY_COUNT must be between 0 and 10")
         if not 1 <= self.sse_max_connections <= 50:
             raise RuntimeError("SSE_MAX_CONNECTIONS must be between 1 and 50")
         if not 5 <= self.sse_max_seconds <= 290:

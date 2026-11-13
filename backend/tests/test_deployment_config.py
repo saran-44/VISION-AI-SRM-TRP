@@ -41,3 +41,4 @@ def test_cloud_build_sets_the_secure_first_deployment_path():
     # window has allowed Direct VPC egress and Cloud NAT to become ready.
     assert '"--timeout", "180"' in dockerfile
     assert "periodSeconds=10,failureThreshold=24" in config
+    assert "TRUSTED_PROXY_COUNT=0" in config
