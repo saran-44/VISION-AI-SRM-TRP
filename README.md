@@ -1,4 +1,4 @@
-# SRM TRP Transport — Campus Bus Gate Monitoring
+# VISION AI - SRM TRP — Campus Bus Gate Monitoring
 
 A web application for the SRM Transport department that turns camera/OCR gate
 detections into live, auditable bus movement records: how many buses are inside

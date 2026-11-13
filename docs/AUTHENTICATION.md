@@ -1,6 +1,6 @@
 # Authentication — Firebase sign-in with a restricted access list
 
-This document explains how the SRM TRP Transport console authenticates, how
+This document explains how the VISION AI - SRM TRP console authenticates, how
 access is restricted to specific email addresses, and exactly what to click in
 the Firebase console.
 

@@ -1,4 +1,4 @@
-# SRM TRP Transport — Historical Upgrade Specification
+# VISION AI - SRM TRP — Historical Upgrade Specification
 
 > **Historical document, not an operations guide.** The architecture, project
 > identifiers, database descriptions and commands below describe earlier
@@ -52,7 +52,7 @@
 
 ## 1. Executive summary
 
-SRM TRP Transport is an internal tool for the SRM TRP Engineering College
+VISION AI - SRM TRP is an internal tool for the SRM TRP Engineering College
 transport department. It tracks college buses as they enter and leave the
 campus, logs every movement with the bus registration number, and gives the
 transport office a live dashboard, analytics, exports and an audit trail.
@@ -81,7 +81,7 @@ See [§5](#5-the-ai-model--provenance-investigation).
 The user asked for, in their own terms:
 
 > Create a comprehensive Markdown upgrade specification for import into Claude
-> and implement the upgrade across the existing SRM TRP Transport project.
+> and implement the upgrade across the existing VISION AI - SRM TRP project.
 
 with this scope:
 

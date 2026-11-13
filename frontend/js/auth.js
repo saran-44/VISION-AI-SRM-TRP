@@ -1,5 +1,5 @@
 /**
- * Sign-in for the SRM TRP Transport console.
+ * Sign-in for the VISION AI - SRM TRP console.
  *
  * The browser authenticates with Firebase (email/password or Google) and then
  * exchanges the resulting **Firebase ID token** for this application's own

@@ -1,4 +1,4 @@
-"""Access control for the SRM TRP Transport console.
+"""Access control for the VISION AI - SRM TRP console.
 
 The ``users`` table is the authoritative **authorisation list**: it holds
 the email address, the role and whether the account is active. Firebase

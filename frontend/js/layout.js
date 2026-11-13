@@ -261,7 +261,7 @@ function wireShell({ sidebar, topbar, theme, searchInput, searchBar, overlay, se
   });
 }
 
-export async function mountShell({ active, allowedRoles = [], pageTitle = 'SRM TRP Transport' }) {
+export async function mountShell({ active, allowedRoles = [], pageTitle = 'VISION AI - SRM TRP' }) {
   let user;
   try {
     ({ user } = await apiGet('/api/auth/me'));
@@ -274,7 +274,7 @@ export async function mountShell({ active, allowedRoles = [], pageTitle = 'SRM T
     throw new Error('Forbidden role');
   }
 
-  document.title = `${pageTitle} · SRM TRP Transport`;
+  document.title = `${pageTitle} · VISION AI - SRM TRP`;
   applyTheme();
   const shell = document.getElementById('app-shell');
   if (!shell) throw new Error('Missing #app-shell');

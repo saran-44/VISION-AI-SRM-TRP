@@ -1,4 +1,4 @@
-"""Firebase Authentication for the SRM TRP Transport console.
+"""Firebase Authentication for the VISION AI - SRM TRP console.
 
 The browser authenticates with Firebase (email/password or Google), then
 exchanges the resulting **Firebase ID token** for this application's own

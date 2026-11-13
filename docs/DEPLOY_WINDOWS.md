@@ -193,7 +193,7 @@ owner, project, location and settings before explicitly reusing it:
 
 ```bash
 gcloud artifacts repositories create srm-trp --repository-format=docker --location="$REGION" \
-  --description='SRM TRP Transport backend images' --project="$PROJECT_ID"
+  --description='VISION AI - SRM TRP backend images' --project="$PROJECT_ID"
 gcloud iam service-accounts create srm-trp-run --display-name='SRM TRP Cloud Run runtime' --project="$PROJECT_ID"
 gcloud iam service-accounts create srm-trp-build --display-name='SRM TRP Cloud Build deployer' --project="$PROJECT_ID"
 gcloud storage buckets create "gs://$BUILD_BUCKET" --project="$PROJECT_ID" --location="$REGION" \

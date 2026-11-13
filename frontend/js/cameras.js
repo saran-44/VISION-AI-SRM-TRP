@@ -1,5 +1,5 @@
 /**
- * Camera access for the SRM TRP Transport console.
+ * Camera access for the VISION AI - SRM TRP console.
  *
  * Three source kinds are supported:
  *
