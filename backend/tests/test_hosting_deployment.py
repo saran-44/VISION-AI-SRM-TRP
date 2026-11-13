@@ -17,17 +17,47 @@ from backend.tests.conftest import HEAD_ADMIN_EMAIL, HEAD_ADMIN_PASSWORD
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_hosting_routes_dynamic_paths_to_cloud_run_without_uploading_pages():
+RENDER_ORIGIN = "https://srm-trp-transport.onrender.com"
+
+
+def test_hosting_redirects_every_path_to_the_free_render_backend():
+    """Hosting runs on the free Spark plan, which cannot rewrite to Cloud Run.
+
+    A rewrite to ``run.serviceId`` needs Blaze billing, so the deployed config
+    redirects instead: one capture rule keeps the path and query string, and a
+    catch-all covers anything the capture misses. Every visitor still reaches
+    the Flask app, which owns authentication, roles and the page templates.
+    """
     config = json.loads((ROOT / "firebase.json").read_text())
     hosting = config["hosting"]
-    assert hosting["public"] == "frontend"
-    assert "**/pages/**" in hosting["ignore"]
-    assert hosting["rewrites"] == [
-        {
-            "source": "**",
-            "run": {"serviceId": "srm-trp-transport", "region": "asia-south1"},
-        }
-    ]
+    assert hosting["public"] == "deploy/firebase/public"
+    assert "rewrites" not in hosting, "Spark plan cannot rewrite to Cloud Run"
+    redirects = hosting["redirects"]
+    assert redirects, "hosting must send visitors to the Render deployment"
+    assert all(rule["type"] == 302 for rule in redirects), "keep it temporary"
+    assert all(rule["destination"].startswith(RENDER_ORIGIN) for rule in redirects)
+    # First rule keeps the path and query string; last rule is the catch-all.
+    assert redirects[0] == {
+        "source": "/:path*",
+        "destination": f"{RENDER_ORIGIN}/:path*",
+        "type": 302,
+    }
+    assert redirects[-1] == {"source": "**", "destination": RENDER_ORIGIN, "type": 302}
+
+
+def test_hosting_public_directory_has_a_fallback_page():
+    """Hosting refuses a deploy without a public directory with content.
+
+    The redirects shadow this page, so it is only a safety net, but it must
+    exist and must point at the live deployment.
+    """
+    public = ROOT / "firebase.json"
+    hosting = json.loads(public.read_text())["hosting"]
+    index = ROOT / hosting["public"] / "index.html"
+    assert index.is_file()
+    html = index.read_text()
+    assert RENDER_ORIGIN in html
+    assert "http-equiv=\"refresh\"" in html
 
 
 def test_cookie_survives_the_hosting_forwarding_boundary(app, users):

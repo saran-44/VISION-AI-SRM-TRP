@@ -243,12 +243,16 @@ The browser camera API requires a **secure context** (`https://` or
 
 ## Firebase
 
-Firebase Hosting serves the static login/assets and rewrites unmatched paths,
-including protected pages and `/api/**`, to Cloud Run. Protected templates are
-not uploaded to Hosting. Analytics is optional; the production build requires
-Firebase Authentication and an active PostgreSQL access entry. The browser's
-Firebase configuration is served by `GET /api/config/firebase`; the supplied
-web API key is a public project identifier, not a Supabase secret.
+On the free plan Firebase Hosting serves nothing itself: the checked-in
+`firebase.json` answers every path with a `302` that keeps the path and query
+string and forwards to the Render deployment, so `vision-ai-srmtrp.web.app`
+still opens the portal. Hosting→Cloud Run rewrites need Blaze billing; until
+then the Flask app remains the only origin and keeps owning authentication,
+role checks and every page template, so no protected page is ever published
+statically. Analytics is optional; the production build requires Firebase
+Authentication and an active PostgreSQL access entry. The browser's Firebase
+configuration is served by `GET /api/config/firebase`; the supplied web API key
+is a public project identifier, not a Supabase secret.
 
 See [`docs/FIREBASE.md`](docs/FIREBASE.md).
 
@@ -348,7 +352,9 @@ complete security audit.
 runs the whole portal — Flask API and frontend — on a **single free Render
 service** with Supabase as the database and Firebase for sign-in. No card, no
 Cloud Run, no Hosting rewrite. The trade-offs are a sleeping instance, 512 MB
-of RAM (so no torch/OCR detector) and one application instance.
+of RAM (so no torch/OCR detector) and one application instance. The optional
+`vision-ai-srmtrp.web.app` address is a redirect to that service — see
+[the Firebase redirect guide](docs/DEPLOY_FIREBASE_REDIRECT.md).
 
 Fast path on a fresh Git Bash install: the
 [Git Bash quickstart](docs/DEPLOY_GITBASH_QUICKSTART.md) walks through Supabase
@@ -415,9 +421,9 @@ frontend/           Static frontend (no build step)
   js/               ES modules (api, ui, layout, cameras, firebase, charts, tables, pages)
   pages/            dashboard, logs, analytics, drivers, buses, driver-details, audit, manage
   vendor/           Chart.js, hls.js, SheetJS, Firebase SDK (+ licences)
-deploy/             Dockerfile and Cloud Build pipeline
+deploy/             Dockerfile, Cloud Build pipeline, Firebase Hosting target
 docs/               upgrade specification, detection, cameras, Firebase, architecture,
-                    event contract, privacy note
+                    event contract, privacy note, Render + Firebase deploy guides
 scripts/            frontend checks and secret scanner
 .github/workflows/  CI
 ```
