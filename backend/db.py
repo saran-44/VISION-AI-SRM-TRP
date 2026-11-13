@@ -73,7 +73,8 @@ events = Table(
     Column("direction", String(3), nullable=False), Column("gate", Text, nullable=False),
     Column("camera_id", Text, nullable=False), Column("confidence", Float, nullable=False),
     Column("timestamp", DateTime(), nullable=False), Column("created_at", DateTime()),
-    Column("source", Text), Column("flag_reasons", json_type, nullable=False, default=list),
+    Column("source", Text), Column("idempotency_key", String(128)),
+    Column("flag_reasons", json_type, nullable=False, default=list),
     Column("flagged", Boolean, nullable=False, default=False),
     Column("demo", Boolean, nullable=False, default=False),
 )
@@ -95,6 +96,8 @@ bus_states = Table(
 )
 Index("users_firebase_uid", users.c.firebase_uid)
 Index("buses_plate_key", buses.c.plate_key)
+Index("events_idempotency_key", events.c.idempotency_key, unique=True)
+Index("events_dedup", events.c.bus_number, events.c.direction, events.c.camera_id, events.c.timestamp.desc())
 Index("audit_collection_action_timestamp", audit_logs.c.collection, audit_logs.c.action, audit_logs.c.timestamp.desc())
 Index("bus_states_direction", bus_states.c.direction)
 Index("bus_states_updated_at", bus_states.c.updated_at)
@@ -437,6 +440,8 @@ def public_doc(doc: dict[str, Any] | None) -> dict[str, Any] | None:
         return None
     result = {}
     for key, value in doc.items():
+        if key == "idempotency_key":
+            continue
         if key == "_id": result["id"] = str(value)
         elif isinstance(value, datetime): result[key] = iso_utc(value)
         elif isinstance(value, dict): result[key] = public_doc(value)

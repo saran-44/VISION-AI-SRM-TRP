@@ -38,6 +38,16 @@ WHERE plate_key IS NULL;
 CREATE INDEX IF NOT EXISTS buses_plate_key
     ON transport_portal.buses (plate_key);
 
+ALTER TABLE transport_portal.events
+    ADD COLUMN IF NOT EXISTS idempotency_key varchar(128);
+
+CREATE UNIQUE INDEX IF NOT EXISTS events_idempotency_key
+    ON transport_portal.events (idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS events_dedup
+    ON transport_portal.events (bus_number, direction, camera_id, timestamp DESC);
+
 DO $$
 DECLARE api_role text;
 BEGIN

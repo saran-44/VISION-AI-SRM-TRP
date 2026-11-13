@@ -497,3 +497,163 @@ def test_manage_states_cli_rebuild_reconstructs_states(db, config, capsys):
     assert db.bus_states.find_one({"bus_number": "BUS-CLI"})["direction"] == "IN"
     assert _execute(db, config, "purge") == 0
     assert "skipped" in capsys.readouterr().out.lower()
+
+
+def test_event_idempotency_key_returns_200_deduplicated_and_omits_key_from_response_and_audit(client, db, users):
+    register_bus(client, users)
+    payload = event_payload(bus_number="BUS-001", direction="IN")
+    headers = {"X-Device-Key": DEVICE_KEY, "X-Idempotency-Key": "gate1-abc-123"}
+
+    first = client.post("/api/events", headers=headers, json=payload)
+    assert first.status_code == 201
+    first_body = first.get_json()
+    assert "idempotency_key" not in first_body["event"]
+
+    second = client.post("/api/events", headers=headers, json=payload)
+    assert second.status_code == 200
+    second_body = second.get_json()
+    assert second_body["deduplicated"] is True
+    assert second_body["event"]["id"] == first_body["event"]["id"]
+    assert "idempotency_key" not in second_body["event"]
+    assert db.events.count_documents({}) == 1
+
+    # G-15: idempotency_key must also never leak into audit_logs.
+    audit_entries = list(db.audit_logs.find({"action": "event_ingested"}))
+    assert len(audit_entries) == 1
+    assert "idempotency_key" not in (audit_entries[0].get("after") or {})
+
+
+def test_event_invalid_idempotency_key_rejected_with_400(client):
+    res_long = client.post(
+        "/api/events",
+        headers={"X-Device-Key": DEVICE_KEY, "X-Idempotency-Key": "k" * 129},
+        json=event_payload(),
+    )
+    assert res_long.status_code == 400
+
+
+def test_event_sliding_window_deduplicates_without_key_and_allows_opposite_direction(client, db, users):
+    register_bus(client, users)
+    ts = naive_now() - timedelta(minutes=2)
+    first = post_event(client, event_payload(direction="IN", timestamp=ts.isoformat() + "Z"))
+    assert first.status_code == 201
+
+    dup = post_event(
+        client,
+        event_payload(direction="IN", timestamp=(ts + timedelta(seconds=10)).isoformat() + "Z"),
+    )
+    assert dup.status_code == 200
+    assert dup.get_json()["deduplicated"] is True
+    assert db.events.count_documents({}) == 1
+
+    # Opposite direction within window is NOT deduplicated.
+    out_ev = post_event(
+        client,
+        event_payload(direction="OUT", timestamp=(ts + timedelta(seconds=10)).isoformat() + "Z"),
+    )
+    assert out_ev.status_code == 201
+    assert db.events.count_documents({}) == 2
+
+
+def test_event_canonicalizes_plate_variant_via_plate_key(client, db, users):
+    login_transport_office(client, users)
+    assert (
+        client.post("/api/buses", json={"bus_number": "TN-12-AB-1234", "capacity": 40}).status_code
+        == 201
+    )
+
+    res = post_event(client, event_payload(bus_number="TN 12 AB 1234", direction="IN", confidence=0.95))
+    assert res.status_code == 201
+    event = res.get_json()["event"]
+    assert event["bus_number"] == "TN-12-AB-1234"
+    assert "unregistered_plate" not in event["flag_reasons"]
+    assert db.bus_states.find_one({"bus_number": "TN-12-AB-1234"})["direction"] == "IN"
+    assert db.bus_states.find_one({"bus_number": "TN 12 AB 1234"}) is None
+
+
+def test_later_out_same_timestamp_tiebreaks_on_id(db, config):
+    from backend.services import compute_flag_reasons
+
+    db.buses.insert_one({"bus_number": "BUS-TIE", "plate_key": "BUSTIE", "capacity": 40, "demo": False})
+    ts = naive_now() - timedelta(hours=15)
+    db.events.insert_one({
+        "_id": "000000000000000000000001",
+        "bus_number": "BUS-TIE",
+        "direction": "IN",
+        "gate": "Gate 1",
+        "camera_id": "cam-1",
+        "confidence": 0.95,
+        "timestamp": ts,
+        "created_at": ts,
+        "flag_reasons": [],
+        "flagged": False,
+    })
+    # Same-timestamp OUT with strictly larger _id closes the prior IN.
+    db.events.insert_one({
+        "_id": "000000000000000000000002",
+        "bus_number": "BUS-TIE",
+        "direction": "OUT",
+        "gate": "Gate 1",
+        "camera_id": "cam-1",
+        "confidence": 0.95,
+        "timestamp": ts,
+        "created_at": ts,
+        "flag_reasons": [],
+        "flagged": False,
+    })
+    later_in = {
+        "bus_number": "BUS-TIE",
+        "direction": "IN",
+        "confidence": 0.95,
+        "timestamp": naive_now(),
+    }
+    assert "long_overstay" not in compute_flag_reasons(db, later_in, config)
+
+
+def test_detection_client_retries_with_stable_idempotency_key_on_503_and_stops_on_400():
+    from backend.detection_client import post_event_with_retries
+
+    class FakeResponse:
+        def __init__(self, status_code, text=""):
+            self.status_code = status_code
+            self.text = text
+            self.ok = 200 <= status_code < 300
+
+    seen_keys = []
+    responses = [FakeResponse(503, "busy"), FakeResponse(502, "bad gateway"), FakeResponse(201, "ok")]
+
+    class FakeSession:
+        def post(self, url, *, json, headers, timeout):
+            seen_keys.append(headers["X-Idempotency-Key"])
+            return responses.pop(0)
+
+    res = post_event_with_retries(
+        "https://transport.example.edu",
+        "key-123",
+        {"bus_number": "BUS-001"},
+        max_retries=3,
+        backoff_seconds=0,
+        session=FakeSession(),
+    )
+    assert res.status_code == 201
+    assert len(seen_keys) == 3
+    assert len(set(seen_keys)) == 1
+
+    # 400 is NOT retried.
+    calls_400 = [0]
+
+    class BadSession:
+        def post(self, url, *, json, headers, timeout):
+            calls_400[0] += 1
+            return FakeResponse(400, "invalid")
+
+    bad_res = post_event_with_retries(
+        "https://transport.example.edu",
+        "key-123",
+        {"bus_number": "BUS-001"},
+        max_retries=3,
+        backoff_seconds=0,
+        session=BadSession(),
+    )
+    assert bad_res.status_code == 400
+    assert calls_400[0] == 1

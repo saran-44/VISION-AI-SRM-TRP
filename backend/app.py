@@ -54,6 +54,7 @@ from .services import (
     event_sort,
     events_for_export,
     ingest_event,
+    ingest_event_with_status,
     invalidate_stats_cache,
     naive_now,
     record_audit,
@@ -514,10 +515,26 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
     @limiter.limit(lambda: config.event_rate_limit, key_func=device_key_or_ip)
     @require_device_key
     def create_event():
+        raw_idem = request.headers.get("X-Idempotency-Key")
+        idem_key: str | None = None
+        if raw_idem is not None:
+            idem_key = raw_idem.strip()
+            if not idem_key:
+                idem_key = None
+            elif len(idem_key) > 128 or any(ord(ch) < 32 for ch in idem_key):
+                return jsonify({"error": "Invalid X-Idempotency-Key header"}), 400
         payload, error = validate(EventCreate)
         if error:
             return error
-        event = ingest_event(db, payload, config, source="device")
+        event, created = ingest_event_with_status(
+            db,
+            payload,
+            config,
+            source="device",
+            idempotency_key=idem_key,
+        )
+        if not created:
+            return jsonify({"event": event, "deduplicated": True}), 200
         record_audit(
             db,
             {"email": "device-client", "role": "device"},

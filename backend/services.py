@@ -11,9 +11,11 @@ from zoneinfo import ZoneInfo
 
 from openpyxl import Workbook
 
+from sqlalchemy.exc import IntegrityError
+
 from .config import Config
 from .db import ASCENDING, DESCENDING, iso_utc, public_doc, utc_naive
-from .schemas import AnalyticsFilter, EventCreate, EventFilter, normalize_bus_number
+from .schemas import AnalyticsFilter, EventCreate, EventFilter, normalize_bus_number, plate_key
 
 _stats_cache_lock = threading.Lock()
 _stats_cache: dict[tuple[int, str], tuple[float, dict[str, Any]]] = {}
@@ -93,10 +95,31 @@ def query_events(db, event_filter: EventFilter, config: Config, *, limit: int | 
     return list(cursor)
 
 
-def compute_flag_reasons(db, event: dict[str, Any], config: Config) -> list[str]:
+def _canonical_bus_number(db, raw_bus_number: str) -> tuple[str, bool]:
+    normalized = normalize_bus_number(raw_bus_number)
+    key = plate_key(normalized)
+    if key:
+        registered = db.buses.find_one({"plate_key": key}, {"bus_number": 1})
+        if registered:
+            return registered["bus_number"], True
+    registered = db.buses.find_one({"bus_number": normalized}, {"bus_number": 1})
+    if registered:
+        return registered["bus_number"], True
+    return normalized, False
+
+
+def compute_flag_reasons(
+    db,
+    event: dict[str, Any],
+    config: Config,
+    *,
+    is_registered: bool | None = None,
+) -> list[str]:
     reasons: list[str] = []
     bus_number = normalize_bus_number(event["bus_number"])
-    if not db.buses.find_one({"bus_number": bus_number}, {"_id": 1}):
+    if is_registered is None:
+        bus_number, is_registered = _canonical_bus_number(db, bus_number)
+    if not is_registered:
         reasons.append("unregistered_plate")
     if float(event["confidence"]) < config.ocr_confidence_threshold:
         reasons.append("low_ocr_confidence")
@@ -114,7 +137,15 @@ def compute_flag_reasons(db, event: dict[str, Any], config: Config) -> list[str]
             {
                 "bus_number": bus_number,
                 "direction": "OUT",
-                "timestamp": {"$gt": prior_in["timestamp"], "$lt": event["timestamp"]},
+                "$or": [
+                    {
+                        "timestamp": prior_in["timestamp"],
+                        "_id": {"$gt": prior_in["_id"]},
+                    },
+                    {
+                        "timestamp": {"$gt": prior_in["timestamp"], "$lt": event["timestamp"]},
+                    },
+                ],
             },
             {"_id": 1},
         )
@@ -195,25 +226,81 @@ def purge_expired_records(db, config: Config) -> dict[str, int]:
     return deleted
 
 
-def ingest_event(db, payload: EventCreate, config: Config, *, source: str = "device") -> dict[str, Any]:
+def ingest_event_with_status(
+    db,
+    payload: EventCreate,
+    config: Config,
+    *,
+    source: str = "device",
+    idempotency_key: str | None = None,
+) -> tuple[dict[str, Any], bool]:
+    if idempotency_key:
+        existing = db.events.find_one({"idempotency_key": idempotency_key})
+        if existing:
+            return public_doc(existing), False
+
     data = payload.model_dump()
-    event = {
-        "bus_number": normalize_bus_number(data["bus_number"]),
+    canonical_bus, is_registered = _canonical_bus_number(db, data["bus_number"])
+    event_ts = utc_naive(data["timestamp"])
+
+    if config.event_dedup_window_seconds > 0:
+        window = timedelta(seconds=config.event_dedup_window_seconds)
+        duplicate = db.events.find_one(
+            {
+                "bus_number": canonical_bus,
+                "direction": data["direction"],
+                "camera_id": data["camera_id"],
+                "timestamp": {"$gte": event_ts - window, "$lte": event_ts + window},
+            },
+            sort=event_sort(),
+        )
+        if duplicate:
+            return public_doc(duplicate), False
+
+    event: dict[str, Any] = {
+        "bus_number": canonical_bus,
         "direction": data["direction"],
         "gate": data["gate"],
         "camera_id": data["camera_id"],
         "confidence": float(data["confidence"]),
-        "timestamp": utc_naive(data["timestamp"]),
+        "timestamp": event_ts,
         "created_at": naive_now(),
         "source": source,
     }
-    event["flag_reasons"] = compute_flag_reasons(db, event, config)
+    if idempotency_key is not None:
+        event["idempotency_key"] = idempotency_key
+    event["flag_reasons"] = compute_flag_reasons(db, event, config, is_registered=is_registered)
     event["flagged"] = bool(event["flag_reasons"])
-    result = db.events.insert_one(event)
+    try:
+        result = db.events.insert_one(event)
+    except IntegrityError:
+        if idempotency_key:
+            existing = db.events.find_one({"idempotency_key": idempotency_key})
+            if existing:
+                return public_doc(existing), False
+        raise
     event["_id"] = result.inserted_id
     db.upsert_bus_state(_bus_state_from_event(event))
     invalidate_stats_cache(db)
-    return public_doc(event)
+    return public_doc(event), True
+
+
+def ingest_event(
+    db,
+    payload: EventCreate,
+    config: Config,
+    *,
+    source: str = "device",
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    event, _ = ingest_event_with_status(
+        db,
+        payload,
+        config,
+        source=source,
+        idempotency_key=idempotency_key,
+    )
+    return event
 
 
 def compute_stats(db, config: Config) -> dict[str, Any]:

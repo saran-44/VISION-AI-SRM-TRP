@@ -452,15 +452,15 @@ def test_scan_and_event_rate_limits_return_429_keyed_by_device_key(db, monkeypat
     # A second device key from the same IP has its own bucket.
     assert client.post("/api/detection/scan", headers={"X-Device-Key": "second-device-key"}, json={"image": b64}).status_code == 200
 
-    ev = {
-        "bus_number": "BUS-001",
-        "direction": "IN",
-        "gate": "Gate 1",
-        "camera_id": "cam-1",
-        "confidence": 0.9,
-        "timestamp": "2026-01-01T00:00:00Z",
-    }
-    for _ in range(2):
+    for idx in range(2):
+        ev = {
+            "bus_number": f"BUS-00{idx + 1}",
+            "direction": "IN",
+            "gate": "Gate 1",
+            "camera_id": "cam-1",
+            "confidence": 0.9,
+            "timestamp": "2026-01-01T00:00:00Z",
+        }
         assert client.post("/api/events", headers={"X-Device-Key": DEVICE_KEY}, json=ev).status_code == 201
     assert client.post("/api/events", headers={"X-Device-Key": DEVICE_KEY}, json=ev).status_code == 429
 

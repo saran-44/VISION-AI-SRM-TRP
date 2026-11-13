@@ -59,6 +59,7 @@ CREATE TABLE transport_portal.events (
     timestamp timestamp NOT NULL,
     created_at timestamp,
     source text,
+    idempotency_key varchar(128),
     flag_reasons jsonb NOT NULL DEFAULT '[]'::jsonb,
     flagged boolean NOT NULL DEFAULT false,
     demo boolean NOT NULL DEFAULT false
@@ -95,6 +96,8 @@ CREATE INDEX events_bus_timestamp ON transport_portal.events (bus_number, timest
 CREATE INDEX events_gate_direction_timestamp ON transport_portal.events (gate, direction, timestamp DESC);
 CREATE INDEX events_camera_timestamp ON transport_portal.events (camera_id, timestamp DESC);
 CREATE INDEX events_flagged_timestamp ON transport_portal.events (flagged, timestamp DESC);
+CREATE UNIQUE INDEX events_idempotency_key ON transport_portal.events (idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE INDEX events_dedup ON transport_portal.events (bus_number, direction, camera_id, timestamp DESC);
 CREATE INDEX events_reasons ON transport_portal.events USING gin (flag_reasons);
 CREATE INDEX audit_timestamp ON transport_portal.audit_logs (timestamp DESC);
 CREATE INDEX audit_actor ON transport_portal.audit_logs (actor, timestamp DESC);
