@@ -33,8 +33,11 @@ Read [§10](#10-limits-of-the-free-plan) before putting real driver data in.
 
 **You do NOT need** — for this free path only: a Google Cloud billing account,
 `gcloud`, `firebase-tools`, the Firebase CLI, Firebase Hosting, Docker Desktop,
-or any Supabase secret/service-role key. (Those belong to the Cloud Run path in
-[`DEPLOY_GITBASH_QUICKSTART.md`](DEPLOY_GITBASH_QUICKSTART.md).)
+the **Supabase CLI** (`supabase init` / `supabase link` / `supabase db push`),
+or any Supabase API key (`sb_publishable_…`, anon or service-role). The schema is
+applied once through the **SQL Editor**, and the app talks to Postgres directly
+through the session pooler, never through the Supabase Data API. (The Cloud Run
+path is in [`DEPLOY_GITBASH_QUICKSTART.md`](DEPLOY_GITBASH_QUICKSTART.md).)
 
 Keep a private folder for the certificate and `.env`, e.g.
 `C:\Users\<you>\srm-trp-private\`.
@@ -382,6 +385,8 @@ deliberately ships without torch. See [§10](#10-limits-of-the-free-plan).
 | `password authentication failed` | DB password changed after `.env` was written | reset it, update `DATABASE_URL` in Render, redeploy |
 | `certificate verify failed` / `SSL error` | CA missing, truncated, or extra whitespace | regenerate `PGSSLROOTCERT_B64` with `base64 -w0` (one line, no newlines) |
 | `PostgreSQL initialization failed after retries` | network restriction enabled, or project paused | disable restrictions / resume the project |
+| Timeout / `could not translate host name db.<ref>.supabase.co` | the **direct** connection was used; new projects expose it over IPv6 only | use the **Session pooler** host (`…pooler.supabase.com:5432`) instead |
+| `invalid dsn` / `password authentication failed` after copy-paste | the password was not URL-encoded (`@` → `%40`, `/` → `%2F`, `:` → `%3A`) | prefer `scripts/configure_supabase.py`, which URL-encodes for you |
 | Login screen shows but sign-in fails with `auth/unauthorized-domain` | Render host missing in Firebase | add the exact host in **Authorized domains** |
 | `auth/invalid-api-key` | `FIREBASE_API_KEY` empty or wrong | copy from `.env` into Render, redeploy |
 | Sign-in works but immediately returns to login | no access row, or email unverified | `manage_access list`, re-run the verification check |

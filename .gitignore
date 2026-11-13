@@ -64,6 +64,14 @@ uploads/
 !frontend/assets/logo-wordmark.png
 !frontend/assets/favicon.png
 
+# --- Supabase CLI -----------------------------------------------------------
+# `supabase init` / `supabase link` write local state (and linked project refs)
+# here. This project applies its schema through the Supabase SQL Editor, so the
+# CLI directory is never needed in Git.
+supabase/.temp/
+.supabase/
+.branches/
+
 # --- Firebase ---------------------------------------------------------------
 .firebase/
 firebase-debug.log
