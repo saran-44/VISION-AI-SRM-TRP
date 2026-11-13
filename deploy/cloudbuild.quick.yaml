@@ -1,0 +1,45 @@
+# Fast path: build and push the backend image ONLY.
+#
+# This config deliberately does not deploy Cloud Run and does not create the
+# Direct VPC / Cloud NAT resources. Use it when Supabase network restrictions
+# are DISABLED (the default for new projects) and you want the shortest route
+# to a working deployment. It uses the canonical image definition in
+# deploy/Dockerfile, so the runtime is identical to the hardened pipeline.
+#
+#   gcloud builds submit . --project="$PROJECT_ID" \
+#     --config=deploy/cloudbuild.quick.yaml \
+#     --substitutions=_TAG=v1
+#
+# The hardened pipeline (dedicated build identity, VPC egress, Cloud NAT,
+# one-step build+deploy) stays in deploy/cloudbuild.yaml and is documented in
+# docs/DEPLOY_WINDOWS.md. Use that one when Supabase restricts networks.
+
+substitutions:
+  _REGION: asia-south1
+  _REPOSITORY: srm-trp
+  _SERVICE: srm-trp-transport
+  _TAG: manual
+  # Set to "0" to skip torch/ultralytics/OCR (much smaller, much faster build).
+  # /api/detection/* then reports unavailable; the rest of the portal is unaffected.
+  _INSTALL_VISION: "1"
+
+timeout: 2400s
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${_TAG}
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - deploy/Dockerfile
+      - --build-arg
+      - INSTALL_VISION=${_INSTALL_VISION}
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${_TAG}
+      - .

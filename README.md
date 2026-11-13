@@ -344,8 +344,16 @@ complete security audit.
 
 ## Deployment
 
-Follow the ordered [Windows Git Bash runbook](docs/DEPLOY_WINDOWS.md) to
-apply the private-schema migration once, create a dedicated database login,
+Fast path on a fresh Git Bash install: the
+[Git Bash quickstart](docs/DEPLOY_GITBASH_QUICKSTART.md) walks through Supabase
+migration, CA/TLS, `configure_supabase.py`, Secret Manager, a quick Cloud Build
+(`deploy/cloudbuild.quick.yaml`) and `firebase deploy`, with verification and
+troubleshooting. Note that **Supabase hosts only the database** — the Flask
+backend runs on Cloud Run, because Supabase cannot run a Python container.
+
+Follow the ordered [Windows Git Bash runbook](docs/DEPLOY_WINDOWS.md) for the
+hardened variant: apply the private-schema migration once, create a dedicated
+database login,
 configure verified TLS, set the Firebase project, and deploy Cloud Run and
 Hosting. It also covers the static NAT configuration, secret handling,
 initial administrator and verification. Existing MongoDB data and access
