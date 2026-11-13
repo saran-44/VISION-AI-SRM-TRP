@@ -48,6 +48,8 @@ CLASS_LABELS = {
 # Bus numbers seen in this project look like "TN 12 AB 1234" / "BUS-001".
 # The OCR result is normalised to the same shape the API accepts.
 PLATE_CLEAN_RE = re.compile(r"[^A-Z0-9 .\-]")
+DATA_IMAGE_URI_RE = re.compile(r"^data:image/(?:jpeg|jpg|png|webp|bmp);base64$", re.IGNORECASE)
+ALLOWED_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP", "BMP"}
 
 _model_lock = threading.Lock()
 _model_cache: dict[str, Any] = {}
@@ -57,6 +59,10 @@ _ocr_cache: dict[str, Any] = {}
 
 class VisionUnavailable(RuntimeError):
     """Raised when a vision dependency or the model file is missing."""
+
+
+class InvalidImageError(ValueError):
+    """Raised when a caller supplies malformed, unsupported, or oversized image data."""
 
 
 @dataclass
@@ -286,21 +292,81 @@ def normalize_plate(text: str) -> str:
 # --------------------------------------------------------------------------- #
 # Detection
 # --------------------------------------------------------------------------- #
-def decode_image(payload: bytes | str) -> "Any":
-    """Decode raw image bytes or a base64 string into a PIL image."""
-    Image = _require_pil()
-    if isinstance(payload, str):
-        data = payload.split(",", 1)[-1] if payload.startswith("data:") else payload
-        try:
-            payload = base64.b64decode(data, validate=False)
-        except (binascii.Error, ValueError) as exc:
-            raise VisionUnavailable("The image payload is not valid base64") from exc
+def _env_int(name: str, default: int) -> int:
     try:
-        image = Image.open(io.BytesIO(payload))
-        image.load()
-        return image
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def decode_image(
+    payload: bytes | str,
+    *,
+    max_bytes: int | None = None,
+    max_pixels: int | None = None,
+    max_dim: int | None = None,
+) -> "Any":
+    """Decode raw image bytes or a base64 string into a validated PIL image."""
+    max_bytes = max_bytes if max_bytes is not None else max(1, _env_int("VISION_MAX_IMAGE_BYTES", 2_000_000))
+    max_pixels = max_pixels if max_pixels is not None else max(1, _env_int("VISION_MAX_IMAGE_PIXELS", 16_000_000))
+    max_dim = max_dim if max_dim is not None else max(1, _env_int("VISION_MAX_IMAGE_DIM", 4096))
+
+    if isinstance(payload, str):
+        data = payload.strip()
+        if data.startswith("data:"):
+            header, sep, body = data.partition(",")
+            if not sep or not DATA_IMAGE_URI_RE.match(header.strip()):
+                raise InvalidImageError("Unsupported image data URI")
+            data = body
+        compact = "".join(data.split())
+        if not compact:
+            raise InvalidImageError("The image payload is empty")
+        # Quick pre-decode upper bound check (~4/3 expansion) to reject huge strings early.
+        if (len(compact) * 3) // 4 > max_bytes + 4:
+            raise InvalidImageError("The image payload exceeds the maximum allowed byte size")
+        try:
+            payload_bytes = base64.b64decode(compact, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise InvalidImageError("The image payload is not valid base64") from exc
+    elif isinstance(payload, (bytes, bytearray)):
+        payload_bytes = bytes(payload)
+    else:
+        raise InvalidImageError("The image payload must be bytes or base64 text")
+
+    if not payload_bytes:
+        raise InvalidImageError("The image payload is empty")
+    if len(payload_bytes) > max_bytes:
+        raise InvalidImageError("The image payload exceeds the maximum allowed byte size")
+
+    Image = _require_pil()
+    try:
+        from PIL import ImageOps
+    except ImportError:  # pragma: no cover - Pillow includes ImageOps
+        ImageOps = None
+
+    try:
+        image = Image.open(io.BytesIO(payload_bytes))
     except Exception as exc:
-        raise VisionUnavailable("The uploaded data is not a readable image") from exc
+        raise InvalidImageError("The uploaded data is not a readable image") from exc
+
+    img_format = (getattr(image, "format", None) or "").upper()
+    if img_format not in ALLOWED_IMAGE_FORMATS:
+        raise InvalidImageError("Unsupported image format; supply JPEG, PNG, WEBP, or BMP")
+
+    width = int(getattr(image, "width", 0) or 0)
+    height = int(getattr(image, "height", 0) or 0)
+    if width <= 0 or height <= 0 or width > max_dim or height > max_dim or (width * height) > max_pixels:
+        raise InvalidImageError("Image dimensions exceed maximum allowed limits")
+
+    try:
+        image.load()
+        if ImageOps is not None:
+            image = ImageOps.exif_transpose(image)
+        return image
+    except InvalidImageError:
+        raise
+    except Exception as exc:
+        raise InvalidImageError("The uploaded image data is corrupt or truncated") from exc
 
 
 def max_crops() -> int:
@@ -337,18 +403,24 @@ def detect(image, *, model=None, threshold: float | None = None) -> DetectionRes
         return result
 
     names = getattr(model, "names", {}) or {}
-    limit = max_crops()
-    for index in range(min(len(boxes), limit)):
+    raw_boxes: list[tuple[int, float, list[int], str]] = []
+    for index in range(len(boxes)):
         class_id = int(boxes.cls[index].item())
         confidence = float(boxes.conf[index].item())
         coords = [int(value) for value in boxes.xyxy[index].tolist()]
-        class_name = names.get(class_id, CLASS_LABELS.get(class_id, str(class_id)))
+        class_name = str(names.get(class_id, CLASS_LABELS.get(class_id, str(class_id))))
+        raw_boxes.append((class_id, confidence, coords, class_name))
 
+    # Prioritise sticker boxes over red-circle boxes and highest confidence before slicing.
+    raw_boxes.sort(key=lambda item: (0 if item[0] == CLASS_STICKER else 1, -item[1]))
+
+    limit = max_crops()
+    for class_id, confidence, coords, class_name in raw_boxes[:limit]:
         candidate = PlateCandidate(
             confidence=confidence,
             bbox=coords,
             class_id=class_id,
-            class_name=str(class_name),
+            class_name=class_name,
         )
         crop = _crop(image, coords)
         if crop is not None:

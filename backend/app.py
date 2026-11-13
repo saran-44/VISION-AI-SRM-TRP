@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import math
 import os
@@ -10,7 +12,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, Response, current_app, g, jsonify, make_response, redirect, request, send_from_directory, stream_with_context
+from flask import Flask, Response, abort, current_app, g, jsonify, make_response, redirect, request, send_from_directory, stream_with_context
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -62,6 +64,7 @@ from .firebase_auth import (
     verify_id_token as verify_firebase_id_token,
 )
 from .vision import (
+    InvalidImageError,
     VisionUnavailable,
     best_candidate,
     decode_image,
@@ -72,11 +75,15 @@ from .vision import (
 
 def create_app(config: Config | None = None, database_engine=None) -> Flask:
     config = config or Config.from_env()
+    scan_content_limit = max(
+        config.max_content_length_bytes,
+        math.ceil(config.vision_max_image_bytes * 4 / 3) + 65_536,
+    )
     app = Flask(__name__, static_folder=None)
     app.config.update(
         TESTING=config.testing,
         PROPAGATE_EXCEPTIONS=False,
-        MAX_CONTENT_LENGTH=1_000_000,
+        MAX_CONTENT_LENGTH=scan_content_limit,
         TRANSPORT_CONFIG=config,
         RATELIMIT_ENABLED=config.rate_limit_enabled,
         RATELIMIT_STORAGE_URI=config.rate_limit_storage_uri,
@@ -110,6 +117,29 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
     app.extensions["limiter"] = limiter
     sse_semaphore = threading.BoundedSemaphore(config.sse_max_connections)
     app.extensions["sse_semaphore"] = sse_semaphore
+    vision_semaphore = threading.BoundedSemaphore(config.vision_max_concurrency)
+    app.extensions["vision_semaphore"] = vision_semaphore
+
+    def device_key_or_ip() -> str:
+        provided = request.headers.get("X-Device-Key", "")
+        if provided and config.device_api_keys and any(
+            hmac.compare_digest(provided, expected) for expected in config.device_api_keys
+        ):
+            return "device:" + hashlib.sha256(provided.encode("utf-8")).hexdigest()[:16]
+        return "ip:" + get_remote_address()
+
+    @app.before_request
+    def enforce_content_length():
+        if request.method not in {"POST", "PUT", "PATCH"}:
+            return None
+        is_scan = request.path == "/api/detection/scan"
+        limit = scan_content_limit if is_scan else config.max_content_length_bytes
+        content_length = request.content_length
+        if content_length is not None and content_length > limit:
+            abort(413)
+        if not is_scan and content_length is None and len(request.get_data(cache=True)) > limit:
+            abort(413)
+        return None
 
     CORS(
         app,
@@ -477,6 +507,7 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         )
 
     @app.post("/api/events")
+    @limiter.limit(lambda: config.event_rate_limit, key_func=device_key_or_ip)
     @require_device_key
     def create_event():
         payload, error = validate(EventCreate)
@@ -571,13 +602,13 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         return jsonify(vision_status())
 
     @app.post("/api/detection/scan")
+    @limiter.limit(lambda: config.detection_rate_limit, key_func=device_key_or_ip)
     @require_device_key_or_roles("head_admin")
     def detection_scan():
         """Detect bus stickers in a posted image and read their numbers.
 
         Accepts either a multipart `image` file or a JSON body with an
-        `image` field holding base64 data. The device API key is required, so
-        only a detection device may submit frames.
+        `image` field holding base64 data.
         """
         payload: dict[str, Any] = {}
         image_source: bytes | str | None = None
@@ -586,7 +617,7 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             upload = request.files.get("image")
             if upload is None:
                 return jsonify({"error": "An 'image' file part is required"}), 400
-            image_source = upload.read()
+            image_source = upload.read(config.vision_max_image_bytes + 1)
             payload = request.form.to_dict()
         else:
             body = request.get_json(silent=True)
@@ -598,14 +629,52 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         if not image_source:
             return jsonify({"error": "No image was supplied"}), 400
 
+        actor = getattr(g, "current_user", None) or {"email": "device-client", "role": "device"}
         try:
-            image = decode_image(image_source)
+            if (
+                config.vision_max_image_bytes == 2_000_000
+                and config.vision_max_image_pixels == 16_000_000
+                and config.vision_max_image_dim == 4096
+            ):
+                image = decode_image(image_source)
+            else:
+                image = decode_image(
+                    image_source,
+                    max_bytes=config.vision_max_image_bytes,
+                    max_pixels=config.vision_max_image_pixels,
+                    max_dim=config.vision_max_image_dim,
+                )
+        except InvalidImageError as exc:
+            record_audit(
+                db,
+                actor,
+                "detection_scan_rejected",
+                "events",
+                None,
+                after={"error": str(exc), "source": payload.get("source", "device")},
+                flask_request=request,
+            )
+            return jsonify({"error": str(exc)}), 400
+        except VisionUnavailable as exc:
+            record_audit(
+                db,
+                actor,
+                "detection_scan_failed",
+                "events",
+                None,
+                after={"error": str(exc), "source": payload.get("source", "device")},
+                flask_request=request,
+            )
+            return jsonify({"error": str(exc)}), 503
+
+        if not vision_semaphore.acquire(timeout=5):
+            return jsonify({"error": "Detector is busy; retry shortly"}), 503
+        try:
             result = detect(image)
         except VisionUnavailable as exc:
             # The detector is unavailable on this host (no model, no OCR
             # engine). Record the attempt so the gap is visible in the audit
             # trail, then tell the caller.
-            actor = getattr(g, "current_user", None) or {"email": "device-client", "role": "device"}
             record_audit(
                 db,
                 actor,
@@ -618,7 +687,6 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             return jsonify({"error": str(exc)}), 503
         except Exception as exc:  # pragma: no cover - defensive
             current_app.logger.exception("Detection failed")
-            actor = getattr(g, "current_user", None) or {"email": "device-client", "role": "device"}
             record_audit(
                 db,
                 actor,
@@ -629,6 +697,8 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
                 flask_request=request,
             )
             return jsonify({"error": f"Detection failed: {type(exc).__name__}"}), 500
+        finally:
+            vision_semaphore.release()
 
         candidate = best_candidate(result)
         response: dict[str, Any] = {

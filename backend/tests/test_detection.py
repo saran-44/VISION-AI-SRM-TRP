@@ -129,7 +129,7 @@ def test_detection_scan_by_head_admin_audits_admin_email_and_compact_payload(cli
     from backend import app as app_module
     from backend.vision import DetectionResult, PlateCandidate
 
-    monkeypatch.setattr(app_module, "decode_image", lambda _src: object())
+    monkeypatch.setattr(app_module, "decode_image", lambda _src, **_kw: object())
     monkeypatch.setattr(
         app_module,
         "detect",
@@ -289,3 +289,177 @@ def test_config_parser_accepts_rtsp_but_rejects_embedded_credentials():
         _parse_camera_streams(
             '{"cam": {"type": "mjpeg", "url": "http://u:p@host/stream", "label": "Cam"}}'
         )
+
+
+def test_scan_rejects_invalid_base64_and_bad_data_uri_with_400(client, users):
+    login_head_admin(client, users)
+    bad_b64 = client.post(
+        "/api/detection/scan",
+        json={"image": "not!valid!base64"},
+    )
+    assert bad_b64.status_code == 400
+    assert "base64" in bad_b64.get_json()["error"].lower()
+
+    bad_uri = client.post(
+        "/api/detection/scan",
+        json={"image": "data:image/svg+xml;base64,PHN2Zz4="},
+    )
+    assert bad_uri.status_code == 400
+    assert "uri" in bad_uri.get_json()["error"].lower()
+
+
+def test_scan_rejects_oversized_pixel_bomb_before_load(client, users, monkeypatch):
+    import types
+    from backend import vision
+
+    load_called = False
+
+    class BombImage:
+        format = "PNG"
+        width = 10000
+        height = 10000
+
+        def load(self):
+            nonlocal load_called
+            load_called = True
+
+    fake_pil = types.SimpleNamespace(
+        Image=types.SimpleNamespace(open=lambda _buf: BombImage()),
+        ImageOps=types.SimpleNamespace(exif_transpose=lambda img: img),
+    )
+    monkeypatch.setattr(vision, "_require_pil", lambda: fake_pil.Image)
+    monkeypatch.setitem(__import__("sys").modules, "PIL", fake_pil)
+
+    login_head_admin(client, users)
+    b64 = base64.b64encode(_png_bytes()).decode("ascii")
+    response = client.post("/api/detection/scan", json={"image": b64})
+    assert response.status_code == 400
+    assert "dimensions" in response.get_json()["error"].lower()
+    assert load_called is False
+
+
+def test_detection_scan_accepts_base64_under_image_limit_but_over_1mb_body(client, db, users, monkeypatch):
+    from backend import app as app_module
+    from backend.vision import DetectionResult, PlateCandidate
+
+    monkeypatch.setattr(app_module, "decode_image", lambda src, **_kw: object())
+    monkeypatch.setattr(
+        app_module,
+        "detect",
+        lambda _img: DetectionResult(candidates=[PlateCandidate(bus_number="BUS-001", confidence=0.9)]),
+    )
+
+    # 1.15 MB raw bytes -> ~1.53 MB base64 JSON (> 1 MB global MAX_CONTENT_LENGTH, < 2 MB image limit).
+    raw_b64 = base64.b64encode(b"x" * 1_150_000).decode("ascii")
+    scan_res = client.post(
+        "/api/detection/scan",
+        headers={"X-Device-Key": DEVICE_KEY},
+        json={"image": raw_b64},
+    )
+    assert scan_res.status_code == 200
+    assert scan_res.get_json()["bus_number"] == "BUS-001"
+
+    # Global 1 MB limit still rejects non-scan endpoints.
+    other_res = client.post(
+        "/api/events",
+        headers={"X-Device-Key": DEVICE_KEY},
+        json={"padding": raw_b64},
+    )
+    assert other_res.status_code == 413
+
+
+def test_detect_prioritizes_sticker_and_confidence_before_max_crops(monkeypatch):
+    from backend import vision
+
+    class FakeTensor:
+        def __init__(self, values):
+            self._values = values
+
+        def __getitem__(self, index):
+            return self._values[index]
+
+    class FakeScalar:
+        def __init__(self, val):
+            self._val = val
+
+        def item(self):
+            return self._val
+
+    class FakeCoords:
+        def __init__(self, coords):
+            self._coords = coords
+
+        def tolist(self):
+            return self._coords
+
+    class FakeBoxes:
+        def __init__(self):
+            # 3 low-confidence red circles first, then 1 high-confidence sticker last.
+            self.cls = [FakeScalar(0), FakeScalar(0), FakeScalar(0), FakeScalar(1)]
+            self.conf = [FakeScalar(0.4), FakeScalar(0.5), FakeScalar(0.6), FakeScalar(0.95)]
+            self.xyxy = [
+                FakeCoords([0, 0, 10, 10]),
+                FakeCoords([0, 0, 10, 10]),
+                FakeCoords([0, 0, 10, 10]),
+                FakeCoords([5, 5, 20, 20]),
+            ]
+
+        def __len__(self):
+            return len(self.cls)
+
+    class FakeModel:
+        names = {0: "red circle", 1: "sticker"}
+
+        def predict(self, **_kw):
+            return [type("R", (), {"boxes": FakeBoxes()})()]
+
+    class FakeImg:
+        width = 100
+        height = 100
+
+        def crop(self, _box):
+            return object()
+
+    monkeypatch.setenv("VISION_MAX_CROPS", "1")
+    monkeypatch.setattr(vision, "read_text", lambda _crop: "TN 12 AB 1234")
+    result = vision.detect(FakeImg(), model=FakeModel(), threshold=0.35)
+    assert len(result.candidates) == 1
+    assert result.candidates[0].class_name == "sticker"
+    assert result.candidates[0].bus_number == "TN 12 AB 1234"
+
+
+def test_scan_and_event_rate_limits_return_429_keyed_by_device_key(db, monkeypatch):
+    from backend import app as app_module
+    from backend.tests.conftest import build_config
+    from backend.vision import DetectionResult
+
+    cfg = build_config(
+        rate_limit_enabled=True,
+        detection_rate_limit="2 per minute",
+        event_rate_limit="2 per minute",
+        device_api_keys=(DEVICE_KEY, "second-device-key"),
+    )
+    app = app_module.create_app(cfg, database_engine=db.engine)
+    app.config.update(TESTING=True)
+    monkeypatch.setattr(app_module, "decode_image", lambda *_a, **_kw: object())
+    monkeypatch.setattr(app_module, "detect", lambda _img: DetectionResult())
+    client = app.test_client()
+
+    b64 = base64.b64encode(_png_bytes()).decode("ascii")
+    for _ in range(2):
+        assert client.post("/api/detection/scan", headers={"X-Device-Key": DEVICE_KEY}, json={"image": b64}).status_code == 200
+    assert client.post("/api/detection/scan", headers={"X-Device-Key": DEVICE_KEY}, json={"image": b64}).status_code == 429
+    # A second device key from the same IP has its own bucket.
+    assert client.post("/api/detection/scan", headers={"X-Device-Key": "second-device-key"}, json={"image": b64}).status_code == 200
+
+    ev = {
+        "bus_number": "BUS-001",
+        "direction": "IN",
+        "gate": "Gate 1",
+        "camera_id": "cam-1",
+        "confidence": 0.9,
+        "timestamp": "2026-01-01T00:00:00Z",
+    }
+    for _ in range(2):
+        assert client.post("/api/events", headers={"X-Device-Key": DEVICE_KEY}, json=ev).status_code == 201
+    assert client.post("/api/events", headers={"X-Device-Key": DEVICE_KEY}, json=ev).status_code == 429

@@ -143,6 +143,13 @@ class Config:
     audit_detection_scans: bool = True
     sse_max_connections: int = 4
     sse_max_seconds: int = 50
+    max_content_length_bytes: int = 1_000_000
+    vision_max_image_bytes: int = 2_000_000
+    vision_max_image_pixels: int = 16_000_000
+    vision_max_image_dim: int = 4096
+    vision_max_concurrency: int = 2
+    detection_rate_limit: str = "30 per minute"
+    event_rate_limit: str = "120 per minute"
 
     @classmethod
     def from_env(cls, overrides: dict | None = None) -> "Config":
@@ -196,6 +203,13 @@ class Config:
             audit_detection_scans=_bool("AUDIT_DETECTION_SCANS", True),
             sse_max_connections=_int("SSE_MAX_CONNECTIONS", 4),
             sse_max_seconds=_int("SSE_MAX_SECONDS", 50),
+            max_content_length_bytes=_int("MAX_CONTENT_LENGTH_BYTES", 1_000_000),
+            vision_max_image_bytes=_int("VISION_MAX_IMAGE_BYTES", 2_000_000),
+            vision_max_image_pixels=_int("VISION_MAX_IMAGE_PIXELS", 16_000_000),
+            vision_max_image_dim=_int("VISION_MAX_IMAGE_DIM", 4096),
+            vision_max_concurrency=_int("VISION_MAX_CONCURRENCY", 2),
+            detection_rate_limit=os.getenv("DETECTION_RATE_LIMIT", "30 per minute"),
+            event_rate_limit=os.getenv("EVENT_RATE_LIMIT", "120 per minute"),
         )
         if overrides:
             cfg = replace(cfg, **overrides)
@@ -248,6 +262,16 @@ class Config:
             raise RuntimeError("SSE_MAX_CONNECTIONS must be between 1 and 50")
         if not 5 <= self.sse_max_seconds <= 290:
             raise RuntimeError("SSE_MAX_SECONDS must be between 5 and 290")
+        if not 100_000 <= self.max_content_length_bytes <= 20_000_000:
+            raise RuntimeError("MAX_CONTENT_LENGTH_BYTES must be between 100000 and 20000000")
+        if not 100_000 <= self.vision_max_image_bytes <= 20_000_000:
+            raise RuntimeError("VISION_MAX_IMAGE_BYTES must be between 100000 and 20000000")
+        if not 10_000 <= self.vision_max_image_pixels <= 100_000_000:
+            raise RuntimeError("VISION_MAX_IMAGE_PIXELS must be between 10000 and 100000000")
+        if not 64 <= self.vision_max_image_dim <= 16_384:
+            raise RuntimeError("VISION_MAX_IMAGE_DIM must be between 64 and 16384")
+        if not 1 <= self.vision_max_concurrency <= 16:
+            raise RuntimeError("VISION_MAX_CONCURRENCY must be between 1 and 16")
         known_providers = {"password", "google.com"}
         unknown = set(self.firebase_allowed_providers) - known_providers
         if unknown:
