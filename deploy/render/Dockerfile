@@ -24,16 +24,20 @@ WORKDIR /app
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser
 
 COPY backend/requirements.txt /tmp/requirements.txt
 RUN pip install --upgrade pip \
- && pip install -r /tmp/requirements.txt
+ && pip install -r /tmp/requirements.txt \
+ && rm -f /tmp/requirements.txt
 
-COPY backend/ /app/backend/
-COPY frontend/ /app/frontend/
-COPY deploy/render/entrypoint.sh /app/entrypoint.sh
+COPY --chown=appuser:appuser backend/ /app/backend/
+COPY --chown=appuser:appuser frontend/ /app/frontend/
+COPY --chown=appuser:appuser deploy/render/entrypoint.sh /app/entrypoint.sh
 RUN chmod 755 /app/entrypoint.sh
+
+USER appuser
 
 EXPOSE 10000
 

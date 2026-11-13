@@ -42,3 +42,23 @@ def test_cloud_build_sets_the_secure_first_deployment_path():
     assert '"--timeout", "180"' in dockerfile
     assert "periodSeconds=10,failureThreshold=24" in config
     assert "TRUSTED_PROXY_COUNT=0" in config
+
+
+def test_dockerfile_runs_as_non_root_and_uses_single_worker_with_16_threads():
+    dockerfile = (ROOT / "deploy" / "Dockerfile").read_text()
+    assert "USER appuser" in dockerfile
+    assert '"--workers", "1", "--threads", "16"' in dockerfile
+    assert '"--timeout", "180"' in dockerfile
+    assert "OMP_NUM_THREADS=1" in dockerfile
+    assert "YOLO_CONFIG_DIR=/tmp/Ultralytics" in dockerfile
+
+    render_dockerfile = (ROOT / "deploy" / "render" / "Dockerfile").read_text()
+    assert "USER appuser" in render_dockerfile
+
+
+def test_cloudbuild_sets_concurrency_limit():
+    config = (ROOT / "deploy" / "cloudbuild.yaml").read_text()
+    assert "--concurrency" in config
+    assert '"16"' in config
+    assert "SSE_MAX_CONNECTIONS=4" in config
+    assert "SSE_MAX_SECONDS=50" in config
