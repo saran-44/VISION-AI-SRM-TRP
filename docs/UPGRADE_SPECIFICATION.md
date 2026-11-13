@@ -116,7 +116,7 @@ These are standing instructions. They continue to apply to any follow-up work.
 | 6 | Provide **full Git Bash commands and deployment instructions** because the user performs the remote connection/deployment. | [§16](#16-git-and-git-bash-command-reference). |
 | 7 | **Search GitHub for the `best.pt` backend.** No repository or API may be fabricated if none is verified. | Search performed; the source was found and verified ([§5](#5-the-ai-model--verified-provenance)). |
 | 8 | **Never commit real credentials, real driver/bus registers, or personal media.** | The Firebase API key lives in the environment, not in Git. The secret scanner (`scripts/scan_secrets.py`) runs in CI. |
-| 9 | **The earlier leaked MongoDB credential must be rotated and sensitive Git history purged** before production use. | Still outstanding — see [§18](#18-outstanding-work-and-known-risks). **This is a blocker for production.** |
+| 9 | **The earlier leaked MongoDB credential must be rotated and sensitive Git history purged** before production use. | Still outstanding — see [§19](#19-outstanding-work-and-known-risks). **This is a blocker for production.** |
 
 ---
 
@@ -681,15 +681,15 @@ gates must both pass:
 2. **The backend's access list** (the MongoDB `users` collection) decides
    whether that *identity* may use the portal.
 
-The second gate is not redundant. Firebase's email/password provider only
-accepts accounts an administrator created, but the **Google provider issues
-a valid token for any Google account on Earth** — relying on Firebase alone
-would let anyone with a Google account into the portal.
+The second gate is not redundant. Firebase can issue tokens to self-registered
+password users and to arbitrary Google accounts. Neither is evidence that an
+administrator authorised portal access. Both providers must supply a verified
+email before an access-list entry can be used or a UID bound.
 
 | Provider | Unknown email | Rule |
 | --- | --- | --- |
-| `password` | Admitted on first use | A successful sign-in proves an administrator created that Firebase account, so the access record is created automatically (`FIREBASE_AUTO_PROVISION`). |
-| `google.com` | **Refused** | Google accounts cannot be curated in the Firebase console, so the email must already be on the access list. |
+| `password` | Only if specifically approved | Auto-provisioning requires a verified email, `FIREBASE_AUTO_PROVISION=true`, and an administrator-set `transport_portal_approved_email` claim matching that email. |
+| `google.com` | **Refused** | The verified email must already be on the access list. |
 
 ### 10.2 What was built
 
@@ -917,7 +917,7 @@ non-MJPEG camera (with a message pointing at the HLS/MJPEG gateway URL).
 | `FIREBASE_MEASUREMENT_ID` | `G-7MXBNH3N7D` | Analytics measurement id. |
 | `FIREBASE_AUTH_ENABLED` | `true` | Master switch for Firebase sign-in (effective only when a project id is set). |
 | `FIREBASE_ALLOWED_PROVIDERS` | `password,google.com` | Which Firebase providers are accepted. |
-| `FIREBASE_AUTO_PROVISION` | `true` | Auto-create the access record on a first email/password sign-in. |
+| `FIREBASE_AUTO_PROVISION` | `true` | Auto-create the access record only for a verified password identity with the administrator-set approval claim. |
 | `FIREBASE_DEFAULT_ROLE` | `transport_office` | The role given to an auto-provisioned account. |
 | `LEGACY_PASSWORD_LOGIN_ENABLED` | `true` | Keep the local MongoDB password login as a break-glass path. |
 
@@ -1247,6 +1247,19 @@ frontend/                         repository root
 | 1 | **Rotate the leaked MongoDB credential and purge Git history** | The credential is in the repository's history. Anyone who clones it has the credential. | Rotate in the provider first, then purge ([§16.8](#168-secret-rotation-and-history-purge-production-blocker)), then force-push and ask collaborators to re-clone. |
 | 2 | **Resolve the AGPL-3.0 / no-licence position on `best.pt`** | AGPL-3.0 obliges you to offer the corresponding source to network users. The upstream repository declares no licence. | Get written permission from the model owner, **or** re-train an equivalent model on a dataset you are licensed to use and replace `best.pt`. |
 | 3 | **TLS in front of the app** | The browser camera API requires a secure context. | Terminate TLS at Cloud Run / a load balancer / a reverse proxy. |
+
+#### Item 1 in detail — the leaked credential
+
+An old connection string was committed in the root `app.py` and remains in
+Git history. A replacement credential or a different cluster does not by
+itself prove that the old database user was disabled. An Atlas administrator
+must verify that the old credential has been revoked or rotated, then purge
+the sensitive history as described in
+[§16.8](#168-secret-rotation-and-history-purge-production-blocker).
+
+Treat any credential shared in chat, logs or other unintended places as
+exposed and rotate it separately. Store replacements in a secrets vault or
+Secret Manager rather than committing them or sharing them in chat.
 
 ### 18.2 Recommended improvements
 

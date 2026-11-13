@@ -7,7 +7,10 @@ signature check, the audience, the issuer, the expiry — is the real code path.
 
 from __future__ import annotations
 
+import io
+import json
 import time
+from urllib.error import URLError
 
 import jwt
 import pytest
@@ -65,6 +68,79 @@ def test_a_valid_token_is_accepted(stub_keys, keypair):
     claims = verify_id_token(_token(keypair), PROJECT_ID)
     assert claims["email"] == "teacher@srmtrp.edu.in"
     assert claims["sub"] == "firebase-uid-1"
+
+
+def test_jwks_endpoint_and_key_rotation_use_the_real_jwk_client(monkeypatch, keypair):
+    # Firebase's OpenID discovery document advertises this JWKS URI. The x509
+    # endpoint has a different JSON shape and cannot be used with PyJWKClient.
+    expected_url = (
+        "https://www.googleapis.com/service_accounts/v1/jwk/"
+        "securetoken@system.gserviceaccount.com"
+    )
+    old_private, old_public = keypair
+    new_private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    new_public = new_private.public_key()
+
+    def jwk(public_key, kid):
+        value = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(public_key))
+        value.update({"kid": kid, "alg": "RS256", "use": "sig"})
+        return value
+
+    responses = [{"keys": [jwk(old_public, "old-key")]}, {"keys": [jwk(new_public, "new-key")]}]
+    calls = []
+
+    def fake_urlopen(request, **kwargs):
+        assert request.full_url == expected_url
+        calls.append(request.full_url)
+        return io.BytesIO(json.dumps(responses[len(calls) - 1]).encode())
+
+    monkeypatch.setattr(firebase_auth, "_jwk_client", None)
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    payload = jwt.decode(_token(keypair), options={"verify_signature": False})
+    old_token = jwt.encode(payload, old_private, algorithm="RS256", headers={"kid": "old-key"})
+    new_token = jwt.encode(payload, new_private, algorithm="RS256", headers={"kid": "new-key"})
+
+    assert verify_id_token(old_token, PROJECT_ID)["sub"] == "firebase-uid-1"
+    assert verify_id_token(old_token, PROJECT_ID)["sub"] == "firebase-uid-1"
+    assert len(calls) == 1  # cached key set
+    assert verify_id_token(new_token, PROJECT_ID)["sub"] == "firebase-uid-1"
+    assert len(calls) == 2  # unknown key id triggers a refresh
+
+
+def test_jwks_network_failure_reports_service_unavailable(monkeypatch, keypair):
+    def fail_urlopen(*args, **kwargs):
+        raise URLError("network unreachable")
+
+    monkeypatch.setattr(firebase_auth, "_jwk_client", None)
+    monkeypatch.setattr("urllib.request.urlopen", fail_urlopen)
+    with pytest.raises(FirebaseAuthError) as excinfo:
+        verify_id_token(_token(keypair), PROJECT_ID)
+    assert excinfo.value.status == 503
+
+
+def test_exchange_requires_a_valid_signature_and_matching_admin_approval(
+    client, db, stub_keys, keypair
+):
+    from backend.firebase_auth import PORTAL_APPROVAL_CLAIM
+
+    email = "teacher@srmtrp.edu.in"
+    unapproved = _token(keypair)
+    response = client.post("/api/auth/firebase", json={"id_token": unapproved})
+    assert response.status_code == 403
+    assert db.users.find_one({"email": email}) is None
+
+    approved = _token(keypair, **{PORTAL_APPROVAL_CLAIM: email})
+    unsigned_claims = jwt.decode(approved, options={"verify_signature": False})
+    rogue_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    forged = jwt.encode(unsigned_claims, rogue_key, algorithm="RS256")
+    response = client.post("/api/auth/firebase", json={"id_token": forged})
+    assert response.status_code == 401
+    assert db.users.find_one({"email": email}) is None
+
+    response = client.post("/api/auth/firebase", json={"id_token": approved})
+    assert response.status_code == 200
+    assert response.get_json()["created"] is True
+    assert db.users.find_one({"email": email})["firebase_uid"] == "firebase-uid-1"
 
 
 def test_a_token_for_another_project_is_rejected(stub_keys, keypair):

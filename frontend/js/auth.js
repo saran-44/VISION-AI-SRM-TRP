@@ -3,15 +3,14 @@
  *
  * The browser authenticates with Firebase (email/password or Google) and then
  * exchanges the resulting **Firebase ID token** for this application's own
- * session cookie via `POST /api/auth/firebase`. The Firebase ID token is used
- * once and then discarded — it is never written to localStorage or
- * sessionStorage. The session itself lives in an HttpOnly cookie that the
- * backend sets, so the token is not reachable from JavaScript at all.
+ * session cookie via `POST /api/auth/firebase`. The application does not
+ * persist the exchanged ID token; Firebase manages its own browser auth state.
+ * The backend-issued session cookie is HttpOnly and not readable by JavaScript.
  *
- * Access is restricted server-side. Firebase decides *whether a credential is
- * valid*; the backend's access list decides *whether that identity may use
- * the portal*. A Google account that has never been added to the access list
- * is rejected even though Firebase signed it happily.
+ * Firebase validates the credential; the backend requires a verified email
+ * and enforces the access list. An unknown password user additionally needs
+ * an administrator-set approval claim for optional auto-provisioning. Google
+ * users must already be on the access list.
  */
 
 import { initFirebase, signOutFirebase } from './firebase.js';
