@@ -108,18 +108,29 @@ def _grab_webcam(
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
-def _scan_folder(folder: Path, overrides, as_json: bool) -> int:
+def _scan_folder(folder: Path, overrides, as_json: bool, limit: int = 0) -> int:
     """Scan every image in a folder — the fastest way to tune the thresholds.
 
     One line per frame, then a summary. Ten real gate frames answer "is the
     recall good enough?" in a way one lucky frame never can.
     """
-    from backend.vision import VisionUnavailable, best_identification, decode_image, detect
+    from backend.vision import (
+        ImageRejected,
+        VisionUnavailable,
+        best_identification,
+        decode_image,
+        detect,
+    )
 
     if not folder.is_dir():
         print(f"Not a folder: {folder}", file=sys.stderr)
         return 2
     files = sorted(path for path in folder.iterdir() if path.suffix.lower() in IMAGE_SUFFIXES)
+    if limit and len(files) > limit:
+        # Even spacing, not the first N: the first N of a folder are usually one
+        # bus photographed in a burst, which flatters every threshold.
+        step = len(files) / limit
+        files = [files[int(index * step)] for index in range(limit)]
     if not files:
         print(f"No images in {folder} ({', '.join(sorted(IMAGE_SUFFIXES))})", file=sys.stderr)
         return 2
@@ -127,9 +138,16 @@ def _scan_folder(folder: Path, overrides, as_json: bool) -> int:
     rows = []
     reasons: dict[str, int] = {}
     cascades: dict[str, int] = {}
-    for path in files:
+    for index, path in enumerate(files, start=1):
+        if not as_json:
+            print(f"  [{index}/{len(files)}] {path.name}", file=sys.stderr, flush=True)
         try:
             result = detect(decode_image(path.read_bytes()), stages=overrides)
+        except KeyboardInterrupt:
+            # Minutes on a CPU-only laptop is expected, not an error. Keep what
+            # was measured rather than throwing the whole run away.
+            print(f"\nStopped after {index - 1} of {len(files)} frames.", file=sys.stderr)
+            break
         except ImageRejected as exc:
             print(f"Skipped {path.name}: {exc}", file=sys.stderr)
             reasons["image_rejected"] = reasons.get("image_rejected", 0) + 1
@@ -155,7 +173,11 @@ def _scan_folder(folder: Path, overrides, as_json: bool) -> int:
         print(json.dumps(rows, indent=2))
         return 0
 
-    print(f"{folder}  ({len(rows)} image{'s' if len(rows) != 1 else ''})")
+    rejected = reasons.get("image_rejected", 0)
+    scanned = len(files)
+    header = f"{folder}  ({scanned} image{'s' if scanned != 1 else ''}"
+    header += f", {rejected} rejected)" if rejected else ")"
+    print(header)
     for row in rows:
         number = row["bus_number"] or "-"
         confidence = f"{row['confidence']:.2f}" if row["confidence"] is not None else "-"
@@ -203,6 +225,16 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="scan every image in this folder and print one line per frame (tuning mode)",
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help=(
+            "with --dir: scan at most N frames, spread evenly across the folder. "
+            "A CPU-only laptop needs 5-10 s per frame, so ten sampled frames beat "
+            "a hundred that never finish."
+        ),
+    )
     parser.add_argument("--json", action="store_true", help="print the raw response instead of a summary")
     args = parser.parse_args(argv)
 
@@ -229,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
     overrides = stage_overrides_from_payload({"stages": args.stages}) if args.stages else None
 
     if args.dir:
-        return _scan_folder(Path(args.dir).expanduser(), overrides, args.json)
+        return _scan_folder(Path(args.dir).expanduser(), overrides, args.json, limit=args.limit)
 
     if args.camera is not None:
         grabbed = _grab_webcam(args.camera, args.frames, args.save, args.width, args.height)
