@@ -62,6 +62,7 @@ from .firebase_auth import (
     verify_id_token as verify_firebase_id_token,
 )
 from .vision import (
+    ImageRejected,
     VisionUnavailable,
     best_candidate,
     best_identification,
@@ -622,6 +623,12 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             # The panel can switch a stage off for this scan only; anything it
             # does not name keeps the host default (VISION_STAGE_*).
             result = detect(image, stages=stage_overrides_from_payload(payload))
+        except ImageRejected as exc:
+            # The caller's own upload is unusable: that is a 400, never a 503.
+            # Answering "cloud vision is unavailable, install the agent" for an
+            # undecodable or oversized frame sent operators chasing a fault that
+            # was in the file they chose.
+            return jsonify({"error": str(exc), "code": "image_rejected"}), 400
         except VisionUnavailable as exc:
             # The detector is unavailable on this host (no model, no OCR
             # engine). Record the attempt so the gap is visible in the audit

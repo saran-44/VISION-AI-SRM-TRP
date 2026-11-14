@@ -136,6 +136,15 @@ class VisionUnavailable(RuntimeError):
     """Raised when a vision dependency or the model file is missing."""
 
 
+class ImageRejected(ValueError):
+    """Raised when the caller's own image cannot be used.
+
+    Separate from VisionUnavailable on purpose: "your upload is unusable" is a
+    400, "this server has no detector" is a 503. Conflating them produced an
+    install-the-extras message for a photograph that was simply too big.
+    """
+
+
 @dataclass
 class PlateCandidate:
     """One detected sticker and the text read from it."""
@@ -731,39 +740,67 @@ def normalize_plate(text: str) -> str:
 # Frame guards. A 1 MB request body can still decode into a gigantic bitmap,
 # so the pixel count is capped before any pixel data is allocated, and the
 # side length is capped before the decoder touches it.
-MAX_IMAGE_PIXELS = 12_000_000  # ~12 MP, comfortably above 4K video frames
+# The detector resizes every frame to `VISION_IMAGE_SIZE` (960 px) before the
+# model sees it, so the only thing a huge upload costs is decode time. These are
+# therefore *resize targets*, not refusals: a 12 MP phone photo — the single most
+# common thing a gate operator will upload — used to be rejected outright with
+# "Image is larger than the 12 MP limit", which reads as a broken install.
+MAX_IMAGE_PIXELS = 12_000_000
+# Beyond this, downscaling still means holding a multi-hundred-megabyte bitmap in
+# memory, so it stays a hard refusal. 120 MP is far above any camera frame.
+MAX_INPUT_PIXELS = 120_000_000
 MAX_IMAGE_SIDE = 6_000
 MAX_IMAGE_BYTES = 8_000_000
 
 
 def decode_image(payload: bytes | str) -> "Any":
-    """Decode raw image bytes or a base64 string into a PIL image."""
+    """Decode raw image bytes or a base64 string into a PIL image.
+
+    Oversized frames are downscaled to the detector's working size rather than
+    refused: `VISION_IMAGE_SIZE` is 960 px, so a 4096x3072 phone photo costs a
+    resize and nothing else. Only a genuinely bomb-sized canvas (over
+    `MAX_INPUT_PIXELS`) and unreadable bytes are rejected.
+    """
     Image = _require_pil()
-    # PIL's own bomb guard covers formats that declare a huge canvas.
-    Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+    # PIL's own guard warns at this size before we ever resize. Keep it well
+    # above anything we accept so a large-but-legitimate photo is not noisy.
+    Image.MAX_IMAGE_PIXELS = MAX_INPUT_PIXELS
     if isinstance(payload, str):
         if len(payload) > MAX_IMAGE_BYTES * 2:
-            raise VisionUnavailable("The image payload is too large")
+            raise ImageRejected("The image payload is too large")
         data = payload.split(",", 1)[-1] if payload.startswith("data:") else payload
         try:
             payload = base64.b64decode(data, validate=False)
         except (binascii.Error, ValueError) as exc:
-            raise VisionUnavailable("The image payload is not valid base64") from exc
+            raise ImageRejected("The image payload is not valid base64") from exc
     if len(payload) > MAX_IMAGE_BYTES:
-        raise VisionUnavailable("The image payload is too large")
+        raise ImageRejected(
+            f"The image is larger than the {MAX_IMAGE_BYTES // 1_000_000} MB limit"
+        )
     try:
         with Image.open(io.BytesIO(payload)) as probe:
             width, height = probe.size
-            if width * height > MAX_IMAGE_PIXELS or max(width, height) > MAX_IMAGE_SIDE:
-                raise VisionUnavailable(
-                    f"Image is larger than the {MAX_IMAGE_PIXELS // 1_000_000} MP limit"
+            if width * height > MAX_INPUT_PIXELS or max(width, height) > MAX_IMAGE_SIDE:
+                raise ImageRejected(
+                    f"Image is larger than the {MAX_INPUT_PIXELS // 1_000_000} MP limit"
                 )
             probe.load()
-            return probe.copy()
-    except VisionUnavailable:
+            image = probe.copy()
+    except ImageRejected:
         raise
     except Exception as exc:
-        raise VisionUnavailable("The uploaded data is not a readable image") from exc
+        raise ImageRejected("The uploaded data is not a readable image") from exc
+
+    # Fit inside both budgets, keeping the aspect ratio the detector expects.
+    scale = 1.0
+    if max(image.size) > MAX_IMAGE_SIDE:
+        scale = min(scale, MAX_IMAGE_SIDE / max(image.size))
+    if image.width * image.height > MAX_IMAGE_PIXELS:
+        scale = min(scale, (MAX_IMAGE_PIXELS / (image.width * image.height)) ** 0.5)
+    if scale < 1.0:
+        target = (max(1, int(image.width * scale)), max(1, int(image.height * scale)))
+        image = image.resize(target, Image.LANCZOS)
+    return image
 
 
 def max_crops() -> int:
