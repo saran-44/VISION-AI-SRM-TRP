@@ -22,14 +22,21 @@ Two assistants share this repository and you are one of them.
 
 ```bash
 pwd                        # must be the repository root
-git rev-parse --short HEAD # af65914 or a descendant
+git rev-parse --short HEAD # a1ef06c or a descendant
 git status --short         # must not list files from another project
+ls docs/                   # the real directory listing
 ```
 
-Stop and report if the folder is wrong, if HEAD is older than `af65914` (the
+Stop and report if the folder is wrong, if HEAD is older than `a1ef06c` (the
 tree is stale — `git pull --ff-only origin main` and restart), or if the working
-tree holds another project's files. Never create a file to make this prompt
-true: if a file named below is missing, the tree is wrong.
+tree holds another project's files.
+
+**If `ls docs/` shows a file that your own file search cannot find, your index is
+stale, not the file.** Say exactly that — *"my index does not include X, the
+directory listing does"* — and ask for the window to be reloaded. Do not report
+it as missing, and never create a file to make this prompt true. The terminal
+listing is the ground truth; a codebase index built before the last `git pull`
+is not.
 
 **READ FIRST — in this order**
 
