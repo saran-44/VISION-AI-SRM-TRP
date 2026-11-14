@@ -520,3 +520,181 @@ body.dark-theme .setup-item code {
         padding: 0;
     }
 }
+
+/* --------------------------------------------------------------------------
+   7. Test Lab — detection stage switches
+
+   The cascade is a product setting, not a developer setting: an operator has to
+   be able to turn sticker detection off when the guard is testing a bus without
+   one, and see which stage produced the answer. Real checkboxes underneath, so
+   keyboard and screen readers work; the pill is styling only.
+   -------------------------------------------------------------------------- */
+
+.stage-panel {
+    margin: 0.85rem 0 0;
+    padding: 0.9rem 1rem 0.75rem;
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    background: var(--surface-muted);
+}
+
+.stage-panel-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.35rem 0.85rem;
+    margin-bottom: 0.7rem;
+}
+
+.stage-panel-title {
+    margin: 0;
+    font-size: 0.98rem;
+    font-weight: 700;
+    color: var(--text-main);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.stage-panel-note {
+    margin: 0.65rem 0 0;
+    font-size: 0.82rem;
+    line-height: 1.5;
+}
+
+.stage-toggles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+    gap: 0.55rem;
+}
+
+.stage-toggle {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.7rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    background: var(--card-bg);
+    cursor: pointer;
+    min-height: var(--tap);
+}
+
+.stage-toggle:hover {
+    border-color: var(--brand-purple-200);
+}
+
+.stage-switch {
+    position: relative;
+    flex: 0 0 auto;
+    width: 42px;
+    height: 24px;
+    margin-top: 2px;
+}
+
+.stage-switch-input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.stage-switch-track {
+    position: absolute;
+    inset: 0;
+    border-radius: 999px;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-strong);
+    transition: background 0.18s ease, border-color 0.18s ease;
+    pointer-events: none;
+}
+
+.stage-switch-track::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(36, 26, 60, 0.35);
+    transition: transform 0.18s ease;
+}
+
+.stage-switch-input:checked + .stage-switch-track {
+    background: var(--primary);
+    border-color: var(--primary);
+}
+
+.stage-switch-input:checked + .stage-switch-track::after {
+    transform: translateX(18px);
+}
+
+.stage-switch-input:focus-visible + .stage-switch-track {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.stage-toggle-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+}
+
+.stage-toggle-label {
+    font-weight: 600;
+    color: var(--text-main);
+    font-size: 0.9rem;
+}
+
+.stage-toggle-note {
+    font-size: 0.78rem;
+    line-height: 1.4;
+    color: var(--text-muted);
+}
+
+.stage-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.55rem;
+}
+
+.stage-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    background: var(--surface-muted);
+    color: var(--text-muted);
+}
+
+.stage-chip.is-ok {
+    border-color: transparent;
+    background: var(--success-bg);
+    color: var(--success);
+}
+
+.stage-chip.is-warn {
+    border-color: transparent;
+    background: var(--warning-bg);
+    color: var(--warning);
+}
+
+.stage-chip.is-off {
+    border-color: transparent;
+    background: var(--danger-bg);
+    color: var(--danger);
+}
+
+.stage-chip.is-idle {
+    opacity: 0.85;
+}

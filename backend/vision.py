@@ -48,6 +48,74 @@ CLASS_LABELS = {
 # The only class that is OCR'd. See sticker_class_id().
 DEFAULT_STICKER_CLASS = CLASS_STICKER
 
+# --------------------------------------------------------------------------- #
+# Detection stages
+#
+# One frame is read by a cascade of detectors, cheapest and most specific
+# first, so a bus that carries no sticker still yields a number:
+#
+#   sticker  -> best.pt, the trained sticker/red-circle checkpoint
+#   plate    -> an optional number-plate checkpoint (weights/number_plate.pt)
+#   vehicle  -> an optional COCO-style checkpoint (bus / car / bike / truck)
+#
+# Each stage can be switched off from the panel (per request) or from the
+# environment (per host). A stage whose weights are missing is *skipped*, never
+# an error: the console still answers with whatever the other stages found.
+# --------------------------------------------------------------------------- #
+STAGE_STICKER = "sticker"
+STAGE_NUMBER_PLATE = "number_plate"
+STAGE_VEHICLE = "vehicle"
+STAGE_ORDER = (STAGE_STICKER, STAGE_NUMBER_PLATE, STAGE_VEHICLE)
+
+# Names the panel and the API may use for a stage, including short forms.
+STAGE_ALIASES = {
+    "sticker": STAGE_STICKER,
+    "stickers": STAGE_STICKER,
+    "plate": STAGE_NUMBER_PLATE,
+    "number_plate": STAGE_NUMBER_PLATE,
+    "numberplate": STAGE_NUMBER_PLATE,
+    "vehicle": STAGE_VEHICLE,
+    "vehicles": STAGE_VEHICLE,
+    "type": STAGE_VEHICLE,
+}
+
+STAGE_LABELS = {
+    STAGE_STICKER: "Sticker",
+    STAGE_NUMBER_PLATE: "Number plate",
+    STAGE_VEHICLE: "Vehicle type",
+}
+
+# Environment variable that switches a stage off for the whole host.
+STAGE_ENV = {
+    STAGE_STICKER: "VISION_STAGE_STICKER",
+    STAGE_NUMBER_PLATE: "VISION_STAGE_PLATE",
+    STAGE_VEHICLE: "VISION_STAGE_VEHICLE",
+}
+
+# Optional checkpoints. `weights/` is git-ignored: drop the files there.
+DEFAULT_PLATE_MODEL_PATH = ROOT / "weights" / "number_plate.pt"
+DEFAULT_VEHICLE_MODEL_PATH = ROOT / "weights" / "vehicle.pt"
+
+# COCO names that count as "a vehicle", and how they are reported. A two-wheeler
+# is the same thing to a gate operator whether the label says motorcycle or
+# bicycle, so both collapse to "bike".
+VEHICLE_CLASS_MAP = {
+    "bicycle": "bike",
+    "motorcycle": "bike",
+    "motorbike": "bike",
+    "scooter": "bike",
+    "car": "car",
+    "van": "car",
+    "bus": "bus",
+    "truck": "truck",
+    "auto": "auto",
+    "autorickshaw": "auto",
+}
+DEFAULT_VEHICLE_CLASSES = ("bicycle", "motorcycle", "car", "bus", "truck")
+
+# Which stage produced the answer in a frame.
+CASCADE_NONE = "none"
+
 # Bus numbers seen in this project look like "TN 12 AB 1234" / "BUS-001".
 # The OCR result is normalised to the same shape the API accepts.
 PLATE_CLEAN_RE = re.compile(r"[^A-Z0-9 .\-]")
@@ -85,6 +153,45 @@ class PlateCandidate:
 
 
 @dataclass
+class StageReport:
+    """What one stage of the cascade did on this frame.
+
+    The panel needs this to answer "why is the plate stage not producing
+    anything?" without reading a log: a stage is either disabled, skipped
+    because its weights are missing, or it ran and found `found` boxes.
+    """
+
+    name: str
+    enabled: bool = True
+    ran: bool = False
+    found: int = 0
+    best_confidence: float = 0.0
+    model: str = ""
+    # "" when the stage ran, otherwise disabled | not_needed | model_missing |
+    # not_installed | error.
+    skipped: str = ""
+    detail: str = ""
+    ms: int = 0
+    # identified | seen_unreadable | none
+    result: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "label": STAGE_LABELS.get(self.name, self.name),
+            "enabled": self.enabled,
+            "ran": self.ran,
+            "found": self.found,
+            "best_confidence": round(float(self.best_confidence), 4),
+            "model": self.model,
+            "skipped": self.skipped,
+            "detail": self.detail,
+            "ms": self.ms,
+            "result": self.result,
+        }
+
+
+@dataclass
 class DetectionResult:
     """Outcome of running the detector over a single frame."""
 
@@ -106,6 +213,14 @@ class DetectionResult:
     image_size: int = 0
     reason: str = ""
     advice: str = ""
+    # Cascade. `stages` records every stage that was asked to run, `cascade`
+    # names the one that produced the answer, and `vehicle` carries the
+    # classification when the vehicle stage could identify one.
+    stages: list[StageReport] = field(default_factory=list)
+    stage_flags: dict[str, bool] = field(default_factory=dict)
+    plate_candidates: list[PlateCandidate] = field(default_factory=list)
+    vehicle: dict[str, Any] | None = None
+    cascade: str = CASCADE_NONE
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -123,7 +238,15 @@ class DetectionResult:
             "image_size": self.image_size,
             "reason": self.reason,
             "advice": self.advice,
+            # Additive: clients that only know the sticker fields above keep
+            # working, the panel reads these to show the cascade.
+            "stages": [stage.to_dict() for stage in self.stages],
+            "stage_flags": dict(self.stage_flags),
+            "plate_candidates": [candidate.to_dict() for candidate in self.plate_candidates],
+            "vehicle": self.vehicle,
+            "cascade": self.cascade,
         }
+
 
 
 # --------------------------------------------------------------------------- #
@@ -195,6 +318,164 @@ def sticker_class_id(model=None) -> int:
     return DEFAULT_STICKER_CLASS
 
 
+def _env_flag(name: str, default: bool = True) -> bool:
+    """Read a boolean environment flag (`1/0`, `true/false`, `on/off`)."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on", "y"}:
+        return True
+    if value in {"0", "false", "no", "off", "n"}:
+        return False
+    logger.warning("%s=%r is not a boolean; using %s", name, raw, default)
+    return default
+
+
+def _as_flag(value, default: bool = True) -> bool | None:
+    """Coerce a JSON/form value into a boolean, or None when unreadable."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on", "y", ""}:
+        return True if text else default
+    if text in {"0", "false", "no", "off", "n"}:
+        return False
+    return None
+
+
+def stage_enabled(stage: str) -> bool:
+    """Is this stage switched on for the host? (`VISION_STAGE_*`)"""
+    return _env_flag(STAGE_ENV.get(stage, f"VISION_STAGE_{stage.upper()}"), True)
+
+
+def normalize_stages(overrides=None) -> dict[str, bool]:
+    """Resolve the per-request stage toggles into one flag per stage.
+
+    Anything not named keeps its environment default, so a caller can switch a
+    single stage off (`{"sticker": False}`) without having to repeat the rest.
+    """
+    flags = {stage: stage_enabled(stage) for stage in STAGE_ORDER}
+    if overrides is None:
+        return flags
+
+    if isinstance(overrides, str):
+        pairs: list[tuple[str, Any]] = [(part, True) for part in overrides.split(",") if part.strip()]
+    elif isinstance(overrides, dict):
+        pairs = list(overrides.items())
+    else:
+        pairs = [(item, True) for item in overrides]
+
+    for raw_name, raw_value in pairs:
+        key = str(raw_name).strip().lower().replace("-", "_").replace(" ", "_")
+        stage = STAGE_ALIASES.get(key)
+        if stage is None:
+            logger.info("Ignoring unknown detection stage %r", raw_name)
+            continue
+        value = _as_flag(raw_value)
+        if value is not None:
+            flags[stage] = value
+    return flags
+
+
+def stage_overrides_from_payload(payload: dict[str, Any] | None) -> dict[str, bool]:
+    """Pull stage toggles out of a form/JSON body sent by the panel.
+
+    Two shapes are accepted, because the panel posts multipart while devices
+    post JSON:
+
+        {"stages": {"sticker": false}}       or  "stages=sticker,plate"
+        {"sticker": "0", "vehicle": "1"}     or  form fields of the same name
+    """
+    payload = payload or {}
+    overrides: dict[str, bool] = {}
+
+    raw_stages = payload.get("stages")
+    if isinstance(raw_stages, dict):
+        overrides.update(normalize_stages_subset(raw_stages))
+    elif isinstance(raw_stages, str) and raw_stages.strip().startswith("{"):
+        import json
+
+        try:
+            parsed = json.loads(raw_stages)
+        except ValueError:
+            logger.info("Ignoring unreadable stages JSON: %r", raw_stages)
+            parsed = None
+        if isinstance(parsed, dict):
+            overrides.update(normalize_stages_subset(parsed))
+    elif isinstance(raw_stages, str) and raw_stages.strip():
+        # A plain list only switches stages on; anything omitted keeps its default.
+        for part in raw_stages.split(","):
+            key = part.strip().lower().replace("-", "_")
+            stage = STAGE_ALIASES.get(key)
+            if stage is not None:
+                overrides[stage] = True
+
+    for key, value in payload.items():
+        name = str(key).strip().lower().replace("-", "_").replace(" ", "_")
+        stage = STAGE_ALIASES.get(name)
+        if stage is None:
+            continue
+        flag = _as_flag(value)
+        if flag is not None:
+            overrides[stage] = flag
+
+    return overrides
+
+
+def normalize_stages_subset(values: dict[str, Any]) -> dict[str, bool]:
+    """Like `normalize_stages`, but only for the keys present in `values`."""
+    subset: dict[str, bool] = {}
+    for raw_name, raw_value in values.items():
+        key = str(raw_name).strip().lower().replace("-", "_").replace(" ", "_")
+        stage = STAGE_ALIASES.get(key)
+        if stage is None:
+            continue
+        flag = _as_flag(raw_value)
+        if flag is not None:
+            subset[stage] = flag
+    return subset
+
+
+def plate_model_path() -> Path:
+    """Checkpoint used by the number-plate stage (`weights/number_plate.pt`)."""
+    configured = os.getenv("VISION_PLATE_MODEL_PATH", "").strip()
+    return Path(configured).expanduser() if configured else DEFAULT_PLATE_MODEL_PATH
+
+
+def vehicle_model_path() -> Path:
+    """Checkpoint used by the vehicle stage (`weights/vehicle.pt`)."""
+    configured = os.getenv("VISION_VEHICLE_MODEL_PATH", "").strip()
+    return Path(configured).expanduser() if configured else DEFAULT_VEHICLE_MODEL_PATH
+
+
+def vehicle_threshold() -> float:
+    """Minimum confidence for a vehicle box (`VISION_VEHICLE_CONFIDENCE`)."""
+    try:
+        value = float(os.getenv("VISION_VEHICLE_CONFIDENCE", "0.35"))
+    except ValueError:
+        return 0.35
+    return max(0.01, min(0.99, value))
+
+
+def vehicle_classes() -> set[str]:
+    """Which model labels count as a vehicle (`VISION_VEHICLE_CLASSES`)."""
+    configured = os.getenv("VISION_VEHICLE_CLASSES", "").strip()
+    if not configured:
+        return set(DEFAULT_VEHICLE_CLASSES)
+    values = {part.strip().lower() for part in configured.split(",") if part.strip()}
+    return values or set(DEFAULT_VEHICLE_CLASSES)
+
+
+def vehicle_label(class_name: str) -> str:
+    """Collapse a detector class name into the label the console shows."""
+    return VEHICLE_CLASS_MAP.get(str(class_name).strip().lower(), str(class_name).strip().lower())
+
+
 def ocr_engine_name() -> str:
     """Which OCR backend to use: `auto`, `tesseract`, `easyocr` or `none`."""
     return os.getenv("VISION_OCR_ENGINE", "auto").strip().lower() or "auto"
@@ -253,34 +534,75 @@ def _ocr_easyocr():
 # --------------------------------------------------------------------------- #
 # Model loading
 # --------------------------------------------------------------------------- #
-def load_model():
-    """Load (and cache) the Ultralytics model. Raises VisionUnavailable."""
-    path = model_path()
+class StageNotConfigured(VisionUnavailable):
+    """A cascade stage has no usable checkpoint on this host.
+
+    Carries `reason` (model_missing | not_installed | load_failed) so the stage
+    report can say why it was skipped instead of turning a missing optional
+    model into a failed scan.
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+def load_model_at(path: Path, cache_key: str, label: str):
+    """Load (and cache) a YOLO checkpoint from `path` under `cache_key`."""
     if not path.exists():
-        raise VisionUnavailable(
-            f"Detection model not found at {path}. Set VISION_MODEL_PATH to a valid "
-            "best.pt file."
+        raise StageNotConfigured(
+            "model_missing",
+            f"{label} model not found at {path}.",
         )
     with _model_lock:
-        cached = _model_cache.get("model")
+        cached = _model_cache.get(cache_key)
         if cached is not None:
             return cached
         try:
             from ultralytics import YOLO  # type: ignore
         except ImportError as exc:
-            raise VisionUnavailable(
+            raise StageNotConfigured(
+                "not_installed",
                 "ultralytics is not installed. Install the vision extras with "
-                "`pip install -r backend/requirements-vision.txt`."
+                "`pip install -r backend/requirements-vision.txt`.",
             ) from exc
-        logger.info("Loading detection model from %s", path)
-        model = YOLO(str(path))
-        _model_cache["model"] = model
+        logger.info("Loading %s model from %s", label.lower(), path)
+        try:
+            model = YOLO(str(path))
+        except Exception as exc:  # a corrupt or half-downloaded checkpoint
+            raise StageNotConfigured(
+                "load_failed",
+                f"{label} model at {path} could not be loaded: {type(exc).__name__}",
+            ) from exc
+        _model_cache[cache_key] = model
         return model
+
+
+def load_model():
+    """Load (and cache) the sticker model. Raises VisionUnavailable."""
+    try:
+        return load_model_at(model_path(), "model", "Detection")
+    except StageNotConfigured as exc:
+        raise VisionUnavailable(
+            f"Detection model not found at {model_path()}. Set VISION_MODEL_PATH to a "
+            "valid best.pt file."
+        ) from exc
+
+
+def load_stage_model(stage: str):
+    """Load the checkpoint that belongs to one cascade stage."""
+    if stage == STAGE_STICKER:
+        return load_model()
+    if stage == STAGE_NUMBER_PLATE:
+        return load_model_at(plate_model_path(), "plate", "Number-plate")
+    if stage == STAGE_VEHICLE:
+        return load_model_at(vehicle_model_path(), "vehicle", "Vehicle")
+    raise StageNotConfigured("model_missing", f"Unknown detection stage {stage!r}")
 
 
 def unload_model() -> None:
     with _model_lock:
-        _model_cache.pop("model", None)
+        _model_cache.clear()
 
 
 # --------------------------------------------------------------------------- #
@@ -408,65 +730,48 @@ def max_crops() -> int:
     return max(1, value)
 
 
-def detect(image, *, model=None, threshold: float | None = None) -> DetectionResult:
-    """Run the detector over an image and OCR each detected sticker.
-
-    The model is asked for boxes down to 0.05 confidence and filtered here, so
-    a "nothing found" answer can say *why*: no boxes at all, boxes under the
-    threshold, or a sticker whose number the OCR could not read.
-    """
-    import time
-
-    model = model or load_model()
-    threshold = confidence_threshold() if threshold is None else threshold
-    probe_conf = min(threshold, 0.05)
-    size = image_size()
-    started = time.perf_counter()
-
-    results = model.predict(source=image, conf=probe_conf, imgsz=size, verbose=False)
-    elapsed_ms = int((time.perf_counter() - started) * 1000)
-
-    result = DetectionResult(
-        model=str(model_path().name),
-        inference_ms=elapsed_ms,
-        frame_width=getattr(image, "width", 0) or 0,
-        frame_height=getattr(image, "height", 0) or 0,
-        threshold=float(threshold),
-        image_size=size,
-    )
+def _predict_rows(model, image, size: int, conf: float) -> list[tuple[float, int, list[int]]]:
+    """Run one forward pass and return sorted (confidence, class, bbox) rows."""
+    results = model.predict(source=image, conf=conf, imgsz=size, verbose=False)
     if not results:
-        return _explain(result)
-
+        return []
     boxes = getattr(results[0], "boxes", None)
     if boxes is None or len(boxes) == 0:
-        return _explain(result)
-
-    names = getattr(model, "names", {}) or {}
-    sticker_id = sticker_class_id(model)
-    result.sticker_class = sticker_id
-    limit = max_crops()
-    rows = []
-    for index in range(len(boxes)):
-        rows.append((
+        return []
+    rows = [
+        (
             float(boxes.conf[index].item()),
             int(boxes.cls[index].item()),
             [int(value) for value in boxes.xyxy[index].tolist()],
-        ))
+        )
+        for index in range(len(boxes))
+    ]
     # Ultralytics sorts by confidence already; do not rely on it.
     rows.sort(key=lambda row: row[0], reverse=True)
+    return rows
 
-    result.boxes_total = len(rows)
-    result.best_confidence = rows[0][0]
 
+def _ocr_rows(
+    image,
+    rows: list[tuple[float, int, list[int]]],
+    names: dict,
+    *,
+    threshold: float,
+    limit: int,
+    class_filter: int | None = None,
+) -> list[PlateCandidate]:
+    """Crop the boxes above `threshold` and OCR each one.
+
+    `class_filter` keeps a single class id; `None` keeps every class, which is
+    what a single-class number-plate checkpoint needs.
+    """
+    candidates: list[PlateCandidate] = []
     for confidence, class_id, coords in rows:
         if confidence < threshold:
             break  # everything after this one is weaker still
-        # Only the sticker class reaches the OCR. The red circle is a box around
-        # the same bus: cropping it costs an OCR call and yields no number.
-        if class_id != sticker_id:
-            result.boxes_other_class += 1
+        if class_filter is not None and class_id != class_filter:
             continue
-        if len(result.candidates) >= limit:
+        if len(candidates) >= limit:
             break
         class_name = names.get(class_id, CLASS_LABELS.get(class_id, str(class_id)))
         candidate = PlateCandidate(
@@ -484,15 +789,258 @@ def detect(image, *, model=None, threshold: float | None = None) -> DetectionRes
                 raw = ""
             candidate.raw_text = raw.strip()
             candidate.bus_number = normalize_plate(candidate.raw_text)
-        result.candidates.append(candidate)
+        candidates.append(candidate)
+    return candidates
 
+
+def _stage_outcome(candidates: list[PlateCandidate]) -> str:
+    if any(candidate.bus_number for candidate in candidates):
+        return "identified"
+    return "seen_unreadable" if candidates else "none"
+
+
+def _run_sticker_stage(image, result: DetectionResult, *, model=None, threshold: float, size: int) -> None:
+    """Stage 1: the trained sticker/red-circle checkpoint (best.pt)."""
+    import time
+
+    report = StageReport(name=STAGE_STICKER, enabled=True, model=str(model_path().name))
+    result.stages.append(report)
+    started = time.perf_counter()
+
+    # A missing sticker model is the one failure that still means "the detector
+    # is not installed": raise, so the API keeps answering 503 with the checklist.
+    model = model or load_model()
+
+    rows = _predict_rows(model, image, size, min(threshold, 0.05))
+    report.ran = True
+    report.ms = int((time.perf_counter() - started) * 1000)
+
+    names = getattr(model, "names", {}) or {}
+    sticker_id = sticker_class_id(model)
+    result.sticker_class = sticker_id
+    result.boxes_total = len(rows)
+    result.best_confidence = rows[0][0] if rows else 0.0
+    # Only the sticker class reaches the OCR. The red circle is a box around the
+    # same bus: cropping it costs an OCR call and yields no number.
+    result.boxes_other_class = sum(
+        1 for confidence, class_id, _ in rows if confidence >= threshold and class_id != sticker_id
+    )
+    result.candidates = _ocr_rows(
+        image,
+        rows,
+        names,
+        threshold=threshold,
+        limit=max_crops(),
+        class_filter=sticker_id,
+    )
     result.boxes_above_threshold = len(result.candidates)
+
+    report.found = len(result.candidates)
+    report.best_confidence = max((candidate.confidence for candidate in result.candidates), default=0.0)
+    report.result = _stage_outcome(result.candidates)
+
+
+def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: int) -> None:
+    """Stage 2: an optional number-plate checkpoint, used when no sticker read."""
+    import time
+
+    path = plate_model_path()
+    report = StageReport(name=STAGE_NUMBER_PLATE, enabled=True, model=str(path.name))
+    result.stages.append(report)
+    started = time.perf_counter()
+
+    if not path.exists():
+        report.skipped = "model_missing"
+        report.detail = (
+            f"No number-plate checkpoint at {path}. Train one (docs/TRAINING.md) and copy "
+            "best.pt there, or point VISION_PLATE_MODEL_PATH at it."
+        )
+        return
+    try:
+        model = load_stage_model(STAGE_NUMBER_PLATE)
+        rows = _predict_rows(model, image, size, min(threshold, 0.05))
+    except StageNotConfigured as exc:
+        report.skipped = exc.reason
+        report.detail = str(exc)
+        return
+    except Exception as exc:  # pragma: no cover - defensive
+        report.skipped = "error"
+        report.detail = f"{type(exc).__name__}: {exc}"
+        return
+
+    report.ran = True
+    report.ms = int((time.perf_counter() - started) * 1000)
+    names = getattr(model, "names", {}) or {}
+    result.plate_candidates = _ocr_rows(
+        image, rows, names, threshold=threshold, limit=max_crops()
+    )
+    report.found = len(result.plate_candidates)
+    report.best_confidence = max(
+        (candidate.confidence for candidate in result.plate_candidates), default=0.0
+    )
+    report.result = _stage_outcome(result.plate_candidates)
+
+
+def _run_vehicle_stage(image, result: DetectionResult, *, threshold: float, size: int) -> None:
+    """Stage 3: bus / car / bike classification, independent of the number."""
+    import time
+
+    path = vehicle_model_path()
+    report = StageReport(name=STAGE_VEHICLE, enabled=True, model=str(path.name))
+    result.stages.append(report)
+    started = time.perf_counter()
+
+    if not path.exists():
+        report.skipped = "model_missing"
+        report.detail = (
+            f"No vehicle checkpoint at {path}. Copy yolo11n.pt (or any COCO model) there, "
+            "or set VISION_VEHICLE_MODEL_PATH."
+        )
+        return
+    try:
+        model = load_stage_model(STAGE_VEHICLE)
+        rows = _predict_rows(model, image, size, min(vehicle_threshold(), 0.05))
+    except StageNotConfigured as exc:
+        report.skipped = exc.reason
+        report.detail = str(exc)
+        return
+    except Exception as exc:  # pragma: no cover - defensive
+        report.skipped = "error"
+        report.detail = f"{type(exc).__name__}: {exc}"
+        return
+
+    report.ran = True
+    report.ms = int((time.perf_counter() - started) * 1000)
+    names = getattr(model, "names", {}) or {}
+    accepted = vehicle_classes()
+    gate = vehicle_threshold()
+    best: tuple[float, str, list[int]] | None = None
+    for confidence, class_id, coords in rows:
+        if confidence < gate:
+            break
+        class_name = str(names.get(class_id, class_id)).strip().lower()
+        if class_name not in accepted:
+            continue
+        if best is None or confidence > best[0]:
+            best = (confidence, class_name, coords)
+
+    if best is None:
+        report.result = "none"
+        return
+    report.found = 1
+    report.best_confidence = best[0]
+    report.result = "identified"
+    result.vehicle = {
+        "label": vehicle_label(best[1]),
+        "class_name": best[1],
+        "confidence": round(float(best[0]), 4),
+        "bbox": list(best[2]),
+        "model": str(path.name),
+    }
+
+
+def _cascade_name(result: DetectionResult) -> str:
+    """Which stage produced the answer for this frame."""
+    if any(candidate.bus_number for candidate in result.candidates):
+        return STAGE_STICKER
+    if any(candidate.bus_number for candidate in result.plate_candidates):
+        return STAGE_NUMBER_PLATE
+    if result.vehicle:
+        return STAGE_VEHICLE
+    return CASCADE_NONE
+
+
+def detect(
+    image,
+    *,
+    model=None,
+    threshold: float | None = None,
+    stages=None,
+) -> DetectionResult:
+    """Run the detection cascade over an image.
+
+    Sticker first: `best.pt` localises the sticker panel and the OCR reads the
+    number out of it. If that yields no number, the optional number-plate
+    checkpoint gets a turn, and the optional vehicle stage classifies what is in
+    the frame (bus / car / bike / truck) whether or not a number was read.
+
+    `stages` overrides the per-host switches for this one call, e.g.
+    `{"sticker": False}`. Every stage is asked for boxes down to 0.05 and
+    filtered here, so a "nothing found" answer can say *why*.
+    """
+    import time
+
+    enabled = normalize_stages(stages)
+    threshold = confidence_threshold() if threshold is None else threshold
+    size = image_size()
+    started = time.perf_counter()
+
+    result = DetectionResult(
+        model=str(model_path().name),
+        frame_width=getattr(image, "width", 0) or 0,
+        frame_height=getattr(image, "height", 0) or 0,
+        threshold=float(threshold),
+        image_size=size,
+        stage_flags=dict(enabled),
+    )
+
+    if enabled[STAGE_STICKER]:
+        _run_sticker_stage(image, result, model=model, threshold=threshold, size=size)
+    else:
+        result.stages.append(StageReport(
+            name=STAGE_STICKER,
+            enabled=False,
+            model=str(model_path().name),
+            skipped="disabled",
+            detail="Sticker detection is switched off for this scan.",
+        ))
+
+    number_read = any(candidate.bus_number for candidate in result.candidates)
+    if not enabled[STAGE_NUMBER_PLATE]:
+        result.stages.append(StageReport(
+            name=STAGE_NUMBER_PLATE,
+            enabled=False,
+            model=str(plate_model_path().name),
+            skipped="disabled",
+            detail="Number-plate detection is switched off for this scan.",
+        ))
+    elif number_read:
+        result.stages.append(StageReport(
+            name=STAGE_NUMBER_PLATE,
+            enabled=True,
+            model=str(plate_model_path().name),
+            skipped="not_needed",
+            detail="The sticker stage already read a number from this frame.",
+        ))
+    else:
+        _run_plate_stage(image, result, threshold=threshold, size=size)
+
+    if enabled[STAGE_VEHICLE]:
+        _run_vehicle_stage(image, result, threshold=threshold, size=size)
+    else:
+        result.stages.append(StageReport(
+            name=STAGE_VEHICLE,
+            enabled=False,
+            model=str(vehicle_model_path().name),
+            skipped="disabled",
+            detail="Vehicle classification is switched off for this scan.",
+        ))
+
+    result.inference_ms = int((time.perf_counter() - started) * 1000)
+    result.cascade = _cascade_name(result)
     return _explain(result)
 
 
 def _explain(result: DetectionResult) -> DetectionResult:
     """Fill in `reason`/`advice` so the caller never has to guess."""
     readable = [candidate for candidate in result.candidates if candidate.bus_number]
+
+    # A number read by the plate stage is just as good an answer as one read
+    # from a sticker, so the reason stays "ok" whichever stage found it.
+    if not readable and any(candidate.bus_number for candidate in result.plate_candidates):
+        result.reason = "ok"
+        result.advice = ""
+        return result
 
     sticker_named = CLASS_LABELS.get(result.sticker_class, f"class {result.sticker_class}")
 
@@ -533,6 +1081,16 @@ def _explain(result: DetectionResult) -> DetectionResult:
     else:
         result.reason = "ok"
         result.advice = ""
+
+    if result.reason != "ok":
+        notes = [
+            f"{STAGE_LABELS.get(stage.name, stage.name)}: {stage.detail}"
+            for stage in result.stages
+            if stage.skipped in {"disabled", "model_missing", "not_installed", "load_failed", "error"}
+            and stage.detail
+        ]
+        if notes:
+            result.advice = " ".join([result.advice, *notes]).strip()
     return result
 
 
@@ -551,6 +1109,23 @@ def _crop(image, coords: list[int]):
     if right <= left or bottom <= top:
         return None
     return image.crop((left, top, right, bottom))
+
+
+def best_identification(result: DetectionResult) -> PlateCandidate | None:
+    """Best candidate across the cascade: a readable number always wins.
+
+    Sticker candidates are preferred over plate candidates at equal standing
+    because the sticker is the trained-in path and its crop is the one the
+    operators recognise.
+    """
+    for pool in (result.candidates, result.plate_candidates):
+        with_number = [candidate for candidate in pool if candidate.bus_number]
+        if with_number:
+            return max(with_number, key=lambda candidate: candidate.confidence)
+    pool = result.candidates or result.plate_candidates
+    if not pool:
+        return None
+    return max(pool, key=lambda candidate: candidate.confidence)
 
 
 def best_candidate(result: DetectionResult) -> PlateCandidate | None:
@@ -655,6 +1230,40 @@ def _ocr_usable() -> bool:
     return False
 
 
+def stage_status() -> list[dict[str, Any]]:
+    """Describe each cascade stage for the status endpoint and the panel."""
+    paths = {
+        STAGE_STICKER: model_path(),
+        STAGE_NUMBER_PLATE: plate_model_path(),
+        STAGE_VEHICLE: vehicle_model_path(),
+    }
+    default_paths = {
+        STAGE_STICKER: DEFAULT_MODEL_PATH,
+        STAGE_NUMBER_PLATE: DEFAULT_PLATE_MODEL_PATH,
+        STAGE_VEHICLE: DEFAULT_VEHICLE_MODEL_PATH,
+    }
+    notes = {
+        STAGE_STICKER: "Runs first: localises the sticker panel and OCRs the bus number.",
+        STAGE_NUMBER_PLATE: "Runs only when the sticker stage reads no number.",
+        STAGE_VEHICLE: "Classifies bus / car / bike / truck; runs every scan.",
+    }
+    rows: list[dict[str, Any]] = []
+    for stage in STAGE_ORDER:
+        path = paths[stage]
+        rows.append({
+            "name": stage,
+            "label": STAGE_LABELS[stage],
+            "enabled": stage_enabled(stage),
+            "env": STAGE_ENV[stage],
+            "model": str(path),
+            "model_present": path.exists(),
+            "bundled": path == default_paths[stage] and stage == STAGE_STICKER,
+            "required": stage == STAGE_STICKER,
+            "note": notes[stage],
+        })
+    return rows
+
+
 def vision_status() -> dict[str, Any]:
     """Describe what the vision stack can currently do."""
     path = model_path()
@@ -682,6 +1291,9 @@ def vision_status() -> dict[str, Any]:
             )
         },
         "classes_source": "model" if loaded is not None else "default",
+        # Every stage of the cascade, with the switch state the panel starts
+        # from and whether its optional checkpoint is on disk.
+        "stages": stage_status(),
         "available": False,
         "problems": [],
     }

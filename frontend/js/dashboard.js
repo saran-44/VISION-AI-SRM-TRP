@@ -5,6 +5,7 @@ import { analyticsParams, eventParams, exportParams, readFilters } from './filte
 import { mountShell } from './layout.js';
 import { connectLive } from './sse.js';
 import { renderCameras, renderCameraTile, requestWebcam, stopStream } from './cameras.js';
+import { appendStagesToForm, describeScan } from './detection-stages.js';
 import { renderEventsTable } from './tables.js';
 import { clear, el, formatDateTime, formatNumber, setState, showToast } from './ui.js';
 import { analytics, initFirebase } from './firebase.js';
@@ -122,6 +123,9 @@ async function scanFrame(blob, meta = {}) {
     body.append('gate', 'Gate 1 Entry');
     body.append('direction', 'IN');
     body.append('source', 'browser');
+    // The same switches the Test Lab shows: an operator who turned sticker
+    // detection off expects the dashboard to leave it off.
+    appendStagesToForm(body);
 
     // The session cookie is the credential here; the device API key must never
     // be shipped to a browser (it would be readable by any script on the page
@@ -140,10 +144,9 @@ async function scanFrame(blob, meta = {}) {
     const confidence = payload.confidence;
     if (plateNode) plateNode.textContent = busNumber || 'UNKNOWN';
     if (statusNode) {
-      statusNode.textContent = busNumber
-        ? `Read ${busNumber} (${Math.round((confidence || 0) * 100)}%)`
-        : 'No plate found in this frame';
-      statusNode.className = `scan-status ${busNumber ? '' : 'text-danger'}`.trim();
+      const { good, text } = describeScan(payload);
+      statusNode.textContent = text;
+      statusNode.className = `scan-status ${good ? '' : 'text-danger'}`.trim();
     }
     if (metaNode) {
       metaNode.textContent = payload.raw_text

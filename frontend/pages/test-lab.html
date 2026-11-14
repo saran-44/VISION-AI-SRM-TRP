@@ -36,10 +36,23 @@
       <div class="camera-grid">
         <div id="labCameraHost"></div>
       </div>
+      <div class="stage-panel">
+        <div class="stage-panel-head">
+          <h3 class="stage-panel-title"><i class='bx bx-slider-alt' aria-hidden="true"></i> Detection stages</h3>
+          <span id="stageStamp" class="card-subtitle">Sticker first, then the plate, then the vehicle type.</span>
+        </div>
+        <div id="stageToggles" class="stage-toggles" role="group" aria-label="Detection stages"></div>
+        <p class="muted stage-panel-note">
+          Switched off here applies to your next scans only; the host default is
+          <code>VISION_STAGE_STICKER</code>, <code>VISION_STAGE_PLATE</code> and
+          <code>VISION_STAGE_VEHICLE</code>. Your choice is remembered in this browser.
+        </p>
+      </div>
       <div class="scan-panel">
         <div id="labScanStatus" class="scan-status">Camera idle. Allow camera access, then press “Scan plate”.</div>
         <div id="labPlate" class="number-plate">—</div>
         <div id="labScanMeta" class="scan-meta">A captured frame is posted to <code>/api/detection/scan</code> with your session cookie.</div>
+        <div id="labStages" class="stage-chips" aria-live="polite"></div>
       </div>
     </section>
 

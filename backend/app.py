@@ -64,8 +64,10 @@ from .firebase_auth import (
 from .vision import (
     VisionUnavailable,
     best_candidate,
+    best_identification,
     decode_image,
     detect,
+    stage_overrides_from_payload,
     vision_status,
 )
 
@@ -614,7 +616,9 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
 
         try:
             image = decode_image(image_source)
-            result = detect(image)
+            # The panel can switch a stage off for this scan only; anything it
+            # does not name keeps the host default (VISION_STAGE_*).
+            result = detect(image, stages=stage_overrides_from_payload(payload))
         except VisionUnavailable as exc:
             # The detector is unavailable on this host (no model, no OCR
             # engine). Record the attempt so the gap is visible in the audit
@@ -642,7 +646,9 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             )
             return jsonify({"error": f"Detection failed: {type(exc).__name__}"}), 500
 
-        candidate = best_candidate(result)
+        # A number read by the plate stage is returned exactly like one read
+        # from a sticker: callers keep the same three fields.
+        candidate = best_identification(result) or best_candidate(result)
         response: dict[str, Any] = {
             "detection": result.to_dict(),
             "bus_number": candidate.bus_number if candidate else None,
@@ -652,6 +658,11 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             "reason": result.reason,
             "advice": result.advice,
             "source": payload.get("source", "device"),
+            # Additive: which stage answered, and what kind of vehicle it was.
+            "stage": result.cascade,
+            "cascade": result.cascade,
+            "vehicle": result.vehicle,
+            "stages": [stage.to_dict() for stage in result.stages],
         }
         record_audit(
             db,
