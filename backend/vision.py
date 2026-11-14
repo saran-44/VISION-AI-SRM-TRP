@@ -226,6 +226,11 @@ class DetectionResult:
     best_confidence: float = 0.0
     threshold: float = 0.0
     image_size: int = 0
+    # Frame diagnostics: measured, not guessed. `frame_sharpness` is the
+    # Laplacian variance (soft frames explain most "no box at all"), and
+    # `tiles` says whether the scan was tiled (see VISION_TILES).
+    frame_sharpness: float | None = None
+    tiles: int = 1
     reason: str = ""
     advice: str = ""
     # Cascade. `stages` records every stage that was asked to run, `cascade`
@@ -251,6 +256,10 @@ class DetectionResult:
             "best_confidence": round(float(self.best_confidence), 4),
             "threshold": round(float(self.threshold), 4),
             "image_size": self.image_size,
+            "frame_sharpness": (
+                round(float(self.frame_sharpness), 1) if self.frame_sharpness is not None else None
+            ),
+            "tiles": self.tiles,
             "reason": self.reason,
             "advice": self.advice,
             # Additive: clients that only know the sticker fields above keep
@@ -806,6 +815,124 @@ def decode_image(payload: bytes | str) -> "Any":
     return image
 
 
+def frame_sharpness(image) -> float | None:
+    """Laplacian variance of the frame, the same number `scan_image.py` prints.
+
+    "No box at all" has two very different causes — a sticker too small to
+    resolve, or a frame too soft to resolve anything — and this separates them
+    at the moment of failure instead of asking the operator to guess.
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        return None
+    try:
+        pixels = np.asarray(image.convert("L"), dtype=np.float64)
+    except Exception:  # noqa: BLE001 - a diagnostic must never break a scan
+        return None
+    if pixels.ndim != 2 or min(pixels.shape) < 3:
+        return None
+    lap = (
+        -4.0 * pixels[1:-1, 1:-1]
+        + pixels[:-2, 1:-1]
+        + pixels[2:, 1:-1]
+        + pixels[1:-1, :-2]
+        + pixels[1:-1, 2:]
+    )
+    return float(lap.var())
+
+
+def tile_settings() -> int:
+    """`VISION_TILES`: 1 (default, off), 2-4, or `auto`.
+
+    Tiling exists for one reason: a gate sticker that is ~20 px wide in a
+    1280×720 frame never survives the letterbox, while the same sticker is
+    comfortable once it is cropped out and enlarged. 0 means "decide per frame".
+    """
+    raw = os.getenv("VISION_TILES", "1").strip().lower()
+    if raw in {"", "off", "none", "false", "0"}:
+        return 1
+    if raw == "auto":
+        return 0
+    try:
+        return max(1, min(4, int(raw)))
+    except ValueError:
+        return 1
+
+
+def tile_count(width: int, height: int, requested: int | None = None) -> int:
+    """How many tiles per axis to use for a frame this size."""
+    wanted = tile_settings() if requested is None else requested
+    if wanted == 0:  # auto: a gate-sized frame gets 2×2, a small crop does not
+        return 2 if max(width, height) >= 1024 else 1
+    return max(1, min(4, wanted))
+
+
+def tile_boxes(width: int, height: int, tiles: int) -> list[tuple[int, int, int, int]]:
+    """Overlapping crops, 25 % of each tile, so a sticker on a seam is whole once."""
+    if tiles <= 1 or width <= 0 or height <= 0:
+        return [(0, 0, width, height)]
+    boxes: list[tuple[int, int, int, int]] = []
+    for row in range(tiles):
+        for column in range(tiles):
+            x0, y0 = int(column * width / tiles), int(row * height / tiles)
+            x1, y1 = int((column + 1) * width / tiles), int((row + 1) * height / tiles)
+            pad_x, pad_y = int((x1 - x0) * 0.25), int((y1 - y0) * 0.25)
+            boxes.append(
+                (max(0, x0 - pad_x), max(0, y0 - pad_y), min(width, x1 + pad_x), min(height, y1 + pad_y))
+            )
+    return boxes
+
+
+def box_iou(first: list[int], second: list[int]) -> float:
+    """Intersection over union of two [x1, y1, x2, y2] boxes."""
+    left = max(first[0], second[0])
+    top = max(first[1], second[1])
+    right = min(first[2], second[2])
+    bottom = min(first[3], second[3])
+    if right <= left or bottom <= top:
+        return 0.0
+    overlap = (right - left) * (bottom - top)
+    area_first = max(0, first[2] - first[0]) * max(0, first[3] - first[1])
+    area_second = max(0, second[2] - second[0]) * max(0, second[3] - second[1])
+    union = area_first + area_second - overlap
+    return overlap / union if union > 0 else 0.0
+
+
+def merge_rows(
+    rows: list[tuple[float, int, list[int]]], iou_threshold: float = 0.45
+) -> list[tuple[float, int, list[int]]]:
+    """One sticker found in two overlapping tiles stays one box.
+
+    Greedy NMS by confidence, per class: without it a tiled scan reports the
+    same sticker twice and the OCR is asked to read it twice.
+    """
+    kept: list[tuple[float, int, list[int]]] = []
+    for row in sorted(rows, key=lambda item: item[0], reverse=True):
+        duplicate = any(
+            other[1] == row[1] and box_iou(other[2], row[2]) >= iou_threshold for other in kept
+        )
+        if not duplicate:
+            kept.append(row)
+    return kept
+
+
+def _predict_tiled(model, image, size: int, conf: float, tiles: int):
+    """Run the detector over overlapping crops and merge what it finds."""
+    width = getattr(image, "width", 0) or 0
+    height = getattr(image, "height", 0) or 0
+    if tiles <= 1 or not width or not height:
+        return _predict_rows(model, image, size, conf)
+    found: list[tuple[float, int, list[int]]] = []
+    for x0, y0, x1, y1 in tile_boxes(width, height, tiles):
+        crop = image.crop((x0, y0, x1, y1))
+        for confidence, class_id, bbox in _predict_rows(model, crop, size, conf):
+            found.append(
+                (confidence, class_id, [bbox[0] + x0, bbox[1] + y0, bbox[2] + x0, bbox[3] + y0])
+            )
+    return merge_rows(found)
+
+
 def max_crops() -> int:
     """Maximum number of sticker crops that are OCR'd in a single frame."""
     try:
@@ -931,7 +1058,7 @@ def _run_sticker_stage(image, result: DetectionResult, *, model=None, threshold:
     # is not installed": raise, so the API keeps answering 503 with the checklist.
     model = model or load_model()
 
-    rows = _predict_rows(model, image, size, min(threshold, 0.05))
+    rows = _predict_tiled(model, image, size, min(threshold, 0.05), result.tiles)
     report.ran = True
     report.ms = int((time.perf_counter() - started) * 1000)
 
@@ -1114,6 +1241,10 @@ def detect(
         threshold=float(threshold),
         image_size=size,
         stage_flags=dict(enabled),
+        frame_sharpness=frame_sharpness(image),
+        tiles=tile_count(
+            getattr(image, "width", 0) or 0, getattr(image, "height", 0) or 0
+        ),
     )
 
     if enabled[STAGE_STICKER]:
@@ -1163,6 +1294,37 @@ def detect(
     return _explain(result)
 
 
+def no_detection_advice(result: DetectionResult) -> str:
+    """Explain a zero-box scan with the numbers that were actually measured.
+
+    The old text ("point the camera at the sticker, fill more of the frame")
+    was the same sentence for a lens that never focused and for a sticker 15 px
+    wide, so it could not be acted on. This names the frame size, the sharpness
+    and whether the scan was tiled, then gives the fix that matches.
+    """
+    facts = []
+    if result.frame_width and result.frame_height:
+        facts.append(f"frame {result.frame_width}×{result.frame_height}")
+    soft = result.frame_sharpness is not None and result.frame_sharpness < 60
+    if result.frame_sharpness is not None:
+        facts.append(f"sharpness {result.frame_sharpness:.0f}" + (" (soft)" if soft else ""))
+    if result.tiles > 1:
+        facts.append(f"{result.tiles}×{result.tiles} tiled at {result.image_size}px")
+    measured = f" — {', '.join(facts)}" if facts else ""
+
+    hints = []
+    if soft:
+        hints.append("clean the lens and let the camera focus before scanning again")
+    if result.tiles <= 1:
+        hints.append(
+            "if the sticker is smaller than about 45 px in the frame, set VISION_TILES=2 "
+            "(or auto) to infer on overlapping crops"
+        )
+    hints.append("move closer so the sticker fills more of the frame")
+    hints.append("confirm the checkpoint matches these stickers: python scripts/inspect_model.py")
+    return f"No box at all, even at 0.05 confidence{measured}. Try: " + "; ".join(hints) + "."
+
+
 def _explain(result: DetectionResult) -> DetectionResult:
     """Fill in `reason`/`advice` so the caller never has to guess."""
     readable = [candidate for candidate in result.candidates if candidate.bus_number]
@@ -1178,11 +1340,7 @@ def _explain(result: DetectionResult) -> DetectionResult:
 
     if result.boxes_total == 0:
         result.reason = "no_detection"
-        result.advice = (
-            "No box at all, even at 0.05 confidence. Point the camera at the sticker, "
-            "fill more of the frame with it, and check the model matches these stickers: "
-            "python scripts/inspect_model.py"
-        )
+        result.advice = no_detection_advice(result)
     elif not result.candidates and result.boxes_other_class:
         # The red circle was found, the sticker panel was not: usually a bus
         # whose sticker is dirty, in shadow, or half out of frame.

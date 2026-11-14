@@ -297,11 +297,53 @@ problems and used to look identical in the UI:
 
 | `reason` | What happened | Fix |
 | --- | --- | --- |
-| `no_detection` | No box at all, even at 0.05 confidence | Camera not pointing at the sticker, sticker too far/small, or the checkpoint does not match these stickers — `python scripts/inspect_model.py` |
+| `no_detection` | No box at all, even at 0.05 confidence | The advice now carries the measured frame size, sharpness and tile count; see §3a |
 | `other_class` | Only the red circle (class 0) was found, never the sticker (class 1) | Sticker dirty/shadowed/half out of frame; check the mounting, or `VISION_STICKER_CLASS` |
 | `below_threshold` | Sticker boxes found, all weaker than `VISION_CONFIDENCE` | `VISION_CONFIDENCE=0.2` to confirm it is being seen; raise `VISION_IMAGE_SIZE` if the sticker is small |
 | `unreadable` | Sticker found and cropped, but the OCR read no text | Get closer, `VISION_IMAGE_SIZE=960`, or install a stronger OCR engine |
 | `ok` | A bus number was read | — |
+
+### §3a. "No box at all" — measure it, don't guess
+
+A zero-box scan used to return one sentence for every cause: a lens that never
+focused and a sticker fifteen pixels wide read identically. Every scan now
+carries the facts:
+
+```json
+"frame": { "width": 1280, "height": 720, "sharpness": 34.4, "tiles": 1, "saved": "…/failed-frames/fail-20261114-231502.jpg" }
+```
+
+| Field | Meaning | Read it as |
+| --- | --- | --- |
+| `frame.width` / `height` | The frame **after** `decode_image` (downscale targets apply) | a 640×480 source can never resolve a sticker the way a 12 MP photo does |
+| `frame.sharpness` | Laplacian variance, the same number `scan_image.py` prints and `frame_report.py` reports | **under 60 means soft**: nothing will be detected, whatever the threshold |
+| `frame.tiles` | Tiles per axis used for the sticker stage (1 = whole frame) | 1 with a sticker under ~45 px means resolution is the limit |
+| `frame.saved` | JPEG of the frame that produced no number, when `VISION_SAVE_FAILURES` is on | `python scripts/frame_report.py <path>` prints an ASCII luminance map of what the detector saw |
+
+The advice string now repeats those numbers, and suggests the fix that matches:
+
+```
+No box at all, even at 0.05 confidence — frame 1280×720, sharpness 34 (soft),
+1×1 tiled at 1280px. Try: clean the lens and let the camera focus before
+scanning again; if the sticker is smaller than about 45 px in the frame, set
+VISION_TILES=2 (or auto) to infer on overlapping crops; move closer so the
+sticker fills more of the frame; confirm the checkpoint matches these stickers…
+```
+
+**Tiling.** `VISION_TILES=1` (default) is the validated baseline: one pass over
+the whole frame. `VISION_TILES=2..4` (or `auto`, which means 2 for anything
+1024 px or wider) runs the sticker checkpoint over overlapping crops — 25 %
+overlap, so a sticker on a seam is whole in one of them — and merges the boxes
+with greedy NMS per class, so one sticker found in two tiles stays one box.
+Each tile is scaled to `VISION_IMAGE_SIZE`, so a 2×2 tiling gives a small
+sticker roughly twice the pixels it had. It costs tiles² passes: 4× the sticker
+stage time (~3 s becomes ~13 s at 1280 px). Turn it on where the camera is far
+from the bus, leave it off where it already works.
+
+```bash
+python scripts/scan_image.py gate-frame.jpg --tiles 2
+VISION_TILES=auto VISION_IMAGE_SIZE=960 python scripts/scan_image.py --camera 0
+```
 
 The model is asked for boxes down to 0.05 so these counts are real, then
 filtered in Python — the threshold still decides what becomes a candidate.

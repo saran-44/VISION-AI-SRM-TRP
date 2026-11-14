@@ -247,6 +247,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--conf", type=float, default=None, help="override VISION_CONFIDENCE")
     parser.add_argument("--imgsz", type=int, default=None, help="override VISION_IMAGE_SIZE")
     parser.add_argument(
+        "--tiles",
+        default=None,
+        help=(
+            "override VISION_TILES: 1 (whole frame), 2-4 (overlapping crops), or auto. "
+            "Tiling is how a sticker that is only ~20 px wide in a gate frame gets enough "
+            "pixels to be detected; it costs tiles² inference passes."
+        ),
+    )
+    parser.add_argument(
         "--stages",
         default=None,
         help=(
@@ -281,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["VISION_CONFIDENCE"] = str(args.conf)
     if args.imgsz is not None:
         os.environ["VISION_IMAGE_SIZE"] = str(args.imgsz)
+    if args.tiles is not None:
+        os.environ["VISION_TILES"] = str(args.tiles)
 
     from backend.vision import (
         ImageRejected,
@@ -334,6 +345,9 @@ def main(argv: list[str] | None = None) -> int:
     candidate = best_identification(result)
     print(f"image       : {path} ({result.frame_width}×{result.frame_height})")
     print(f"model       : {result.model}  @ {result.image_size}px, threshold {result.threshold:.2f}")
+    if result.frame_sharpness is not None:
+        tiled = f", {result.tiles}×{result.tiles} tiled" if result.tiles > 1 else ""
+        print(f"frame       : sharpness {result.frame_sharpness:.0f}{tiled}")
     print(f"inference   : {result.inference_ms} ms")
     print(f"boxes       : {result.boxes_total} found, {result.boxes_above_threshold} above threshold, best {result.best_confidence:.2f}")
     print(f"class filter: only class {result.sticker_class} is OCR'd"
@@ -358,6 +372,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"RESULT      : no bus number — reason={result.reason}")
         print(f"ADVICE      : {result.advice}")
+        saved = (payload.get("frame") or {}).get("saved")
+        if saved:
+            print(f"SAVED       : {saved}  (what the detector saw: python scripts/frame_report.py \"{saved}\")")
     return 0
 
 

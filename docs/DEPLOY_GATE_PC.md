@@ -218,7 +218,8 @@ to delete it on purpose.
 | `camera: answered text/html, not an image` | snapshot path wrong, or the camera wants a login | check the path per §3 |
 | `camera: could not open the RTSP stream` but the network answers | H.265-only stream | switch the camera's sub/main stream to H.264 |
 | `sharpness` under 60 | soft frame: focus, dirt, or a 720p substream | full-resolution snapshot, clean lens |
-| `detection: no box at all` | sticker smaller than ~45 px in the frame | move the camera closer, raise `VISION_IMAGE_SIZE`, or use the full-resolution snapshot |
+| `no box at all` | sticker too small, or the frame is soft | read the `frame` line: `sharpness` under 60 → clean the lens/let it focus; otherwise move closer or set `VISION_TILES=auto` (costs 4× the sticker stage) |
+| Failed scans leave no trace to inspect | `VISION_SAVE_FAILURES=false` | unset it: every scan that reads nothing writes `C:\ProgramData\VisionAI\failed-frames\fail-*.jpg` (newest 40), readable with `python scripts/frame_report.py` |
 | `port: already in use` | the portal is already running | open `http://127.0.0.1:8080/`; a second start reuses the running instance |
 | Browser says "site can't be reached" | the portal is not running | tray icon → Open portal, or Start Menu → the app |
 | `--setup` said "Use at least 12 characters" | the wizard rejects short passwords: it can create a `head_admin` that edits every record | run `--setup` again; it asks three times before stopping, and writes nothing until a password is accepted |

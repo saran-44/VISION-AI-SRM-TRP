@@ -74,6 +74,36 @@ from .vision import (
 )
 
 
+def failed_frame_dir() -> Path:
+    """Where a scan that produced no number leaves its frame."""
+    base = Path(os.getenv("VISION_DATA_DIR", "").strip() or Path.home() / "VisionAI")
+    return base / "failed-frames"
+
+
+def save_failed_frame(image) -> str | None:
+    """Keep the frame behind a failed scan so it can be looked at afterwards.
+
+    "No box at all" is unanswerable without the frame: the operator has moved
+    the bus by the time anyone reads the log. The newest 40 are kept;
+    `VISION_SAVE_FAILURES=false` turns it off.
+    """
+    if os.getenv("VISION_SAVE_FAILURES", "true").strip().lower() in {"0", "false", "no", "off"}:
+        return None
+    try:
+        directory = failed_frame_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / f"fail-{datetime.now():%Y%m%d-%H%M%S}.jpg"
+        image.convert("RGB").save(target, format="JPEG", quality=88)
+        for stale in sorted(directory.glob("fail-*.jpg"))[:-40]:
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+        return str(target)
+    except Exception:  # noqa: BLE001 - a diagnostic must never fail the scan
+        return None
+
+
 def create_app(config: Config | None = None, database_engine=None) -> Flask:
     config = config or Config.from_env()
     app = Flask(__name__, static_folder=None)
@@ -769,6 +799,22 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             "vehicle": result.vehicle,
             "stages": [stage.to_dict() for stage in result.stages],
         }
+        # Measured frame facts travel with every answer, and a scan that read
+        # nothing also leaves its frame on disk for `scripts/frame_report.py`.
+        response["frame"] = {
+            "width": result.frame_width,
+            "height": result.frame_height,
+            "sharpness": (
+                round(float(result.frame_sharpness), 1)
+                if result.frame_sharpness is not None
+                else None
+            ),
+            "tiles": result.tiles,
+            "saved": None,
+        }
+        if not (candidate and candidate.bus_number):
+            response["frame"]["saved"] = save_failed_frame(image)
+
         record_audit(
             db,
             {"email": "device-client", "role": "device"},
