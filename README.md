@@ -232,6 +232,10 @@ contract, the flag rules and the OCR engine options are in
 [`docs/DETECTION.md`](docs/DETECTION.md) and
 [`docs/EVENT_CONTRACT.md`](docs/EVENT_CONTRACT.md).
 
+Training a number-plate model of your own — which base model to pick, the
+dataset rules, the free-training route and how to verify the checkpoint before
+swapping it in — is in [`docs/TRAINING.md`](docs/TRAINING.md).
+
 **Flag rules** (computed server-side, shown with their reason in the UI):
 
 | Reason | Rule |
