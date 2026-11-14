@@ -36,6 +36,18 @@ class LoginSchema(StrictModel):
         return value.lower()
 
 
+class DemoLoginSchema(LoginSchema):
+    """Login payload for DEMO_MODE only.
+
+    The demo account uses the short, well-known password ``admin``, which the
+    production policy deliberately refuses. This schema exists solely so that
+    the isolated demo can sign in; ``create_app`` only reaches for it when
+    ``DEMO_MODE`` is on, and config validation refuses that in production.
+    """
+
+    password: str = Field(min_length=1, max_length=128)
+
+
 class FirebaseTokenSchema(StrictModel):
     """The Firebase ID token handed over after a successful Firebase sign-in."""
 

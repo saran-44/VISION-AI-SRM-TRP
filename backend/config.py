@@ -11,6 +11,11 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env", override=False)
 
+# The demo account created only when DEMO_MODE is on. The address is reserved
+# (`.local`), so it can never receive mail or collide with a real mailbox.
+DEMO_ADMIN_EMAIL = "admin@demo.local"
+DEMO_ADMIN_PASSWORD = "admin"
+
 
 def _bool(name: str, default: bool = False) -> bool:
     return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
@@ -126,6 +131,11 @@ class Config:
     firebase_auto_provision: bool = True
     firebase_default_role: str = "transport_office"
     legacy_password_login_enabled: bool = True
+    # A deliberately isolated testing mode: fake sign-in alias, Test Lab page
+    # and a loud banner. It is refused outright in production.
+    demo_mode: bool = False
+    # Escape hatch for a documented, temporary production exception.
+    allow_legacy_login_in_production: bool = False
 
     @classmethod
     def from_env(cls, overrides: dict | None = None) -> "Config":
@@ -166,7 +176,13 @@ class Config:
             firebase_auto_provision=_bool("FIREBASE_AUTO_PROVISION", True),
             firebase_default_role=os.getenv("FIREBASE_DEFAULT_ROLE", "transport_office").strip()
             or "transport_office",
-            legacy_password_login_enabled=_bool("LEGACY_PASSWORD_LOGIN_ENABLED", True),
+            # Fail closed in production: password sign-in must be asked for
+            # explicitly there, and validate() insists on a second opt-in.
+            legacy_password_login_enabled=_bool(
+                "LEGACY_PASSWORD_LOGIN_ENABLED", environment != "production"
+            ),
+            demo_mode=_bool("DEMO_MODE", False),
+            allow_legacy_login_in_production=_bool("ALLOW_LEGACY_LOGIN_IN_PRODUCTION", False),
         )
         if overrides:
             cfg = replace(cfg, **overrides)
@@ -199,6 +215,17 @@ class Config:
                 raise RuntimeError("JWT_SECRET must be a strong random value in production")
             if self.debug:
                 raise RuntimeError("Flask debug must be disabled in production")
+            if self.demo_mode:
+                raise RuntimeError(
+                    "DEMO_MODE must never be enabled in production: it seeds a known "
+                    "admin password and exposes the Test Lab page."
+                )
+            if self.legacy_password_login_enabled and not self.allow_legacy_login_in_production:
+                raise RuntimeError(
+                    "Password sign-in must be off in production; use Firebase sign-in. "
+                    "Set LEGACY_PASSWORD_LOGIN_ENABLED=false, or acknowledge the risk "
+                    "with ALLOW_LEGACY_LOGIN_IN_PRODUCTION=true for a temporary exception."
+                )
         if not 0 < self.ocr_confidence_threshold < 1:
             raise RuntimeError("OCR_CONFIDENCE_THRESHOLD must be between 0 and 1")
         if self.overstay_hours <= 0:

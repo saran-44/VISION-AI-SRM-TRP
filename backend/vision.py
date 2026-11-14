@@ -286,19 +286,40 @@ def normalize_plate(text: str) -> str:
 # --------------------------------------------------------------------------- #
 # Detection
 # --------------------------------------------------------------------------- #
+# Frame guards. A 1 MB request body can still decode into a gigantic bitmap,
+# so the pixel count is capped before any pixel data is allocated, and the
+# side length is capped before the decoder touches it.
+MAX_IMAGE_PIXELS = 12_000_000  # ~12 MP, comfortably above 4K video frames
+MAX_IMAGE_SIDE = 6_000
+MAX_IMAGE_BYTES = 8_000_000
+
+
 def decode_image(payload: bytes | str) -> "Any":
     """Decode raw image bytes or a base64 string into a PIL image."""
     Image = _require_pil()
+    # PIL's own bomb guard covers formats that declare a huge canvas.
+    Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
     if isinstance(payload, str):
+        if len(payload) > MAX_IMAGE_BYTES * 2:
+            raise VisionUnavailable("The image payload is too large")
         data = payload.split(",", 1)[-1] if payload.startswith("data:") else payload
         try:
             payload = base64.b64decode(data, validate=False)
         except (binascii.Error, ValueError) as exc:
             raise VisionUnavailable("The image payload is not valid base64") from exc
+    if len(payload) > MAX_IMAGE_BYTES:
+        raise VisionUnavailable("The image payload is too large")
     try:
-        image = Image.open(io.BytesIO(payload))
-        image.load()
-        return image
+        with Image.open(io.BytesIO(payload)) as probe:
+            width, height = probe.size
+            if width * height > MAX_IMAGE_PIXELS or max(width, height) > MAX_IMAGE_SIDE:
+                raise VisionUnavailable(
+                    f"Image is larger than the {MAX_IMAGE_PIXELS // 1_000_000} MP limit"
+                )
+            probe.load()
+            return probe.copy()
+    except VisionUnavailable:
+        raise
     except Exception as exc:
         raise VisionUnavailable("The uploaded data is not a readable image") from exc
 

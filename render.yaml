@@ -72,6 +72,9 @@ services:
         value: transport_office
       - key: LEGACY_PASSWORD_LOGIN_ENABLED
         value: "false"
+      # NEVER add DEMO_MODE to this service. It seeds a known admin/admin
+      # account and exposes /test-lab; validation refuses it in production.
+      # Demo and Test Lab runs use scripts/run_preview.py on a laptop instead.
       # ---------------------------------------------------------------- secrets
       # Supabase session-pooler URL. Must end with ?sslmode=verify-full.
       - key: DATABASE_URL
