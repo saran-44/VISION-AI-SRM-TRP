@@ -16,6 +16,11 @@ load_dotenv(ROOT / ".env", override=False)
 DEMO_ADMIN_EMAIL = "admin@demo.local"
 DEMO_ADMIN_PASSWORD = "admin"
 
+# The gate installation: the whole portal on the gate PC, with its own file
+# database, so a scan is recorded whether or not the campus link is up. It is a
+# real installation, not a bench: the production secret and demo rules apply.
+GATE_ENVIRONMENT = "gate"
+
 
 def _bool(name: str, default: bool = False) -> bool:
     return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
@@ -123,6 +128,9 @@ class Config:
     ocr_confidence_threshold: float = 0.75
     overstay_hours: float = 12.0
     camera_streams: dict[str, dict[str, str]] = field(default_factory=dict)
+    # The camera the gate PC grabs frames from itself: an HTTP snapshot URL, an
+    # RTSP URL, or usb:0. Empty means "use the browser camera only".
+    camera_source: str = ""
     frontend_dir: Path = ROOT / "frontend"
     firebase: dict[str, str] = field(default_factory=dict)
     firebase_project_id: str = ""
@@ -164,6 +172,7 @@ class Config:
             ocr_confidence_threshold=_float("OCR_CONFIDENCE_THRESHOLD", 0.75),
             overstay_hours=_float("OVERSTAY_HOURS", 12.0),
             camera_streams=camera_streams,
+            camera_source=os.getenv("CAMERA_SOURCE", "").strip(),
             firebase=firebase,
             firebase_project_id=firebase.get("projectId", ""),
             # Firebase sign-in is only usable when a project id is configured.
@@ -197,8 +206,29 @@ class Config:
             if parts.scheme not in {"postgresql", "postgres", "sqlite"}:
                 raise RuntimeError("DATABASE_URL has an unsupported scheme")
             if parts.scheme == "sqlite":
-                if self.environment == "production" or self.database_url != "sqlite:///:memory:":
-                    raise RuntimeError("SQLite is restricted to disposable in-memory previews and tests")
+                # In-memory SQLite is the disposable preview/test database. A
+                # *file* database is the gate installation's own store: the gate
+                # PC must record events with no network and without a second
+                # service to install and back up. It is refused everywhere else,
+                # so a stray DATABASE_URL can never quietly become a local store.
+                in_memory = self.database_url in {"sqlite://", "sqlite:///:memory:"}
+                if self.environment == "production":
+                    raise RuntimeError(
+                        "Production DATABASE_URL must be PostgreSQL; the gate installation "
+                        "is the only deployment that stores rows in SQLite"
+                    )
+                elif in_memory:
+                    pass  # the disposable preview/test database
+                elif self.environment != GATE_ENVIRONMENT:
+                    raise RuntimeError(
+                        "SQLite is restricted to disposable in-memory previews and tests, and to a "
+                        "file database when ENVIRONMENT=gate"
+                    )
+                elif not parts.path.strip("/"):
+                    raise RuntimeError(
+                        "ENVIRONMENT=gate needs a database file, for example "
+                        "sqlite:///C:/ProgramData/VisionAI/data/gate.db"
+                    )
             else:
                 if not parts.hostname or not parts.path.lstrip("/"):
                     raise RuntimeError("DATABASE_URL must include a host and database")
@@ -225,6 +255,39 @@ class Config:
                     "Password sign-in must be off in production; use Firebase sign-in. "
                     "Set LEGACY_PASSWORD_LOGIN_ENABLED=false, or acknowledge the risk "
                     "with ALLOW_LEGACY_LOGIN_IN_PRODUCTION=true for a temporary exception."
+                )
+        if self.environment == GATE_ENVIRONMENT:
+            # The gate PC is a real installation on a real campus, so it gets the
+            # production secret and demo rules. The two differences are
+            # deliberate: it may keep its own file database, and it must keep a
+            # way for the gate operator to sign in without a network round trip.
+            if len(self.jwt_secret) < 32 or self.jwt_secret.lower().startswith(("replace", "change")):
+                raise RuntimeError("JWT_SECRET must be a strong random value on the gate PC")
+            if self.demo_mode:
+                raise RuntimeError(
+                    "DEMO_MODE must never be enabled on the gate PC: it seeds a known admin "
+                    "password and exposes the Test Lab page."
+                )
+            if self.debug:
+                raise RuntimeError("Flask debug must be disabled on the gate PC")
+            if not (self.legacy_password_login_enabled or self.firebase_auth_enabled):
+                raise RuntimeError(
+                    "ENVIRONMENT=gate with no way to sign in: set "
+                    "LEGACY_PASSWORD_LOGIN_ENABLED=true for the gate's own password login, "
+                    "or configure Firebase sign-in."
+                )
+            if self.trust_proxy_headers:
+                raise RuntimeError(
+                    "ENVIRONMENT=gate serves the portal itself; there is no proxy in front of it, "
+                    "so TRUST_PROXY_HEADERS must stay off"
+                )
+        if self.camera_source:
+            from .frame_source import source_kind
+
+            if not source_kind(self.camera_source):
+                # Never echo the value: it may contain a camera password.
+                raise RuntimeError(
+                    "CAMERA_SOURCE must be an http(s) snapshot URL, an rtsp:// URL, or usb:0"
                 )
         if not 0 < self.ocr_confidence_threshold < 1:
             raise RuntimeError("OCR_CONFIDENCE_THRESHOLD must be between 0 and 1")

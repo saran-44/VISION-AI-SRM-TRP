@@ -5,6 +5,17 @@ console, and why raw RTSP is never loaded directly by a browser.
 
 ---
 
+## 0. Detection does not need a browser camera
+
+The table below is about **live video** in the console. Detection is a different
+path: `backend/frame_source.py` lets the gate PC pull one still frame itself from
+an HTTP snapshot endpoint (Hikvision/Axis/Dahua), an RTSP stream, or a USB device,
+and `POST /api/detection/scan` with `{"capture": true}` scans it in one call.
+That is the supported high-end-camera path for the gate PC — see
+[`DEPLOY_GATE_PC.md`](DEPLOY_GATE_PC.md) §3. Live video still needs HLS or MJPEG.
+
+---
+
 ## 1. The short version
 
 | Source | Where it runs | How the browser gets it | Status |
@@ -13,6 +24,7 @@ console, and why raw RTSP is never loaded directly by a browser.
 | **HLS** | NVR/DVR or a transcoder gateway | `.m3u8` over HTTP(S) via `hls.js` | ✅ Supported |
 | **MJPEG** | NVR/DVR or the backend proxy | `multipart/x-mixed-replace` over HTTP(S) | ✅ Supported |
 | **Raw RTSP** | The IP camera | *impossible directly* — needs a gateway | ⚠️ Gateway required |
+| **Server-side snapshot** | The gate PC | *no browser at all* — `GET /api/camera/snapshot` | ✅ `CAMERA_SOURCE` |
 
 > **Setting up a real NVR/DVR or IP camera?** The step-by-step gateway
 > configuration (MediaMTX, FFmpeg for MJPEG, the four camera IDs, verification

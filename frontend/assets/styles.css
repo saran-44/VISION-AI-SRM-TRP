@@ -1319,6 +1319,7 @@ body.dark-theme {
 .switch-row { display: flex; align-items: center; gap: .6rem; }
 .switch-row input { width: auto; accent-color: var(--primary); }
 
+.scan-camera-btn { margin-top: 0.75rem; width: 100%; }
 .btn-danger { background: var(--danger-bg); color: var(--danger); }
 .btn-danger:hover { background: var(--danger); color: white; }
 .btn-sm { padding: .45rem .75rem; font-size: .8rem; border-radius: .6rem; }

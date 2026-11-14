@@ -3,7 +3,9 @@
 The small table facade intentionally supports only the predicates used by the
 application. All values are bound parameters and all columns are predefined.
 The production schema is installed separately by an administrator; the runtime
-role never needs DDL privileges. SQLite in-memory is for isolated previews/tests.
+role never needs DDL privileges. SQLite in-memory is for isolated previews/tests;
+a SQLite *file* is the gate installation's own store (`ENVIRONMENT=gate`), where
+no administrator is available to run a migration by hand.
 """
 from __future__ import annotations
 
@@ -14,6 +16,7 @@ import threading
 import time
 from contextlib import nullcontext
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -23,9 +26,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import DBAPIError, OperationalError, SQLAlchemyError
+from sqlalchemy.engine import make_url
+from sqlalchemy.event import listen
 from sqlalchemy.pool import StaticPool
 
-from .config import Config
+from .config import GATE_ENVIRONMENT, Config
 
 logger = logging.getLogger(__name__)
 SCHEMA = "transport_portal"
@@ -115,8 +120,12 @@ def create_database_engine(url: str):
         # across preview threads so a concurrent request cannot roll back another.
         engine._transport_preview_lock = threading.RLock()
         return engine
+    if url.startswith("sqlite:///"):
+        return create_local_sqlite_engine(url)
     if not url.startswith(("postgresql://", "postgres://")):
-        raise RuntimeError("DATABASE_URL must use PostgreSQL or the isolated preview database")
+        raise RuntimeError(
+            "DATABASE_URL must use PostgreSQL, the isolated preview database, or the gate file database"
+        )
     normalized = "postgresql+psycopg://" + url.split("://", 1)[1]
     # No prepared statements/session state: compatible with Supabase transaction
     # pooling. Bound connection counts also protect small Supabase instances.
@@ -124,9 +133,52 @@ def create_database_engine(url: str):
                          pool_size=2, max_overflow=0, pool_pre_ping=True, hide_parameters=True)
 
 
-def initialize_preview(engine) -> None:
-    """Only create schema automatically for the disposable in-memory database."""
-    if engine.dialect.name != "sqlite" or engine.url.database not in (None, "", ":memory:"):
+def create_local_sqlite_engine(url: str):
+    """The gate PC's own database: one file, no server, no administrator.
+
+    Same lock as the preview engine: SQLite serialises writers anyway, and a
+    single lock turns the "database is locked" error a waitress thread would
+    otherwise hit into a short wait. WAL keeps reads running while an event is
+    being written, and `busy_timeout` covers a backup that copies the file.
+    """
+    path = make_url(url).database
+    if not path or path == ":memory:":
+        raise RuntimeError("The gate database needs a file path, not an in-memory database")
+    Path(path).expanduser().parent.mkdir(parents=True, exist_ok=True)
+    engine = create_engine(
+        url,
+        connect_args={"check_same_thread": False, "timeout": 30.0},
+        poolclass=StaticPool,
+        execution_options={"schema_translate_map": {SCHEMA: None}},
+        hide_parameters=True,
+    )
+
+    def _pragmas(dbapi_connection, _record):
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
+
+    listen(engine, "connect", _pragmas)
+    engine._transport_preview_lock = threading.RLock()
+    return engine
+
+
+def initialize_preview(engine, allow_file: bool = False) -> None:
+    """Create the schema automatically where nobody can run a migration.
+
+    That is the disposable in-memory database, and the gate PC's own file
+    database. Every other host still installs the schema by hand, so a
+    typo in DATABASE_URL cannot silently create an empty production database.
+    """
+    if engine.dialect.name != "sqlite":
+        raise RuntimeError("Automatic initialization is restricted to SQLite")
+    database = engine.url.database
+    if database not in (None, "", ":memory:") and not allow_file:
         raise RuntimeError("Automatic initialization is restricted to in-memory SQLite")
     metadata.create_all(engine)
     with engine.begin() as conn:
@@ -291,7 +343,7 @@ def get_database(config: Config, engine=None):
     engine = engine or create_database_engine(config.database_url)
     try:
         if engine.dialect.name == "sqlite":
-            initialize_preview(engine)
+            initialize_preview(engine, allow_file=config.environment == GATE_ENVIRONMENT)
         with engine.connect() as conn:
             versions = conn.execute(select(schema_version.c.version)).scalars().all()
             if versions != [SCHEMA_VERSION]:
