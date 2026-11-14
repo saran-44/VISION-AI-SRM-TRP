@@ -1262,15 +1262,24 @@ body.login-page {
 }
 
 /* ==========================================================================
-   Glass3D surface (opt-in)
+   Glass3D surface
    --------------------------------------------------------------------------
-   Add `class="glass3d"` to a container to give it the frosted, layered look.
-   It is opt-in on purpose: the effect needs its own ::before/::after, so a
-   component that already uses those pseudo-elements (for example .stat-card)
-   must not receive the class.
+   The frosted, layered surface every card uses: add `class="glass3d"` next to
+   `class="card"`. It is a class rather than a rule on `.card` because the
+   effect needs both pseudo-elements, and a component that already spends one
+   (`.stat-card::before` draws its accent bar) would silently lose it.
 
-   The noise texture is an inline SVG data URI, not a remote image: the CSP
-   only allows `data:` here, and the app must render identically offline.
+   Two deliberate differences from the reference snippet this was built from:
+
+   1. The noise texture is an inline SVG data URI, not
+      transparenttextures.com/egg-shell.png. The CSP only allows `data:` for
+      images here, the portal must render identically offline and on an
+      intranet with no route to the public internet, and a third-party request
+      on every page load is a privacy answer nobody asked for. Same grain.
+   2. `--color-glass3d` is a tint, not `transparent`. With a 32 px backdrop
+      blur over the light theme's near-white background, a fully transparent
+      layer leaves text floating on whatever is behind the card; the tint is
+      what keeps body text legible in both themes.
    ========================================================================== */
 .glass3d {
     --filter-glass3d: blur(32px) brightness(0.85) saturate(2.5);
@@ -1333,6 +1342,16 @@ body.dark-theme .glass3d {
 .glass3d > * {
     position: relative;
     z-index: 6;
+}
+
+/* A phone can show ten of these at once. 32 px of backdrop blur over a whole
+   screen is expensive on integrated graphics, so the small-screen layer is
+   thinner and the grain stays: the surface still reads as glass, and scrolling
+   stays smooth on the hardware the gate actually uses. */
+@media (max-width: 768px) {
+    .glass3d {
+        --filter-glass3d: blur(18px) brightness(0.92) saturate(1.9);
+    }
 }
 
 /* Browsers without backdrop-filter get the flat card instead of a grey wash. */
