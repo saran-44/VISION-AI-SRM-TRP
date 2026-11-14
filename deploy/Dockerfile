@@ -32,8 +32,16 @@ RUN python -m venv "$VIRTUAL_ENV" \
 ARG INSTALL_VISION=1
 COPY backend/requirements-vision.txt /tmp/requirements-vision.txt
 RUN if [ "$INSTALL_VISION" = "1" ]; then \
-      "$VIRTUAL_ENV/bin/python" -m pip install --extra-index-url https://download.pytorch.org/whl/cpu \
-        -r /tmp/requirements-vision.txt; \
+      "$VIRTUAL_ENV/bin/python" -m pip install \
+        --index-url https://download.pytorch.org/whl/cpu \
+        --extra-index-url https://pypi.org/simple \
+        torch==2.9.1 torchvision==0.24.1; \
+      sed '/^torch==/d; /^torchvision==/d' /tmp/requirements-vision.txt \
+        > /tmp/requirements-vision-pypi.txt; \
+      "$VIRTUAL_ENV/bin/python" -m pip install \
+        --index-url https://pypi.org/simple \
+        -r /tmp/requirements-vision-pypi.txt; \
+      "$VIRTUAL_ENV/bin/python" -c "import ultralytics"; \
     fi
 
 COPY backend/ /app/backend/
