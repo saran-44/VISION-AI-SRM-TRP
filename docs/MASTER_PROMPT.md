@@ -55,6 +55,12 @@ DETECTION SETTINGS - ALREADY TUNED, DO NOT SILENTLY CHANGE
 - VISION_CONFIDENCE=0.25  a sticker box below this never reaches the OCR
 - STAGES sticker -> plate -> vehicle (VISION_STAGE_*), each switchable per scan;
   a missing optional checkpoint is `skipped`, never a 503
+- MODELS best.pt = sticker/red-circle (classes 0 "red circle", 1 "sticker"),
+  OCRs class 1 only; anpr_best.pt = number plate (YOLOv10n on Car_License_Plates,
+  ONE class 0 "licence" -> no class filter, upscaled 3x before OCR);
+  weights/vehicle.pt = optional COCO model for bus/car/bike
+- PLATE  VISION_PLATE_CONFIDENCE=0.25 and VISION_PLATE_UPSCALE=3 are separate
+  from VISION_CONFIDENCE on purpose: do not merge them
 - POST /api/detection/scan returns: candidates[], bus_number, confidence,
   raw_text, reason, advice, detection{boxes_total, boxes_above_threshold,
   boxes_other_class, best_confidence, threshold, image_size, sticker_class,

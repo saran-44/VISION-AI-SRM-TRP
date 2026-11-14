@@ -155,7 +155,11 @@ python scripts/inspect_model.py best.pt
 the classic mistake — pointing at `last.pt`, or at a checkpoint trained on a
 different dataset — before a gate does.
 
-### A number-plate model is the optional second stage
+### A number-plate model is the second stage
+
+The repository already ships one: `anpr_best.pt` (YOLOv10n, one class
+`licence`, trained on `Car_License_Plates`). The text below is for replacing it
+with a model trained on your own gate footage.
 
 Keep the sticker model in `best.pt`: it is the stage that reads the number off
 the sticker, and the one this project validates against. If you also train a
@@ -168,9 +172,10 @@ python scripts/inspect_model.py weights/number_plate.pt
 ```
 
 `backend/vision.py` then uses it as the fallback stage: sticker first, plate
-only when the sticker read nothing, and `VISION_PLATE_MODEL_PATH` points
-elsewhere if you prefer. `weights/` is git-ignored, so the file never reaches
-GitHub.
+only when the sticker read nothing. Point `VISION_PLATE_MODEL_PATH` at your file
+to make it the default; `weights/` is git-ignored, so it never reaches GitHub.
+Verify the swap with `python scripts/inspect_model.py weights/number_plate.pt` —
+you want `task: detect` and the class list you trained.
 
 Prefer not to touch git? Leave the file anywhere and set:
 

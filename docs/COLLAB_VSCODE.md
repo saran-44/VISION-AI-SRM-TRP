@@ -63,6 +63,7 @@ true, and Arena receives facts (files, commands, output) instead of a summary.
 > Use this once per VS Code session, before asking for anything.
 > A single copy-paste version of everything below (plus the training recipe)
 > lives in [`MASTER_PROMPT.md`](MASTER_PROMPT.md) — prefer that one.
+> The current assignment for VS Code is [`TASK_ANPR_VSCODE.md`](TASK_ANPR_VSCODE.md).
 
 ```text
 You are helping me work on the GitHub repository saran-44/VISION-AI-SRM-TRP

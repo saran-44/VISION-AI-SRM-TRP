@@ -163,7 +163,8 @@ def test_the_plate_stage_reads_a_number_when_no_sticker_was_found(clean_env, tmp
     assert vision.best_identification(result).bus_number == "KL 07 AB 1234"
 
 
-def test_a_missing_plate_checkpoint_is_skipped_not_fatal(clean_env):
+def test_a_missing_plate_checkpoint_is_skipped_not_fatal(clean_env, tmp_path):
+    clean_env.setenv("VISION_PLATE_MODEL_PATH", str(tmp_path / "absent.pt"))
     result = vision.detect(_FakeImage(), model=_FakeModel([]), stages={"vehicle": False})
 
     plate = next(stage for stage in result.stages if stage.name == vision.STAGE_NUMBER_PLATE)
@@ -311,7 +312,11 @@ def test_stage_status_lists_the_three_stages():
 
     assert [row["name"] for row in rows] == list(vision.STAGE_ORDER)
     assert rows[0]["required"] is True and rows[0]["bundled"] is True
-    assert rows[1]["model"].endswith("number_plate.pt")
+    # The bundled ANPR checkpoint is stage 2's default, not a file to install.
+    assert rows[1]["model"].endswith("anpr_best.pt")
+    assert rows[1]["required"] is False
+    assert rows[1]["bundled"] is True
+    assert rows[2]["bundled"] is False  # weights/vehicle.pt is fetched
     assert rows[2]["model"].endswith("vehicle.pt")
 
 
@@ -353,3 +358,116 @@ def test_the_scan_route_forwards_the_panel_switches(client, users, monkeypatch, 
     payload = response.get_json()
     assert payload["stage"] == vision.CASCADE_NONE
     assert "vehicle" in payload and "stages" in payload
+
+
+# ------------------------------------------------ the bundled ANPR checkpoint
+#
+# `anpr_best.pt` is a YOLOv10n fine-tune of Car_License_Plates with exactly one
+# class, `licence`. These tests pin the assumptions the plate stage makes about
+# it: it is the default checkpoint, it needs no class filter, and its crops are
+# enlarged before the OCR reads them.
+
+
+def test_the_bundled_anpr_checkpoint_is_the_plate_default(clean_env):
+    assert vision.plate_model_path().name == "anpr_best.pt"
+    assert vision.DEFAULT_PLATE_MODEL_PATH.exists()
+
+
+def test_the_plate_checkpoint_can_be_overridden(clean_env, tmp_path):
+    target = tmp_path / "mine.pt"
+    clean_env.setenv("VISION_PLATE_MODEL_PATH", str(target))
+
+    assert vision.plate_model_path() == target
+
+
+def test_a_missing_bundled_model_falls_back_to_weights(clean_env, tmp_path, monkeypatch):
+    fallback = tmp_path / "number_plate.pt"
+    fallback.write_bytes(b"fake")
+    monkeypatch.setattr(vision, "DEFAULT_PLATE_MODEL_PATH", tmp_path / "absent.pt")
+    monkeypatch.setattr(vision, "PLATE_MODEL_FALLBACKS", (fallback,))
+
+    assert vision.plate_model_path() == fallback
+
+
+def test_a_single_class_licence_model_is_read_without_a_class_filter(clean_env, tmp_path):
+    clean_env.setattr(vision, "read_text", lambda image, engine_name=None: "TN 12 AB 1234")
+    _plate_model(tmp_path, clean_env, [(0.77, 0, [500, 400, 620, 450])], names={0: "licence"})
+
+    result = vision.detect(_FakeImage(), model=_FakeModel([]), stages={"vehicle": False})
+
+    assert result.plate_candidates[0].class_name == "licence"
+    assert vision.best_identification(result).bus_number == "TN 12 AB 1234"
+
+
+def test_the_plate_stage_has_its_own_confidence_gate(clean_env, tmp_path):
+    clean_env.setenv("VISION_PLATE_CONFIDENCE", "0.80")
+    clean_env.setattr(vision, "read_text", lambda image, engine_name=None: "KA 01 AB 9999")
+    _plate_model(tmp_path, clean_env, [(0.60, 0, [500, 400, 620, 450])])
+
+    result = vision.detect(_FakeImage(), model=_FakeModel([]), stages={"vehicle": False})
+
+    assert result.plate_candidates == []  # 0.60 is under the plate gate
+    assert vision.confidence_threshold() == pytest.approx(0.25)  # sticker gate untouched
+
+
+class _Crop:
+    def __init__(self, width, height):
+        self.size = (width, height)
+        self.resized = None
+
+    def resize(self, size, resample):
+        self.resized = (size, resample)
+        return self
+
+
+@pytest.fixture
+def fake_pil(clean_env):
+    clean_env.setattr(
+        vision, "_require_pil", lambda: SimpleNamespace(Resampling=SimpleNamespace(LANCZOS=1))
+    )
+    return clean_env
+
+
+def test_a_small_plate_crop_is_enlarged_before_ocr(fake_pil):
+    crop = _Crop(100, 40)
+
+    enlarged = vision._prepare_plate_crop(crop)
+
+    assert enlarged is crop
+    assert crop.resized == ((300, 120), 1)  # 3x by default
+
+
+def test_a_large_plate_crop_is_left_alone(fake_pil):
+    crop = _Crop(600, 200)
+
+    vision._prepare_plate_crop(crop)
+
+    assert crop.resized is None
+
+
+def test_the_upscale_can_be_switched_off(fake_pil):
+    fake_pil.setenv("VISION_PLATE_UPSCALE", "1")
+    crop = _Crop(100, 40)
+
+    vision._prepare_plate_crop(crop)
+
+    assert crop.resized is None
+
+
+def test_a_crop_without_a_two_dimensional_size_is_passed_through(fake_pil):
+    crop = SimpleNamespace(size=(1, 2, 3, 4))
+
+    assert vision._prepare_plate_crop(crop) is crop
+
+
+def test_the_setup_checklist_separates_required_from_optional():
+    setup = vision.vision_setup()
+    rows = {row["name"]: row for row in setup["components"]}
+
+    assert rows["model"]["present"] is True
+    assert rows["anpr"]["present"] is True
+    assert rows["anpr"]["optional"] is True
+    # An optional model never makes the detector "not ready"; only the runtime
+    # components (torch, OCR, …) can, and this test host has none of them.
+    assert "anpr" not in setup["missing"]
+    assert setup["missing"] == [name for name in setup["missing"] if name != "anpr"]

@@ -17,6 +17,34 @@ works, and the HTTP contract the console uses.
 | Inference size | 640 px |
 | Checkpoint metadata | Identifies an Ultralytics AGPL-3.0 licence; actual model and dataset rights require review |
 
+### The bundled ANPR checkpoint — `anpr_best.pt`
+
+Read out of the checkpoint itself (no inference needed):
+
+| Field | Value |
+| --- | --- |
+| Task | `detect` |
+| Base weights | `yolov10n.pt` |
+| Dataset | `Car_License_Plates` (`data.yaml`) |
+| Epochs | 120 |
+| Ultralytics | 8.1.34 |
+| Trained | 2024-07-02 |
+| Classes | **exactly one: `0 = licence`** |
+| Licence | AGPL-3.0 (same as `best.pt`) |
+
+Consequences for this codebase:
+
+* It **localises** a plate; it does not read characters. The OCR still does
+  that, so a bad OCR read is an OCR problem, not a model problem.
+* One class means **no class filter**: `_ocr_rows(..., class_filter=None)`
+  accepts every box. Filtering on class 1 would silently discard everything.
+* It was trained at 640; running it at 960 (`VISION_IMAGE_SIZE`) is the safe
+  direction (train small, infer large).
+* A plate crop is often ~100 px wide, which is below what OCR engines want, so
+  the plate stage **upscales small crops 3x** (`VISION_PLATE_UPSCALE`) before
+  reading. The sticker stage deliberately does not — its numbers are already
+  validated.
+
 ### Related notebook
 
 A related public GitHub repository was found during the upgrade:
@@ -117,7 +145,7 @@ first. Each stage can be switched off per host (`VISION_STAGE_*`) or per scan
 | # | Stage | Checkpoint | Runs when | Answers |
 | --- | --- | --- | --- | --- |
 | 1 | `sticker` | `best.pt` (bundled) | always, unless switched off | the bus number, read off the sticker panel |
-| 2 | `number_plate` | `weights/number_plate.pt` (optional) | stage 1 read no number | the registration number off the plate |
+| 2 | `number_plate` | `anpr_best.pt` (bundled) | stage 1 read no number | the registration number off the plate |
 | 3 | `vehicle` | `weights/vehicle.pt` (optional) | every scan, unless switched off | `bus`, `car`, `bike`, `truck` |
 
 Rules that keep this honest:
@@ -154,7 +182,8 @@ with its own scans, so a stage switched off on the bench stays off at the gate.
 | Stage | Command | Result |
 | --- | --- | --- |
 | vehicle | `python scripts/fetch_vehicle_model.py` | downloads `yolo11n.pt` into `weights/vehicle.pt` (git-ignored) |
-| number plate | train, then `cp best.pt weights/number_plate.pt` | stage 2 runs whenever no sticker number was read |
+| number plate | nothing — `anpr_best.pt` ships in the repo | stage 2 runs whenever no sticker number was read |
+| number plate (yours) | `cp ~/Downloads/best.pt weights/number_plate.pt` and set `VISION_PLATE_MODEL_PATH` | replaces the bundled ANPR model |
 
 `weights/` and `runs/` are git-ignored on purpose: checkpoints stay on the
 machine that trained them. The only tracked weights are the sticker model at
@@ -394,7 +423,9 @@ pytesseract>=0.3.10
 | `VISION_STAGE_STICKER` | `1` | Host default for the sticker stage. |
 | `VISION_STAGE_PLATE` | `1` | Host default for the number-plate stage. |
 | `VISION_STAGE_VEHICLE` | `1` | Host default for the vehicle stage. |
-| `VISION_PLATE_MODEL_PATH` | `weights/number_plate.pt` | Optional plate checkpoint. |
+| `VISION_PLATE_MODEL_PATH` | `anpr_best.pt` | Plate checkpoint. Falls back to `weights/number_plate.pt` when the bundled file is absent. |
+| `VISION_PLATE_CONFIDENCE` | `0.25` | Minimum confidence for a plate box (independent of `VISION_CONFIDENCE`). |
+| `VISION_PLATE_UPSCALE` | `3` | Enlargement of small plate crops before OCR; `1` disables it. |
 | `VISION_VEHICLE_MODEL_PATH` | `weights/vehicle.pt` | Optional vehicle checkpoint. |
 | `VISION_VEHICLE_CONFIDENCE` | `0.35` | Minimum confidence for a vehicle box. |
 | `VISION_VEHICLE_CLASSES` | `bicycle,motorcycle,car,bus,truck` | Labels counted as a vehicle. |

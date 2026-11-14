@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from backend.vision import vision_setup, vision_status
 
-COMPONENTS = ["torch", "ultralytics", "opencv", "Pillow", "ocr", "model"]
+COMPONENTS = ["torch", "ultralytics", "opencv", "Pillow", "ocr", "model", "anpr"]
 
 
 def test_every_component_is_reported_with_a_fix():
@@ -32,7 +32,12 @@ def test_ready_means_nothing_is_missing():
 
 def test_missing_list_matches_the_component_flags():
     setup = vision_setup()
-    expected = [row["name"] for row in setup["components"] if not row["present"]]
+    # Optional components are rendered but never gate `ready`.
+    expected = [
+        row["name"]
+        for row in setup["components"]
+        if not row["present"] and not row.get("optional")
+    ]
     assert setup["missing"] == expected
 
 
