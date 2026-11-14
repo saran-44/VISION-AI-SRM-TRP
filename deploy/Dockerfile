@@ -39,11 +39,16 @@ RUN if [ "$INSTALL_VISION" = "1" ]; then \
 COPY backend/ /app/backend/
 COPY frontend/ /app/frontend/
 COPY best.pt /app/best.pt
+COPY anpr_best.pt /app/anpr_best.pt
+COPY scripts/fetch_vehicle_model.py /app/scripts/fetch_vehicle_model.py
+RUN if [ "$INSTALL_VISION" = "1" ]; then \
+      python /app/scripts/fetch_vehicle_model.py; \
+    fi
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD curl -fsS http://localhost:8080/api/health || exit 1
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "2", "--threads", "4", \
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "4", \
      "--timeout", "180", "--access-logfile", "-", "backend.app:create_app()"]

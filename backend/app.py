@@ -632,7 +632,17 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
                 after={"error": str(exc), "source": payload.get("source", "device")},
                 flask_request=request,
             )
-            return jsonify({"error": str(exc)}), 503
+            return jsonify(
+                {
+                    "error": (
+                        "Cloud vision is unavailable on this Render Free service. "
+                        "Run VisionAI-GateAgent.exe on the gate computer for automatic scanning."
+                    ),
+                    "code": "vision_local_agent_required",
+                    "detail": str(exc),
+                    "auto_scan": {"available": False, "agent": "VisionAI-GateAgent.exe"},
+                }
+            ), 503
         except Exception as exc:  # pragma: no cover - defensive
             current_app.logger.exception("Detection failed")
             record_audit(

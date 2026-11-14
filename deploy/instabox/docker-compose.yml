@@ -1,0 +1,22 @@
+services:
+  transport:
+    build:
+      context: ../..
+      dockerfile: deploy/Dockerfile
+      args:
+        INSTALL_VISION: "1"
+    image: srm-trp-transport:vision
+    container_name: srm-trp-transport
+    restart: unless-stopped
+    env_file:
+      - .env.instabox
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./supabase-ca.crt:/app/secrets/supabase-ca.crt:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
