@@ -104,7 +104,7 @@ this dataset size:
 ```
 
 *(On the free T4 use `batch=8` if 16 runs out of memory at `imgsz=960`; drop to
-`imgsz=640` if you would rather have the speed.)*
+`imgsz=640` if you would rather have the speed — but then set `VISION_IMAGE_SIZE=640` too.)*
 
 **B. This laptop, CPU** — works, but 100 epochs on 300 images takes hours.
 Fine for a 10-epoch sanity run to prove the data loads:
@@ -159,7 +159,7 @@ Prefer not to touch git? Leave the file anywhere and set:
 
 ```bash
 export VISION_MODEL_PATH=/c/Users/kp571/models/plates-s-960.pt
-export VISION_CONFIDENCE=0.35
+export VISION_CONFIDENCE=0.25
 export VISION_IMAGE_SIZE=960
 ```
 
@@ -182,7 +182,7 @@ Do not chase mAP. Measure the thing the portal does:
 
 A missed read creates no event and is harmless; a **wrong** read creates an
 event for the wrong bus, which is the failure that matters. Keep
-`VISION_CONFIDENCE` conservative (0.35–0.5) and let
+`VISION_CONFIDENCE` conservative (0.25–0.5) and let
 `OCR_CONFIDENCE_THRESHOLD` (0.75) flag the doubtful ones.
 
 ---

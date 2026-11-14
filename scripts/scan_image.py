@@ -133,6 +133,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"model       : {result.model}  @ {result.image_size}px, threshold {result.threshold:.2f}")
     print(f"inference   : {result.inference_ms} ms")
     print(f"boxes       : {result.boxes_total} found, {result.boxes_above_threshold} above threshold, best {result.best_confidence:.2f}")
+    print(f"class filter: only class {result.sticker_class} is OCR'd"
+          + (f" ({result.boxes_other_class} box(es) of other classes were ignored)" if result.boxes_other_class else ""))
     for box in payload["candidates"]:
         print(f"  · {box['class_name']:<12} {box['confidence']:.2f}  bbox={box['bbox']}  text={box['raw_text']!r}")
     print()

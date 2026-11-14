@@ -258,7 +258,7 @@ def test_scan_surfaces_reason_and_advice(client, users, monkeypatch):
     result = vision.DetectionResult(reason="below_threshold", advice="lower VISION_CONFIDENCE")
     result.boxes_total = 2
     result.best_confidence = 0.21
-    result.threshold = 0.35
+    result.threshold = 0.25
 
     monkeypatch.setattr(app_module, "decode_image", lambda payload: object())
     monkeypatch.setattr(app_module, "detect", lambda image: result)
@@ -275,3 +275,4 @@ def test_scan_surfaces_reason_and_advice(client, users, monkeypatch):
     assert payload["advice"] == "lower VISION_CONFIDENCE"
     assert payload["detection"]["boxes_total"] == 2
     assert payload["detection"]["best_confidence"] == pytest.approx(0.21)
+    assert payload["detection"]["sticker_class"] == 1

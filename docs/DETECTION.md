@@ -140,7 +140,7 @@ while preserving the internal grouping used for display
   "model_path": "/srv/srm-trp/best.pt",
   "model_present": true,
   "model_loaded": true,
-  "confidence_threshold": 0.35,
+  "confidence_threshold": 0.25,
   "ocr_engine": "auto",
   "ocr_available": "rapidocr",
   "classes": {"0": "red circle", "1": "sticker"},
@@ -186,7 +186,7 @@ curl -X POST http://localhost:5000/api/detection/scan \
     "boxes_total": 1,
     "boxes_above_threshold": 1,
     "best_confidence": 0.94,
-    "threshold": 0.35,
+    "threshold": 0.25,
     "image_size": 640,
     "reason": "ok",
     "advice": ""
@@ -208,7 +208,8 @@ problems and used to look identical in the UI:
 | `reason` | What happened | Fix |
 | --- | --- | --- |
 | `no_detection` | No box at all, even at 0.05 confidence | Camera not pointing at the sticker, sticker too far/small, or the checkpoint does not match these stickers — `python scripts/inspect_model.py` |
-| `below_threshold` | Boxes found, all weaker than `VISION_CONFIDENCE` | `VISION_CONFIDENCE=0.2` to confirm it is being seen; raise `VISION_IMAGE_SIZE` if the sticker is small |
+| `other_class` | Only the red circle (class 0) was found, never the sticker (class 1) | Sticker dirty/shadowed/half out of frame; check the mounting, or `VISION_STICKER_CLASS` |
+| `below_threshold` | Sticker boxes found, all weaker than `VISION_CONFIDENCE` | `VISION_CONFIDENCE=0.2` to confirm it is being seen; raise `VISION_IMAGE_SIZE` if the sticker is small |
 | `unreadable` | Sticker found and cropped, but the OCR read no text | Get closer, `VISION_IMAGE_SIZE=960`, or install a stronger OCR engine |
 | `ok` | A bus number was read | — |
 
@@ -324,7 +325,9 @@ pytesseract>=0.3.10
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `VISION_MODEL_PATH` | `best.pt` | Path to the Ultralytics checkpoint. |
-| `VISION_CONFIDENCE` | `0.35` | Minimum detection confidence. |
+| `VISION_CONFIDENCE` | `0.25` | Minimum confidence for a sticker to reach the OCR (the model is probed from 0.05). |
+| `VISION_IMAGE_SIZE` | `960` | Inference letterbox size. |
+| `VISION_STICKER_CLASS` | `1` | The only class id that is cropped and OCR'd (`1` = sticker in the shipped model; a single-class checkpoint uses class 0 automatically). |
 | `VISION_OCR_ENGINE` | `auto` | `auto`, `rapidocr`, `tesseract`, `easyocr` or `none`. |
 | `VISION_MAX_CROPS` | `8` | Maximum sticker crops OCR'd per frame. |
 | `OCR_CONFIDENCE_THRESHOLD` | `0.75` | Below this an event is flagged `low_ocr_confidence`. |
