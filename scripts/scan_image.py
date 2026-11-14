@@ -130,6 +130,10 @@ def _scan_folder(folder: Path, overrides, as_json: bool) -> int:
     for path in files:
         try:
             result = detect(decode_image(path.read_bytes()), stages=overrides)
+        except ImageRejected as exc:
+            print(f"Skipped {path.name}: {exc}", file=sys.stderr)
+            reasons["image_rejected"] = reasons.get("image_rejected", 0) + 1
+            continue
         except VisionUnavailable as exc:
             print(f"Detector unavailable: {exc}", file=sys.stderr)
             print("Install the extras: python -m pip install -r backend/requirements-vision.txt", file=sys.stderr)
@@ -213,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["VISION_IMAGE_SIZE"] = str(args.imgsz)
 
     from backend.vision import (
+        ImageRejected,
         STAGE_LABELS,
         VisionUnavailable,
         best_identification,
@@ -243,6 +248,11 @@ def main(argv: list[str] | None = None) -> int:
         image = decode_image(path.read_bytes())
         # "sticker=0,vehicle=1" and "plate" are both accepted; see --stages.
         result = detect(image, stages=overrides)
+    except ImageRejected as exc:
+        # The image is the problem, not the installation. Saying "install the
+        # extras" here sent operators off to reinstall torch over a photograph.
+        print(f"Image rejected: {exc}", file=sys.stderr)
+        return 2
     except VisionUnavailable as exc:
         print(f"Detector unavailable: {exc}", file=sys.stderr)
         print("Install the extras: python -m pip install -r backend/requirements-vision.txt", file=sys.stderr)

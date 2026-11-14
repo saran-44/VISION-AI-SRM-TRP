@@ -299,3 +299,52 @@ def test_scan_explains_when_cloud_vision_is_unavailable(client, users, monkeypat
     payload = response.get_json()
     assert payload["code"] == "vision_local_agent_required"
     assert payload["auto_scan"]["agent"] == "VisionAI-GateAgent.exe"
+
+
+def _oversized_jpeg(width=4096, height=3072):
+    """A camera-sized JPEG: 12.6 MP, the size a phone actually produces."""
+    PIL = pytest.importorskip("PIL.Image")
+    buffer = io.BytesIO()
+    PIL.new("RGB", (width, height), (120, 130, 140)).save(buffer, format="JPEG", quality=70)
+    return buffer.getvalue()
+
+
+def test_a_twelve_megapixel_photo_is_downscaled_not_refused():
+    """The detector works at 960 px; a 12.6 MP upload must not be rejected.
+
+    This was a real failure: `decode_image` refused anything over 12 MP, which
+    is below a single frame from most phones, and the CLI then told the operator
+    to reinstall the vision extras.
+    """
+    from backend.vision import MAX_IMAGE_PIXELS, decode_image
+
+    image = decode_image(_oversized_jpeg())
+
+    assert image.width * image.height <= MAX_IMAGE_PIXELS
+    assert max(image.size) <= 6000
+    # Aspect ratio survives the resize: 4:3 in, 4:3 out.
+    assert abs(image.width / image.height - 4096 / 3072) < 0.01
+
+
+def test_an_unreadable_upload_is_a_400_for_the_client_not_a_503_for_the_server(
+    client, users, monkeypatch
+):
+    """Bad bytes are the caller's fault, and the status code must say so.
+
+    The scan route answered 503 "cloud vision is unavailable" for an image it
+    simply could not decode, which sends an operator to reinstall a detector
+    that was never broken.
+    """
+    pytest.importorskip("PIL.Image")
+    login_head_admin(client, users)
+
+    response = client.post(
+        "/api/detection/scan",
+        data={"image": (io.BytesIO(b"this is not a jpeg"), "frame.jpg")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["code"] == "image_rejected"
+    assert "readable image" in payload["error"]
