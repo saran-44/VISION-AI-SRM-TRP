@@ -215,12 +215,17 @@ problems and used to look identical in the UI:
 The model is asked for boxes down to 0.05 so these counts are real, then
 filtered in Python — the threshold still decides what becomes a candidate.
 
-To test one saved photograph without the browser or the server:
+To test one frame without the browser or the server:
 
 ```bash
 python scripts/scan_image.py frame.jpg
-python scripts/scan_image.py frame.jpg --conf 0.15 --imgsz 1280 --json
+python scripts/scan_image.py --camera 0                 # grab from this webcam
+python scripts/scan_image.py --camera 0 --conf 0.15 --imgsz 1280 --json
 ```
+
+`--camera` samples five frames, keeps the sharpest (Laplacian variance), writes
+it to `frame-<date>-<time>.jpg` and scans that file, so the exact input is
+reproducible. Only OpenCV is required for the grab itself.
 
 Error responses:
 

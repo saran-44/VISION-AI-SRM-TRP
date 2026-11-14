@@ -155,6 +155,37 @@ function rtspNotice(url, stateHost) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Grab the current video frame as a JPEG blob, at the camera's native size.
+ *
+ * Deliberately uses `videoWidth`/`videoHeight` and not the CSS box: the tile is
+ * displayed letterboxed at 16:9, and a downscaled screenshot would hide the
+ * exact detail the detector needs.
+ */
+async function grabFrame(video) {
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth || 1280;
+  canvas.height = video.videoHeight || 720;
+  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = el('a', { href: url, download: filename });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function frameFilename() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  return `frame-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
+    + `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.jpg`;
+}
+
+/**
  * Render one camera tile.
  *
  * @param {object} options
@@ -215,17 +246,23 @@ export function renderCameraTile(options) {
         },
       }, [icon('bx-stop'), el('span', { text: 'Stop' })]),
     );
+    // Download the exact frame the detector would receive, so a failure can be
+    // replayed offline: python scripts/scan_image.py frame-<timestamp>.jpg
+    controls.append(el('button', {
+      class: 'btn btn-outline camera-btn',
+      type: 'button',
+      onclick: async () => {
+        const blob = await grabFrame(video);
+        if (blob) downloadBlob(blob, frameFilename());
+      },
+    }, [icon('bx-download'), el('span', { text: 'Save frame' })]));
+
     if (onCapture) {
       controls.append(el('button', {
         class: 'btn btn-primary camera-btn',
         type: 'button',
         onclick: async () => {
-          const canvas = document.createElement('canvas');
-          canvas.width = video.videoWidth || 1280;
-          canvas.height = video.videoHeight || 720;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+          const blob = await grabFrame(video);
           if (blob) await onCapture(blob, { cameraId: id, label });
         },
       }, [icon('bx-scan'), el('span', { text: 'Scan plate' })]));
