@@ -5,7 +5,15 @@ import { analyticsParams, eventParams, exportParams, readFilters } from './filte
 import { mountShell } from './layout.js';
 import { connectLive } from './sse.js';
 import { renderCameras, renderCameraTile, requestWebcam, stopStream } from './cameras.js';
-import { appendStagesToForm, describeScan } from './detection-stages.js';
+import {
+  STAGES,
+  appendStagesToForm,
+  currentStageFlags,
+  describeScan,
+  scanDetail,
+  scanFailureText,
+  setStageFlag,
+} from './detection-stages.js';
 import { renderEventsTable } from './tables.js';
 import { clear, el, formatDateTime, formatNumber, setState, showToast } from './ui.js';
 import { analytics, initFirebase } from './firebase.js';
@@ -78,6 +86,7 @@ function setChartState(type, message) {
 /* ------------------------------------------------------------------ */
 
 let browserCameraTile = null;
+let camerasMounted = false;
 
 /**
  * Mount a "this device" camera tile that uses the operator's webcam.
@@ -87,7 +96,9 @@ function mountBrowserCamera(cameras) {
   const host = document.getElementById('cameraGrid');
   if (!host) return;
   const existing = host.querySelector('[data-camera-id="browser-local"]');
-  if (existing) existing.remove();
+  // Reuse the live tile: removing it dropped the <video> but not its tracks,
+  // so the camera stayed open while a second stream was requested.
+  if (existing) return;
   host.querySelector('.state-box')?.remove();
 
   if (!navigator.mediaDevices?.getUserMedia) {
@@ -149,14 +160,14 @@ async function scanFrame(blob, meta = {}) {
       statusNode.textContent = text;
       statusNode.className = `scan-status ${good ? '' : 'text-danger'}`.trim();
     }
-    if (metaNode) {
-      metaNode.textContent = payload.raw_text
-        ? `OCR read: ${payload.raw_text}`
-        : 'The detector found no sticker in this frame.';
-    }
+    if (metaNode) metaNode.textContent = scanDetail(payload);
+    renderStageWarning();
     analytics.detectionResult(busNumber, confidence);
     analytics.captureFrame(meta.cameraId);
-    showToast(busNumber ? `Detected bus ${busNumber}` : 'No plate detected in the frame.', busNumber ? 'success' : 'error');
+    showToast(
+      busNumber ? `Detected bus ${busNumber}` : scanFailureText(payload),
+      busNumber ? 'success' : 'error',
+    );
     refreshAll();
   } catch (error) {
     if (statusNode) {
@@ -180,10 +191,17 @@ async function refreshAll() {
       apiGet(`/api/analytics${toQuery(analyticsParams(currentFilters))}`),
     ]);
     flagLabels = config.flag_labels || stats.flag_labels || {};
-    renderCameras(document.getElementById('cameraGrid'), config.cameras || [], {
-      onCapture: scanFrame,
-    });
-    mountBrowserCamera(config.cameras || []);
+    // Mount the cameras once. refreshAll() runs after every scan and on every
+    // SSE tick: re-rendering here replaced the operator's <video>, stopped
+    // nothing, opened a second getUserMedia stream each time, and left the next
+    // capture reading a <video> with readyState 0 — a blank JPEG.
+    if (!camerasMounted) {
+      renderCameras(document.getElementById('cameraGrid'), config.cameras || [], {
+        onCapture: scanFrame,
+      });
+      mountBrowserCamera(config.cameras || []);
+      camerasMounted = true;
+    }
     renderStats(stats);
     currentEvents = events.items || [];
     if (currentEvents.length) {
@@ -234,6 +252,7 @@ function wire() {
     onError: (error) => showToast(error.message || 'Live stream failed; retrying.', 'error'),
   });
   window.addEventListener('pagehide', () => live?.stop());
+  renderStageWarning();
   refreshAll();
 }
 
