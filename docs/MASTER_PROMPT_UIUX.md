@@ -163,7 +163,7 @@ Nine pages, all server-rendered shells plus one ES module each:
 
 ```bash
 node scripts/check_frontend.mjs          # every import and page reference resolves
-python -m pytest -o addopts="" -q        # 247 passed, 5 skipped at 227ba7b
+python -m pytest -o addopts="" -q        # 247 passed, 5 skipped at cd8cfbe
 bash scripts/audit_local.sh              # secrets / ignore rules / frontend
 ```
 
