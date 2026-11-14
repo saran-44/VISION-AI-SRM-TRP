@@ -648,6 +648,9 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             "bus_number": candidate.bus_number if candidate else None,
             "confidence": candidate.confidence if candidate else None,
             "raw_text": candidate.raw_text if candidate else None,
+            # Why the scan returned no number, in the caller's words.
+            "reason": result.reason,
+            "advice": result.advice,
             "source": payload.get("source", "device"),
         }
         record_audit(
