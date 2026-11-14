@@ -144,6 +144,33 @@ for (const page of pages) {
   }
 }
 
+// 4. the scan explanation is distinguishable ---------------------------------
+// A scan that found nothing, one under threshold, one whose plate was
+// unreadable and one whose stage was switched off must not read the same on
+// screen: that collapse is what made a silently disabled stage look like a bus
+// that was never there.
+const stageModule = await import(join(FRONTEND, 'js', 'detection-stages.js'));
+
+function expect(condition, message) {
+  if (!condition) problems.push(message);
+}
+
+const reasons = ['no_detection', 'below_threshold', 'other_class', 'unreadable'];
+const texts = reasons.map((reason) => stageModule.scanFailureText({ reason }));
+expect(new Set(texts).size === texts.length, 'detection-stages.js: every failure reason reads the same on screen');
+expect(!stageModule.scanFailureText({ reason: 'no_detection' }).includes('No plate detected'),
+  'detection-stages.js: no_detection still uses the catch-all sentence');
+expect(stageModule.scanFailureText({ reason: 'unreadable' }).toLowerCase().includes('read'),
+  'detection-stages.js: the unreadable case does not mention reading');
+
+const skippedDetail = stageModule.scanDetail({
+  stages: [{ name: 'sticker', label: 'Sticker', skipped: 'disabled' }],
+});
+expect(skippedDetail.includes('Sticker off'), 'detection-stages.js: a switched-off stage is not named in the detail line');
+
+const adviceDetail = stageModule.scanDetail({ advice: 'Lower VISION_CONFIDENCE.' });
+expect(adviceDetail.includes('VISION_CONFIDENCE'), 'detection-stages.js: the backend advice never reaches the page');
+
 if (problems.length) {
   console.error('Frontend checks failed:');
   problems.forEach((problem) => console.error(`  - ${problem}`));

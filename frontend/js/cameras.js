@@ -162,11 +162,30 @@ function rtspNotice(url, stateHost) {
  * exact detail the detector needs.
  */
 async function grabFrame(video) {
+  // A <video> that has just been created (or whose stream was replaced) has
+  // readyState 0 and no videoWidth. drawImage on it paints nothing, so the
+  // canvas stays empty and toBlob still hands back a perfectly valid JPEG of a
+  // blank rectangle. The detector then reports "no boxes" and the operator is
+  // told there is no plate in a frame that never contained one. Refuse instead:
+  // a wrong answer is worse than a wait.
+  if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+    throw new Error(
+      'The camera has not produced a frame yet. Wait for the preview to appear, then scan again.',
+    );
+  }
   const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth || 1280;
-  canvas.height = video.videoHeight || 720;
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
   canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('The browser could not encode this frame as a JPEG.'));
+        return;
+      }
+      resolve(blob);
+    }, 'image/jpeg', 0.92);
+  });
 }
 
 function downloadBlob(blob, filename) {
@@ -258,8 +277,11 @@ export function renderCameraTile(options) {
       class: 'btn btn-outline camera-btn',
       type: 'button',
       onclick: async () => {
-        const blob = await grabFrame(video);
-        if (blob) downloadBlob(blob, frameFilename());
+        try {
+          downloadBlob(await grabFrame(video), frameFilename());
+        } catch (error) {
+          setState(stateHost, 'error', error.message);
+        }
       },
     }, [icon('bx-download'), el('span', { text: 'Save frame' })]));
 
@@ -268,8 +290,11 @@ export function renderCameraTile(options) {
         class: 'btn btn-primary camera-btn',
         type: 'button',
         onclick: async () => {
-          const blob = await grabFrame(video);
-          if (blob) await onCapture(blob, { cameraId: id, label });
+          try {
+            await onCapture(await grabFrame(video), { cameraId: id, label });
+          } catch (error) {
+            setState(stateHost, 'error', error.message);
+          }
         },
       }, [icon('bx-scan'), el('span', { text: 'Scan plate' })]));
 
@@ -288,8 +313,10 @@ export function renderCameraTile(options) {
             if (autoScanBusy) return;
             autoScanBusy = true;
             try {
-              const blob = await grabFrame(video);
-              if (blob) await onCapture(blob, { cameraId: id, label, automatic: true });
+              await onCapture(await grabFrame(video), { cameraId: id, label, automatic: true });
+            } catch (_error) {
+              // A frame that is not ready yet is normal between ticks; the next
+              // one will be. Stopping the timer here would hide a real failure.
             } finally {
               autoScanBusy = false;
             }

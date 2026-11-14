@@ -89,6 +89,37 @@ export function describeScan(payload = {}) {
   return { good: false, text: 'Nothing found in this frame.' };
 }
 
+/**
+ * One sentence for the one thing that actually went wrong.
+ *
+ * The backend has always distinguished no_detection / below_threshold /
+ * other_class / unreadable and returned an `advice` line plus a per-stage
+ * report. Collapsing those into "No plate detected in the frame" is how a
+ * switched-off stage came to look exactly like a bus that was not there.
+ */
+const FAILURE_TEXT = {
+  no_detection: 'No sticker or plate in the frame — the detector ran and found nothing.',
+  below_threshold: 'A plate was seen, but under the confidence threshold.',
+  other_class: 'The red circle was found, but not the sticker panel.',
+  unreadable: 'A plate was found, but the number could not be read.',
+};
+
+export function scanFailureText(payload = {}) {
+  return FAILURE_TEXT[payload.reason] || 'No plate detected in the frame.';
+}
+
+/** The detail line: what the OCR read, the advice, and anything skipped. */
+export function scanDetail(payload = {}) {
+  const skipped = (payload.stages || [])
+    .filter((stage) => stage.skipped)
+    .map((stage) => `${stage.label || stage.name} ${stage.skipped === 'disabled' ? 'off' : stage.skipped}`);
+  const parts = [];
+  if (payload.raw_text) parts.push(`OCR read: ${payload.raw_text}`);
+  else if (payload.advice) parts.push(payload.advice);
+  if (skipped.length) parts.push(`Stages skipped: ${skipped.join(', ')}.`);
+  return parts.join(' ') || 'The detector found nothing in this frame.';
+}
+
 /** Draw one chip per stage: what ran, what was skipped and why. */
 export function renderStageChips(host, stages) {
   if (!host) return;
