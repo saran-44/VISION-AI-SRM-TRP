@@ -24,12 +24,17 @@ ENVIRONMENT GATE - run these three before anything else
   git rev-parse --short HEAD
   git status --short
   ls docs/                 -> the real directory listing
+Version marker: docs/WORKSPACE_SYNC.md exists only at cd8cfbe and later. If the
+listing does not show it, the checkout is stale.
 Stop and report if:
   - pwd is not the repository root (a different folder was opened);
-  - HEAD is older than a1ef06c (the tree you are reading is stale: run
+  - the marker is absent, or HEAD is older than cd8cfbe (run
     "git pull --ff-only origin main" and start again);
   - git status lists files from another project - do not touch or revert them.
-This prompt describes the tree at a1ef06c.
+A partially-synced docs/ is impossible: every commit has all four prompt docs or
+none. If one is listed and another is not, run "git status --short docs/" - a
+line starting with " D " is a local deletion, fixed by "git restore docs/".
+This prompt describes the tree at cd8cfbe.
 If ls docs/ shows a file your own file search cannot find, your INDEX is stale,
 not the file: say so and ask for the window to be reloaded. The terminal listing
 is the ground truth. Never report a file as missing when the listing has it, and
