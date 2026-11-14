@@ -61,6 +61,8 @@ true, and Arena receives facts (files, commands, output) instead of a summary.
 ## 2. Prompt 1 — what has been built so far (paste into VS Code)
 
 > Use this once per VS Code session, before asking for anything.
+> A single copy-paste version of everything below (plus the training recipe)
+> lives in [`MASTER_PROMPT.md`](MASTER_PROMPT.md) — prefer that one.
 
 ```text
 You are helping me work on the GitHub repository saran-44/VISION-AI-SRM-TRP
