@@ -107,8 +107,29 @@ there is no `.env` (CI), and fails loudly if a `.env` key leaks in again.
 | 12 | Mobile | DevTools device toolbar | bottom nav, search overlay, tables scroll |
 
 Every row above maps to a backend route that a test already covers
-(`192 passed, 4 skipped`), so a failure here is a UI/runtime problem, not an
-unknown.
+(`197 passed, 5 skipped`, or `198 passed, 4 skipped` once your own `.env`
+exists), so a failure here is a UI/runtime problem, not an unknown.
+
+### If Firebase is configured in your `.env`
+
+The bench ignores it on purpose. `FIREBASE_PROJECT_ID` normally makes the login
+page sign in through Firebase, but the demo credentials are not Firebase
+accounts — every attempt came back `403` from `POST /api/auth/firebase` and the
+Test Lab stayed unreachable. In demo mode:
+
+```text
+GET /api/auth/config   {"mode":"password","firebase":{"enabled":false,...},"demo_mode":true}
+POST /api/auth/login   {"email":"admin","password":"admin"} → 200, admin@demo.local
+POST /api/auth/firebase  → 503 "Firebase sign-in is not used in demo mode."
+```
+
+The login form also relaxes two browser constraints that reject `admin` /
+`admin`: the address field becomes `type="text"` (a bare username is not an
+email) and the password minimum drops to one character. Both changes exist only
+when the page is told `demo_mode: true`; the production login path is byte for
+byte what it was, and the server still validates every credential.
+
+With `DEMO_MODE` off, `GET /api/auth/config` still returns `"mode":"firebase"`.
 
 ---
 

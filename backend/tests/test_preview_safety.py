@@ -26,7 +26,7 @@ def test_preview_ignores_datABASE_url_from_the_environment(monkeypatch, capsys, 
     monkeypatch.setattr(sys, "argv", ["run_preview.py", *extra_args, "--port", "5057"])
 
     engine, db = object(), object()
-    config = SimpleNamespace(demo_mode=True)
+    config = SimpleNamespace(demo_mode=True, firebase_project_id="")
     calls = []
 
     class FakeApp:

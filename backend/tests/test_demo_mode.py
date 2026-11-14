@@ -180,3 +180,65 @@ def test_test_lab_requires_head_admin(app, db):
     client.post("/api/auth/login", json={"email": TRANSPORT_EMAIL, "password": TRANSPORT_PASSWORD})
     assert client.get("/api/test-lab/checks").status_code == 403
     assert client.get("/test-lab").status_code == 302
+
+
+# ------------------------------------------------- Firebase configured + demo
+def test_demo_mode_hides_a_configured_firebase_project_from_the_login_page(app):
+    """A Firebase project in `.env` must not hijack the bench's login form.
+
+    The demo credentials are not Firebase accounts, so the exchange would
+    reject every attempt with 403 and the Test Lab would be unreachable —
+    which is exactly what happened on a developer machine with a real
+    FIREBASE_PROJECT_ID set.
+    """
+    normal = app.test_client().get("/api/auth/config").get_json()
+    assert normal["firebase"]["enabled"] is True  # the test config has a project id
+
+    demo = _demo_app(app, firebase_project_id="vision-ai-srmtrp", firebase_auth_enabled=True)
+    payload = demo.test_client().get("/api/auth/config").get_json()
+    assert payload["demo_mode"] is True
+    assert payload["firebase"]["enabled"] is False
+    assert payload["firebase"]["providers"] == []
+    assert payload["mode"] == "password"
+
+
+def test_demo_mode_refuses_a_firebase_token_exchange(app):
+    demo = _demo_app(app)
+    response = demo.test_client().post("/api/auth/firebase", json={"id_token": "x" * 40})
+    assert response.status_code == 503
+    assert "demo mode" in response.get_json()["error"]
+
+
+def test_demo_login_still_works_when_local_passwords_are_disabled(app, db):
+    """The bench is self-contained: turning password sign-in off must not lock it."""
+    from backend.auth import hash_password
+    from backend.services import naive_now
+
+    db.users.insert_one({
+        "email": DEMO_EMAIL,
+        "password_hash": hash_password(DEMO_ADMIN_PASSWORD),
+        "role": "head_admin",
+        "active": True,
+        "demo_user": True,
+        "created_at": naive_now(),
+    })
+
+    demo = _demo_app(app, legacy_password_login_enabled=False)
+    client = demo.test_client()
+    login = client.post("/api/auth/login", json={"email": "admin", "password": DEMO_ADMIN_PASSWORD})
+    assert login.status_code == 200
+    assert login.get_json()["user"]["email"] == DEMO_EMAIL
+    assert client.get("/api/test-lab/checks").status_code == 200
+
+    # Outside demo mode the same switch still blocks password sign-in.
+    blocked = app.test_client().post(
+        "/api/auth/login", json={"email": HEAD_ADMIN_EMAIL, "password": HEAD_ADMIN_PASSWORD}
+    )
+    assert blocked.status_code in {200, 401}  # the plain app keeps its own config
+    strict = replace(app.config["TRANSPORT_CONFIG"], legacy_password_login_enabled=False)
+    strict_app = create_app(strict, database_engine=db.engine)
+    strict_app.config.update(TESTING=True)
+    denied = strict_app.test_client().post(
+        "/api/auth/login", json={"email": HEAD_ADMIN_EMAIL, "password": HEAD_ADMIN_PASSWORD}
+    )
+    assert denied.status_code == 403

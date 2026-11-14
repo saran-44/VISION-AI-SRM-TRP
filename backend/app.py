@@ -280,7 +280,10 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
     @app.post("/api/auth/login")
     @limiter.limit(config.login_rate_limit)
     def login():
-        if not config.legacy_password_login_enabled:
+        # Demo mode owns its own seeded account, so the bench keeps working even
+        # when a deployment has turned local passwords off. Demo mode is refused
+        # outright in production by Config.validate().
+        if not config.legacy_password_login_enabled and not config.demo_mode:
             return jsonify({"error": "Password sign-in is disabled on this deployment."}), 403
         # Demo mode accepts the bare username "admin" as an alias so a test
         # session needs no real-looking address. The alias does not exist
@@ -312,7 +315,15 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         The login page uses this to decide whether to show the Firebase form,
         the Google button, the legacy password form, or a combination.
         """
-        firebase_ready = bool(config.firebase_project_id) and config.firebase_auth_enabled
+        # Demo mode is a closed bench with a seeded local account. A Firebase
+        # project configured in `.env` must not take over its login form: the
+        # demo credentials are not Firebase accounts, so every attempt would be
+        # rejected by the token exchange instead of reaching the Test Lab.
+        firebase_ready = (
+            bool(config.firebase_project_id)
+            and config.firebase_auth_enabled
+            and not config.demo_mode
+        )
         providers = list(config.firebase_allowed_providers) if firebase_ready else []
         return jsonify({
             "mode": "firebase" if firebase_ready else "password",
@@ -336,6 +347,11 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         list, and this application issues its own short-lived HttpOnly session
         cookie. The Firebase token itself is never stored.
         """
+        if config.demo_mode:
+            return jsonify({
+                "error": "Firebase sign-in is not used in demo mode. Sign in with the demo account."
+            }), 503
+
         if not config.firebase_auth_enabled or not config.firebase_project_id:
             return jsonify({"error": "Firebase sign-in is not configured on this deployment."}), 503
 
