@@ -88,3 +88,39 @@ def test_an_unreadable_file_exits_non_zero(tmp_path: Path) -> None:
 
     assert completed.returncode == 2
     assert "not a readable image" in completed.stderr
+
+
+def test_a_missing_folder_explains_where_the_frames_come_from(tmp_path: Path) -> None:
+    """The message that used to be "not a readable image" for a missing folder."""
+    completed = _run(str(tmp_path / "failed-frames"))
+
+    assert completed.returncode == 2
+    assert "no such file or folder" in completed.stderr
+    assert "run a scan on the portal first" in completed.stderr
+
+
+def test_an_empty_folder_says_so_instead_of_failing(tmp_path: Path) -> None:
+    empty = tmp_path / "failed-frames"
+    empty.mkdir()
+
+    completed = _run(str(empty))
+
+    assert "no frames in here yet" in completed.stdout
+    assert completed.returncode == 2
+
+
+def test_a_folder_is_listed_newest_first(tmp_path: Path) -> None:
+    """The frame you want to look at is the one that just failed."""
+    import os
+
+    old = tmp_path / "old.png"
+    new = tmp_path / "new.png"
+    old.write_bytes(_grey_png(32, 24, lambda x, y: 20))
+    new.write_bytes(_grey_png(32, 24, lambda x, y: 200))
+    os.utime(old, (1_600_000_000, 1_600_000_000))
+    os.utime(new, (1_700_000_000, 1_700_000_000))
+
+    completed = _run(str(tmp_path))
+
+    first = completed.stdout.splitlines()[0]
+    assert first.endswith("new.png  (32×24, 0 KB)") or "new.png" in first
