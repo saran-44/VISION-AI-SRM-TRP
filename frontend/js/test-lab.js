@@ -8,9 +8,12 @@
 import { apiGet, apiPost } from './api.js';
 import { renderCameraTile } from './cameras.js';
 import { mountShell } from './layout.js';
-import { badge, clear, el, setState, showToast } from './ui.js';
+import { badge, clear, el, icon, setState, showToast } from './ui.js';
 
 const STATUS_VARIANT = { pass: 'status-in', warn: 'status-out', fail: 'status-out' };
+
+/** Last /api/test-lab/checks payload's detection.setup, for the copy button. */
+let lastSetup = null;
 
 function statusBadge(status) {
   const label = status === 'pass' ? 'Pass' : status === 'warn' ? 'Warn' : 'Fail';
@@ -42,6 +45,76 @@ function renderChecks(payload) {
     stamp.textContent = payload.demo_mode
       ? `demo · ${payload.environment} · ${problems.length ? 'detector incomplete' : 'detector ready'}`
       : 'demo mode off';
+  }
+  renderSetup(payload.detection && payload.detection.setup);
+}
+
+/**
+ * Show each part of the vision stack separately.
+ *
+ * A half-installed stack used to surface as one sentence ("Pillow is not
+ * installed. Install the vision extras…"), which tells you neither what else is
+ * missing nor whether the command is the right one for your machine.
+ */
+function renderSetup(setup) {
+  const host = document.getElementById('visionSetup');
+  const stamp = document.getElementById('visionSetupStamp');
+  const note = document.getElementById('visionSetupNote');
+  const copy = document.getElementById('copySetup');
+  if (!host || !setup) return;
+  clear(host);
+  lastSetup = setup;
+
+  for (const component of setup.components || []) {
+    const ok = Boolean(component.present);
+    host.append(el('div', { class: `setup-item ${ok ? 'is-ok' : 'is-missing'}` }, [
+      el('span', { class: 'setup-state', 'aria-hidden': 'true' }, [icon(ok ? 'bx-check' : 'bx-x')]),
+      el('div', { class: 'setup-body' }, [
+        el('span', { class: 'setup-label', text: component.label }),
+        el('span', {
+          class: 'setup-meta',
+          text: ok ? `installed · ${component.size}` : `missing · ${component.size}`,
+        }),
+        ok ? null : el('code', { text: component.command }),
+      ]),
+    ]));
+  }
+
+  const missing = setup.missing || [];
+  if (stamp) {
+    stamp.textContent = setup.ready
+      ? 'all components present'
+      : `${missing.length} component${missing.length === 1 ? '' : 's'} missing`;
+  }
+  if (note) {
+    note.textContent = setup.ready
+      ? 'Everything the detector needs is installed. A scan should return a plate, or a clear "no sticker in this frame".'
+      : setup.note;
+  }
+  if (copy) copy.disabled = Boolean(setup.ready);
+}
+
+async function copySetup() {
+  const lines = (lastSetup?.components || [])
+    .filter((component) => !component.present)
+    .map((component) => component.command);
+  if (!lines.length) {
+    showToast('Nothing to install — every component is present.', 'success');
+    return;
+  }
+  const text = [
+    '# VISION AI - SRM TRP — detector setup (run in the activated venv)',
+    ...lines,
+    '',
+    '# or, all at once:',
+    lastSetup.install_all,
+  ].join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Install commands copied.', 'success');
+  } catch (_error) {
+    // Clipboard needs a secure context; offer the text instead of failing silently.
+    window.prompt('Copy these commands:', text);
   }
 }
 
@@ -96,9 +169,10 @@ async function scanFrame(blob) {
       status.className = 'scan-status text-danger';
     }
     if (meta) {
-      meta.textContent = 'If this says the detector is unavailable, the host has no torch/ultralytics/PIL — the free image ships without them.';
+      meta.textContent = 'The detector needs the optional vision extras. See “Detector setup” above for the exact command; the camera preview itself keeps working.';
     }
     showToast(error.message || 'Scan failed.', 'error');
+    loadChecks();
   }
 }
 
@@ -152,6 +226,8 @@ async function main() {
   mountCamera();
   wireEventForm();
   document.getElementById('refreshChecks').addEventListener('click', loadChecks);
+  document.getElementById('copySetup').addEventListener('click', copySetup);
+  document.getElementById('recheckSetup').addEventListener('click', loadChecks);
   loadChecks();
 }
 

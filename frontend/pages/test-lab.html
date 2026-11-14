@@ -11,6 +11,7 @@
   <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
   <link rel="stylesheet" href="/assets/styles.css">
   <link rel="stylesheet" href="/assets/theme.css">
+  <link rel="stylesheet" href="/assets/layout.css">
   <script type="module" src="/js/test-lab.js"></script>
 </head>
 <body>
@@ -39,6 +40,19 @@
         <div id="labScanStatus" class="scan-status">Camera idle. Allow camera access, then press “Scan plate”.</div>
         <div id="labPlate" class="number-plate">—</div>
         <div id="labScanMeta" class="scan-meta">A captured frame is posted to <code>/api/detection/scan</code> with your session cookie.</div>
+      </div>
+    </section>
+
+    <section class="card glass3d">
+      <div class="card-header">
+        <h2 class="card-title"><i class='bx bx-chip' aria-hidden="true"></i> Detector setup</h2>
+        <span id="visionSetupStamp" class="card-subtitle">Checking components…</span>
+      </div>
+      <p id="visionSetupNote" class="muted">The detector is an optional add-on: the camera preview, tables, filters and exports work without it.</p>
+      <div id="visionSetup" class="setup-grid"></div>
+      <div class="button-row">
+        <button id="copySetup" class="btn btn-outline" type="button"><i class='bx bx-copy' aria-hidden="true"></i> Copy the install commands</button>
+        <button id="recheckSetup" class="btn btn-outline" type="button"><i class='bx bx-refresh' aria-hidden="true"></i> Re-check after installing</button>
       </div>
     </section>
 
