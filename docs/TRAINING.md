@@ -112,7 +112,7 @@ Fine for a 10-epoch sanity run to prove the data loads:
 ```bash
 source .venv/Scripts/activate
 python -m ultralytics yolo detect train model=yolo26s.pt data=dataset/data.yaml \
-       imgsz=640 epochs=10 batch=4 device=cpu
+       imgsz=960 epochs=10 batch=4 device=cpu
 ```
 
 **Never train on Render.** The free instance is 0.1 CPU / 512 MB and torch is
