@@ -59,12 +59,15 @@ photos/
 uploads/
 
 # --- Trained checkpoints -----------------------------------------------------
-# The sticker model that ships with the project is tracked as `best.pt`.
-# Everything else a training run produces stays on the machine that trained it:
-# the optional number-plate and vehicle checkpoints live in `weights/`, and
-# Ultralytics writes its runs next to the dataset.
+# The sticker model that ships with the project is tracked as `best.pt`, and the
+# number-plate model as `anpr_best.pt`. Everything else a training run produces
+# stays on the machine that trained it: optional checkpoints live in `weights/`,
+# Ultralytics writes its runs next to the dataset, and manual backups of an old
+# checkpoint (`best-v10n-backup.pt`) are never part of the project.
 weights/
 runs/
+*-backup.pt
+*.pt.bak
 
 # The official SRM TRP crest and wordmark are branding assets, not captured
 # media, and must be tracked.
