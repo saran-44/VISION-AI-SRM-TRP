@@ -43,11 +43,34 @@ gains **Test Lab**.
 
 > The preview DB is in-memory: stop the process and everything you inserted is
 > gone. That is the point — it is a sandbox, not a second production.
+>
+> Your `.env` is loaded by the app for the *real* settings, but the preview
+> deliberately **ignores `DATABASE_URL` from it**. Before this change, a local
+> `.env` pointing at Supabase made the preview refuse to start with
+> “Refusing to connect the preview to an external database”. That is gone.
+> Pointing the preview at another database now takes two deliberate actions:
+> `PREVIEW_DATABASE_URL=…` **and** `ALLOW_REAL_PREVIEW_DB=true`.
 
 Non-demo checks (production-shaped, no demo login):
 
 ```bash
 python scripts/run_preview.py --port 4400 --no-seed
+```
+
+### If the preview will not start
+
+| Message | Meaning | Fix |
+| --- | --- | --- |
+| `Refusing to use an external database for the preview.` | `PREVIEW_DATABASE_URL` is set | `unset PREVIEW_DATABASE_URL` for the disposable database |
+| `Refusing to seed an external database without ALLOW_DEMO_SEED=true` | you opted into an external DB and it would be seeded | add `--no-seed`, or drop `PREVIEW_DATABASE_URL` |
+| `Address already in use` | port 4400 is taken | `python scripts/run_preview.py --port 4410` |
+| Blank page, no camera | the browser blocks `getUserMedia` on non-HTTPS non-localhost origins | use `http://localhost:4400`, not the machine's LAN IP |
+
+Activate the environment first — the system interpreter has no Flask:
+
+```bash
+source .venv/Scripts/activate     # Git Bash on Windows
+python scripts/run_preview.py --port 4400
 ```
 
 ---

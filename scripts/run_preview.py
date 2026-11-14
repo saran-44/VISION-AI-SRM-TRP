@@ -58,10 +58,19 @@ def main() -> int:
     parser.add_argument("--no-seed", action="store_true", help="do not insert demo records")
     args = parser.parse_args()
 
-    database_url = os.getenv("DATABASE_URL", "").strip() or PREVIEW_URL
+    # Deliberately NOT plain DATABASE_URL: `.env` usually holds the real
+    # Supabase URL, and a disposable preview must never touch it by accident.
+    # Pointing the preview at another database takes PREVIEW_DATABASE_URL plus
+    # ALLOW_REAL_PREVIEW_DB=true, two deliberate actions.
+    database_url = os.getenv("PREVIEW_DATABASE_URL", "").strip() or PREVIEW_URL
     isolated = database_url == PREVIEW_URL
     if not isolated and not _bool("ALLOW_REAL_PREVIEW_DB", False):
-        print("Refusing to connect the preview to an external database. Set DATABASE_URL=sqlite:///:memory: for an isolated preview.", file=sys.stderr)
+        print(
+            "Refusing to use an external database for the preview.\n"
+            f"  PREVIEW_DATABASE_URL is set; unset it to get the disposable in-memory database,\n"
+            "  or add ALLOW_REAL_PREVIEW_DB=true if you really mean it.",
+            file=sys.stderr,
+        )
         return 2
     if not isolated and not args.no_seed and not _bool("ALLOW_DEMO_SEED", False):
         print("Refusing to seed an external database without ALLOW_DEMO_SEED=true", file=sys.stderr)
@@ -83,6 +92,8 @@ def main() -> int:
     print(" VISION AI - SRM TRP — local preview")
     print(f" URL          : http://{args.host}:{args.port}/")
     print(f" Database     : {'in-memory SQLite (disposable)' if isolated else 'external PostgreSQL (URL hidden)'}")
+    if not isolated:
+        print(" WARNING      : this preview is writing to an EXTERNAL database.")
     if not args.no_seed:
         print(f" Head admin   : {head_email}")
         print(f" Transport    : {office_email}")
