@@ -884,7 +884,31 @@ def min_frame_brightness() -> float:
 
 
 def min_frame_sharpness() -> float:
-    return _float_env("VISION_MIN_SHARPNESS", 20.0)
+    """`VISION_MIN_SHARPNESS`, default 0 = softness never refuses a frame.
+
+    Deliberate: a soft frame can still contain a sticker the model finds (a
+    night frame at sharpness 93 found one at 0.85), so refusing on sharpness
+    would block scans that would have worked. Darkness is the safe signal —
+    nothing is in a black frame. Set this above 0 only on a host where waiting
+    13 s for a hopeless frame is worse than the occasional refusal.
+    """
+    return _float_env("VISION_MIN_SHARPNESS", 0.0)
+
+
+def quality_settings() -> dict[str, Any]:
+    """The detector knobs that change what a scan does, as they are now set."""
+    return {
+        "quality_gate": quality_gate(),
+        "min_brightness": min_frame_brightness(),
+        "min_sharpness": min_frame_sharpness(),
+        "sticker_upscale": sticker_upscale(),
+        "plate_upscale": plate_upscale(),
+        "tiles": os.getenv("VISION_TILES", "1").strip() or "1",
+        "image_size": image_size(),
+        "confidence": confidence_threshold(),
+        "save_failures": os.getenv("VISION_SAVE_FAILURES", "true").strip().lower()
+        not in {"0", "false", "no", "off"},
+    }
 
 
 def frame_problems(result: "DetectionResult") -> list[str]:
@@ -895,7 +919,8 @@ def frame_problems(result: "DetectionResult") -> list[str]:
             f"too dark (mean brightness {result.frame_brightness:.0f} of 255, "
             f"minimum {min_frame_brightness():.0f})"
         )
-    if result.frame_sharpness is not None and result.frame_sharpness < min_frame_sharpness():
+    floor = min_frame_sharpness()
+    if floor > 0 and result.frame_sharpness is not None and result.frame_sharpness < floor:
         problems.append(
             f"too soft (sharpness {result.frame_sharpness:.0f}, minimum {min_frame_sharpness():.0f})"
         )
@@ -1705,6 +1730,9 @@ def vision_status() -> dict[str, Any]:
             )
         ),
         "ocr_engine": ocr_engine_name(),
+        # Upscale, gate, tiles: the settings that decide whether a scan reads
+        # anything, so "is the fix live?" is answerable without a scan.
+        "quality": quality_settings(),
         # The labels the loaded checkpoint actually carries. A freshly trained
         # number-plate model (one class, "number_plate") must not be described
         # with this repository's old sticker/red-circle pair.
