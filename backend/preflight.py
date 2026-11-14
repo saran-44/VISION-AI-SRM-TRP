@@ -285,11 +285,39 @@ def check_ocr(report: Report) -> None:
         )
 
 
+def check_vision_settings(report: Report) -> None:
+    """The settings that decide whether a scan can read anything.
+
+    Reported on every run: after changing `gate.env` the operator needs to see
+    the new value in the process that is serving, not in the file that was
+    edited.
+    """
+    from .vision import quality_settings
+
+    try:
+        settings = quality_settings()
+    except Exception as exc:  # noqa: BLE001 - a readout must never fail a run
+        report.add("vision settings", WARN, f"could not be read: {type(exc).__name__}: {exc}")
+        return
+    report.add(
+        "vision settings",
+        PASS,
+        f"gate={settings['quality_gate']} (dark under {settings['min_brightness']:.0f}/255"
+        + (f", soft under {settings['min_sharpness']:.0f}" if settings["min_sharpness"] > 0 else ", softness allowed")
+        + f"), sticker upscale={settings['sticker_upscale']}x, plate upscale={settings['plate_upscale']}x, "
+        f"tiles={settings['tiles']}, {settings['image_size']}px, confidence {settings['confidence']:.2f}",
+    )
+
+
 def check_detector(report: Report, deep: bool) -> None:
     if not deep:
         report.add("detector", SKIP, "not run (pass --deep: it loads torch, ~10 s)")
         return
     started = time.perf_counter()
+    # A blank frame is exactly what the quality gate refuses; this check exists
+    # to prove the checkpoint loads, so the gate is stood down for it.
+    previous = os.environ.get("VISION_QUALITY_GATE")
+    os.environ["VISION_QUALITY_GATE"] = "off"
     try:
         from PIL import Image
 
@@ -299,6 +327,11 @@ def check_detector(report: Report, deep: bool) -> None:
     except Exception as exc:  # noqa: BLE001
         report.add("detector", FAIL, f"{type(exc).__name__}: {exc}", "Check the vision extras install")
         return
+    finally:
+        if previous is None:
+            os.environ.pop("VISION_QUALITY_GATE", None)
+        else:
+            os.environ["VISION_QUALITY_GATE"] = previous
     elapsed = int((time.perf_counter() - started) * 1000)
     report.add(
         "detector",
@@ -451,6 +484,7 @@ def run(deep: bool = False, port: int = 8080, data_dir: Path | None = None, conf
     check_frontend(report, config)
     check_models(report)
     check_ocr(report)
+    check_vision_settings(report)
     check_detector(report, deep)
     check_camera(report, config)
     check_port(report, port)

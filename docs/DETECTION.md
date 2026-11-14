@@ -333,9 +333,9 @@ sticker fills more of the frame; confirm the checkpoint matches these stickers�
 
 **The quality gate.** Before any checkpoint is loaded, `detect()` measures the
 frame (`frame_sharpness`, `frame_brightness`). A frame under
-`VISION_MIN_BRIGHTNESS` (12) or `VISION_MIN_SHARPNESS` (20) is refused with
-`reason: "frame_unusable"`, every stage reported as `skipped: "frame_unusable"`,
-and an advice sentence carrying the numbers:
+`VISION_MIN_BRIGHTNESS` (12/255) is refused with `reason: "frame_unusable"`,
+every stage reported as `skipped: "frame_unusable"`, and an advice sentence
+carrying the numbers:
 
 ```
 Refused before inference (1280×720): the frame is too dark (mean brightness 6
@@ -344,12 +344,32 @@ light on the gate (or use the camera's own IR/illuminator), let autofocus
 settle, then scan again. Set VISION_QUALITY_GATE=off to scan anyway.
 ```
 
+Darkness is the *only* default refusal, and deliberately so: nothing is in a
+black frame, while a soft frame can still contain a sticker the model finds (a
+frame at sharpness 93 found one at 0.85). `VISION_MIN_SHARPNESS` adds a
+softness floor for a host that would rather refuse than wait, but it is `0` by
+default because a wrong refusal costs a scan that would have worked.
+
 This is not a threshold trick: a dark frame has nothing in it to detect, and
 tiled inference on one costs ~13 s. The refusal takes milliseconds, and the
 frame is not written to `failed-frames/` (a night of black JPEGs would rotate
 the ring and lose the frames worth looking at). `VISION_QUALITY_GATE=off`
 restores the old behaviour — every frame through the cascade — for a host whose
 camera genuinely sees a dark subject (IR illuminators, night vision).
+
+**Seeing the settings.** `GET /api/detection/status` carries a `quality` block
+(`quality_gate`, `min_brightness`, `min_sharpness`, `sticker_upscale`,
+`plate_upscale`, `tiles`, `image_size`, `confidence`, `save_failures`), and
+`preflight.py` prints the same line on every run:
+
+```
+vision settings  pass  gate=refuse (dark under 12/255, softness allowed),
+  sticker upscale=3x, plate upscale=3x, tiles=auto, 1280px, confidence 0.25
+```
+
+That is the fastest way to answer "did my edit to `gate.env` reach the process
+that is serving?" — a value that is not in this line is not in effect, and the
+portal needs restarting.
 
 **Small crops and the OCR.** The plate stage has always enlarged a small crop
 `VISION_PLATE_UPSCALE` (3) times first. The sticker stage did not, deliberately,
@@ -501,7 +521,7 @@ pytesseract>=0.3.10
 | `VISION_STICKER_UPSCALE` | `1` | Enlargement of small sticker crops before OCR. `1` keeps the validated behaviour; `3` is what a sticker 50 px wide in the frame needs to become readable. Crops already wider than 480 px are never enlarged. |
 | `VISION_QUALITY_GATE` | `refuse` | Measure the frame first and refuse it, without loading a model, when it cannot contain a sticker. `off` scans anyway. |
 | `VISION_MIN_BRIGHTNESS` | `12` | Below this mean luminance (0-255) a frame is refused as too dark. |
-| `VISION_MIN_SHARPNESS` | `20` | Below this Laplacian variance a frame is refused as too soft. |
+| `VISION_MIN_SHARPNESS` | `0` | `0` = softness never refuses (a soft frame can still hold a sticker). Set `20` on a host where waiting for hopeless frames is worse than an occasional refusal. |
 | `VISION_VEHICLE_MODEL_PATH` | `weights/vehicle.pt` | Optional vehicle checkpoint. |
 | `VISION_VEHICLE_CONFIDENCE` | `0.35` | Minimum confidence for a vehicle box. |
 | `VISION_VEHICLE_CLASSES` | `bicycle,motorcycle,car,bus,truck` | Labels counted as a vehicle. |

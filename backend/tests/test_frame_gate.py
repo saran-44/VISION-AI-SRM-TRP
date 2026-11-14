@@ -297,3 +297,89 @@ def test_a_black_frame_is_refused_end_to_end_without_a_checkpoint(
     assert payload["frame"]["brightness"] < 20
     assert payload["frame"]["saved"] is None
     assert all(stage["skipped"] == "frame_unusable" for stage in payload["stages"])
+
+
+# ------------------------------------------- softness is advice, not a refusal
+def test_a_washed_out_but_bright_frame_is_still_scanned(monkeypatch) -> None:
+    """Sharpness never refuses by default: a soft frame can still hold a sticker."""
+    monkeypatch.delenv("VISION_MIN_SHARPNESS", raising=False)
+    flat = PIL.new("RGB", (320, 240), (200, 200, 200))  # bright, zero edges
+    with pytest.raises(VisionUnavailable):  # reached the model, i.e. was not refused
+        detect(flat)
+
+
+def test_softness_refuses_only_when_a_floor_is_set(monkeypatch) -> None:
+    monkeypatch.setenv("VISION_MIN_SHARPNESS", "20")
+    result = detect(PIL.new("RGB", (320, 240), (200, 200, 200)))
+    assert result.reason == "frame_unusable"
+    assert "too soft" in result.advice
+    assert "too dark" not in result.advice
+
+
+# ------------------------------------------------- the settings the panel sees
+def test_the_reported_settings_name_every_knob(monkeypatch) -> None:
+    from backend.vision import quality_settings
+
+    monkeypatch.setenv("VISION_STICKER_UPSCALE", "3")
+    monkeypatch.setenv("VISION_TILES", "auto")
+    settings = quality_settings()
+    assert settings["sticker_upscale"] == 3
+    assert settings["tiles"] == "auto"
+    assert set(settings) >= {
+        "quality_gate",
+        "min_brightness",
+        "min_sharpness",
+        "sticker_upscale",
+        "plate_upscale",
+        "tiles",
+        "image_size",
+        "confidence",
+        "save_failures",
+    }
+
+
+def test_the_status_payload_carries_the_settings(monkeypatch) -> None:
+    from backend.vision import vision_status
+
+    monkeypatch.setenv("VISION_STICKER_UPSCALE", "3")
+    assert vision_status()["quality"]["sticker_upscale"] == 3
+
+
+# ---------------------------------------------------------------- preflight
+def test_preflight_prints_the_settings_it_will_use(monkeypatch) -> None:
+    import backend.preflight as preflight
+
+    monkeypatch.setenv("VISION_STICKER_UPSCALE", "3")
+    monkeypatch.setenv("VISION_MIN_SHARPNESS", "0")
+    report = preflight.Report()
+    preflight.check_vision_settings(report)
+
+    check = report.checks[0]
+    assert check.status == "pass"
+    assert "sticker upscale=3x" in check.detail
+    assert "softness allowed" in check.detail
+
+
+def test_the_deep_detector_check_is_not_refused_by_its_own_blank_frame(monkeypatch) -> None:
+    """The probe must prove the checkpoint loads, so it stands the gate down."""
+    import backend.preflight as preflight
+    import backend.vision as vision
+
+    seen: list[str | None] = []
+
+    def fake_detect(image, stages=None):
+        import os
+
+        seen.append(os.environ.get("VISION_QUALITY_GATE"))
+        return DetectionResult(image_size=1280, model="best.pt")
+
+    monkeypatch.setattr(vision, "detect", fake_detect)
+    monkeypatch.setenv("VISION_QUALITY_GATE", "refuse")
+    report = preflight.Report()
+    preflight.check_detector(report, deep=True)
+
+    assert seen == ["off"]
+    assert report.checks[0].status == "pass"
+    import os
+
+    assert os.environ["VISION_QUALITY_GATE"] == "refuse"  # put back
