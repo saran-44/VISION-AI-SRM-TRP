@@ -61,9 +61,9 @@ def test_image_size_is_configurable_and_clamped(monkeypatch):
     monkeypatch.setenv("VISION_IMAGE_SIZE", "99999")
     assert image_size() == 1536
     monkeypatch.setenv("VISION_IMAGE_SIZE", "not-a-number")
-    assert image_size() == 640
+    assert image_size() == 960
     monkeypatch.delenv("VISION_IMAGE_SIZE", raising=False)
-    assert image_size() == 640
+    assert image_size() == 960
 
 
 def test_status_labels_come_from_a_loaded_number_plate_model():

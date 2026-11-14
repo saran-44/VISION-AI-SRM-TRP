@@ -97,7 +97,7 @@ def test_boxes_below_the_threshold_report_their_best_confidence(no_ocr):
     assert result.boxes_total == 2
     assert result.boxes_above_threshold == 0
     assert result.best_confidence == pytest.approx(0.22)
-    assert result.threshold == pytest.approx(0.35)
+    assert result.threshold == pytest.approx(0.25)
     assert "VISION_CONFIDENCE" in result.advice
 
 
@@ -128,7 +128,7 @@ def test_low_confidence_probe_keeps_the_threshold_for_candidates(no_ocr):
     result = vision.detect(_FakeImage(), model=model)
 
     assert model.calls[0]["conf"] == pytest.approx(0.05)
-    assert model.calls[0]["imgsz"] == 640
+    assert model.calls[0]["imgsz"] == 960
     assert result.boxes_total == 2
     assert result.boxes_above_threshold == 1
     assert [c.confidence for c in result.candidates] == [pytest.approx(0.80)]
@@ -140,6 +140,89 @@ def test_scan_payload_carries_reason_and_advice(no_ocr):
 
     assert payload["reason"] == "below_threshold"
     assert payload["advice"]
-    assert payload["image_size"] == 640
-    assert payload["threshold"] == pytest.approx(0.35)
+    assert payload["image_size"] == 960
+    assert payload["threshold"] == pytest.approx(0.25)
     assert payload["best_confidence"] == pytest.approx(0.12)
+
+
+# ------------------------------------------------------- class-1-only filter
+def test_only_the_sticker_class_reaches_the_ocr(monkeypatch):
+    """class 0 = red circle, class 1 = sticker: only class 1 is OCR'd."""
+    seen = []
+
+    def fake_read_text(image, engine_name=None):
+        seen.append(image)
+        return "TN 12 AB 1234"
+
+    monkeypatch.setattr(vision, "read_text", fake_read_text)
+    monkeypatch.delenv("VISION_CONFIDENCE", raising=False)
+    monkeypatch.delenv("VISION_STICKER_CLASS", raising=False)
+
+    model = _FakeModel([
+        (0.93, 1, [400, 300, 520, 360]),   # sticker  -> OCR
+        (0.88, 0, [380, 280, 560, 400]),   # red circle -> skipped
+    ])
+    result = vision.detect(_FakeImage(), model=model)
+
+    assert result.sticker_class == 1
+    assert len(result.candidates) == 1
+    assert result.candidates[0].class_id == 1
+    assert result.candidates[0].class_name == "sticker"
+    assert result.boxes_other_class == 1
+    assert len(seen) == 1  # exactly one OCR call
+
+
+def test_a_red_circle_alone_is_reported_as_other_class(no_ocr):
+    model = _FakeModel([(0.80, 0, [380, 280, 560, 400])])
+    result = vision.detect(_FakeImage(), model=model)
+
+    assert result.reason == "other_class"
+    assert result.candidates == []
+    assert result.boxes_other_class == 1
+    assert "sticker" in result.advice
+    assert vision.best_candidate(result) is None
+
+
+def test_single_class_checkpoint_uses_its_only_class(no_ocr):
+    """A one-class number-plate model has no class 1; do not reject everything."""
+    class _PlateModel(_FakeModel):
+        names = {0: "number_plate"}
+
+    model = _PlateModel([(0.90, 0, [400, 300, 520, 360])])
+    result = vision.detect(_FakeImage(), model=model)
+
+    assert result.sticker_class == 0
+    assert len(result.candidates) == 1
+    assert result.candidates[0].class_name == "number_plate"
+
+
+def test_sticker_class_can_be_overridden(no_ocr, monkeypatch):
+    monkeypatch.setenv("VISION_STICKER_CLASS", "0")
+    model = _FakeModel([(0.90, 0, [400, 300, 520, 360])])
+    result = vision.detect(_FakeImage(), model=model)
+
+    assert result.sticker_class == 0
+    assert len(result.candidates) == 1
+
+
+def test_invalid_sticker_class_falls_back_to_the_model(no_ocr, monkeypatch):
+    monkeypatch.setenv("VISION_STICKER_CLASS", "sticker-panel")
+    result = vision.detect(_FakeImage(), model=_FakeModel([(0.90, 1, [1, 1, 9, 9])]))
+
+    assert result.sticker_class == 1
+
+
+def test_defaults_match_the_detector_that_was_validated(monkeypatch):
+    """imgsz 960, probe from 0.05, OCR gate 0.25."""
+    for name in ("VISION_CONFIDENCE", "VISION_IMAGE_SIZE", "VISION_STICKER_CLASS"):
+        monkeypatch.delenv(name, raising=False)
+
+    model = _FakeModel([(0.90, 1, [400, 300, 520, 360])])
+    monkeypatch.setattr(vision, "read_text", lambda image, engine_name=None: "TN 12 AB 1234")
+    result = vision.detect(_FakeImage(), model=model)
+
+    assert model.calls[0]["imgsz"] == 960
+    assert model.calls[0]["conf"] == pytest.approx(0.05)
+    assert result.threshold == pytest.approx(0.25)
+    assert result.image_size == 960
+    assert result.bus_number if False else result.reason == "ok"

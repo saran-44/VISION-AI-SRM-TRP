@@ -45,6 +45,9 @@ CLASS_LABELS = {
     CLASS_STICKER: "sticker",
 }
 
+# The only class that is OCR'd. See sticker_class_id().
+DEFAULT_STICKER_CLASS = CLASS_STICKER
+
 # Bus numbers seen in this project look like "TN 12 AB 1234" / "BUS-001".
 # The OCR result is normalised to the same shape the API accepts.
 PLATE_CLEAN_RE = re.compile(r"[^A-Z0-9 .\-]")
@@ -96,6 +99,8 @@ class DetectionResult:
     # counters below separate them.
     boxes_total: int = 0
     boxes_above_threshold: int = 0
+    boxes_other_class: int = 0
+    sticker_class: int = DEFAULT_STICKER_CLASS
     best_confidence: float = 0.0
     threshold: float = 0.0
     image_size: int = 0
@@ -111,6 +116,8 @@ class DetectionResult:
             "frame_height": self.frame_height,
             "boxes_total": self.boxes_total,
             "boxes_above_threshold": self.boxes_above_threshold,
+            "boxes_other_class": self.boxes_other_class,
+            "sticker_class": self.sticker_class,
             "best_confidence": round(float(self.best_confidence), 4),
             "threshold": round(float(self.threshold), 4),
             "image_size": self.image_size,
@@ -131,29 +138,61 @@ def model_path() -> Path:
 
 
 def confidence_threshold() -> float:
+    """Minimum detection confidence for a sticker that reaches the OCR.
+
+    0.25 is the value the detector was validated with on the gate frames: the
+    model is asked for boxes from 0.05, so anything weaker than 0.25 is a
+    near-miss that only shows up in the diagnostics, never in a candidate.
+    """
     try:
-        value = float(os.getenv("VISION_CONFIDENCE", "0.35"))
+        value = float(os.getenv("VISION_CONFIDENCE", "0.25"))
     except ValueError:
-        return 0.35
+        return 0.25
     return max(0.01, min(0.99, value))
 
 
 def image_size() -> int:
     """Inference letterbox size for the detector.
 
-    A bus number plate occupies a small part of a 1080p gate frame, so the
-    default 640 px of a COCO model is often the limiting factor — not the
-    backbone. Raise it to 960 (or 1280) when the plates are far from the
-    camera; it costs quadratic compute, so it is an explicit trade-off.
+    A bus sticker occupies a small part of a 1280×720 gate frame, so the
+    COCO default of 640 px was the limiting factor, not the backbone: at 960 the
+    sticker survives the letterbox with enough detail for the OCR. Raise it to
+    1280 for far plates; it costs quadratic compute, so it is an explicit
+    trade-off.
 
-    Train at the size you infer at: a model fine-tuned at 640 and run at 960
-    is usually still fine, the reverse is not.
+    Train at the size you infer at: a model fine-tuned at 640 and run at 960 is
+    usually still fine, the reverse is not.
     """
     try:
-        value = int(os.getenv("VISION_IMAGE_SIZE", "640"))
+        value = int(os.getenv("VISION_IMAGE_SIZE", "960"))
     except ValueError:
-        return 640
+        return 960
     return max(320, min(1536, value))
+
+
+def sticker_class_id(model=None) -> int:
+    """Which class id counts as "the sticker".
+
+    The shipped `best.pt` has two classes: 0 = "red circle" (the painted ring)
+    and 1 = "sticker" (the panel that carries the number). Only class 1 may be
+    cropped and OCR'd — the ring is a separate box around the same bus and
+    reading it wastes OCR calls and produces empty text.
+
+    A checkpoint trained as a single-class plate/sticker model has no class 1 at
+    all, so when the model declares exactly one class that class is used.
+    `VISION_STICKER_CLASS` overrides both rules.
+    """
+    configured = os.getenv("VISION_STICKER_CLASS", "").strip()
+    if configured:
+        try:
+            return max(0, int(configured))
+        except ValueError:
+            logger.warning("VISION_STICKER_CLASS=%r is not a number; ignoring it", configured)
+
+    names = getattr(model, "names", None) or {}
+    if len(names) == 1:
+        return int(next(iter(names)))
+    return DEFAULT_STICKER_CLASS
 
 
 def ocr_engine_name() -> str:
@@ -403,6 +442,8 @@ def detect(image, *, model=None, threshold: float | None = None) -> DetectionRes
         return _explain(result)
 
     names = getattr(model, "names", {}) or {}
+    sticker_id = sticker_class_id(model)
+    result.sticker_class = sticker_id
     limit = max_crops()
     rows = []
     for index in range(len(boxes)):
@@ -420,6 +461,11 @@ def detect(image, *, model=None, threshold: float | None = None) -> DetectionRes
     for confidence, class_id, coords in rows:
         if confidence < threshold:
             break  # everything after this one is weaker still
+        # Only the sticker class reaches the OCR. The red circle is a box around
+        # the same bus: cropping it costs an OCR call and yields no number.
+        if class_id != sticker_id:
+            result.boxes_other_class += 1
+            continue
         if len(result.candidates) >= limit:
             break
         class_name = names.get(class_id, CLASS_LABELS.get(class_id, str(class_id)))
@@ -448,12 +494,23 @@ def _explain(result: DetectionResult) -> DetectionResult:
     """Fill in `reason`/`advice` so the caller never has to guess."""
     readable = [candidate for candidate in result.candidates if candidate.bus_number]
 
+    sticker_named = CLASS_LABELS.get(result.sticker_class, f"class {result.sticker_class}")
+
     if result.boxes_total == 0:
         result.reason = "no_detection"
         result.advice = (
             "No box at all, even at 0.05 confidence. Point the camera at the sticker, "
             "fill more of the frame with it, and check the model matches these stickers: "
             "python scripts/inspect_model.py"
+        )
+    elif not result.candidates and result.boxes_other_class:
+        # The red circle was found, the sticker panel was not: usually a bus
+        # whose sticker is dirty, in shadow, or half out of frame.
+        result.reason = "other_class"
+        result.advice = (
+            f"{result.boxes_other_class} box(es) of another class were found, none of "
+            f"{sticker_named} (class {result.sticker_class}). The painted ring is visible but the "
+            "sticker panel is not: check the mounting, clean the sticker, or lower VISION_CONFIDENCE."
         )
     elif not result.candidates:
         result.reason = "below_threshold"
@@ -608,6 +665,12 @@ def vision_status() -> dict[str, Any]:
         "model_loaded": loaded is not None,
         "confidence_threshold": confidence_threshold(),
         "image_size": image_size(),
+        "sticker_class": sticker_class_id(loaded),
+        "sticker_class_name": str(
+            (getattr(loaded, "names", None) or CLASS_LABELS).get(
+                sticker_class_id(loaded), f"class {sticker_class_id(loaded)}"
+            )
+        ),
         "ocr_engine": ocr_engine_name(),
         # The labels the loaded checkpoint actually carries. A freshly trained
         # number-plate model (one class, "number_plate") must not be described
