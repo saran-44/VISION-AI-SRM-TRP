@@ -151,16 +151,25 @@ async function scanFrame(blob) {
     const payload = await response.json().catch(() => null);
     if (!response.ok) throw new Error(payload?.error || `Scan failed (${response.status}).`);
     if (plate) plate.textContent = payload.bus_number || 'UNKNOWN';
+    // The response says *why* it has no number: nothing detected, everything
+    // below the confidence threshold, or a sticker whose text the OCR missed.
+    // All three used to read "no sticker in this frame".
+    const detection = payload.detection || {};
+    const reason = payload.reason || '';
     if (status) {
       status.textContent = payload.bus_number
         ? `Read ${payload.bus_number} (${Math.round((payload.confidence || 0) * 100)}%)`
-        : 'The detector found no sticker in this frame.';
+        : reason === 'below_threshold'
+          ? `Sticker seen, ${Math.round((detection.best_confidence || 0) * 100)}% — under the ${Math.round((detection.threshold || 0) * 100)}% threshold.`
+          : reason === 'unreadable'
+            ? 'Sticker found, but the number could not be read.'
+            : 'No sticker found in this frame.';
       status.className = `scan-status ${payload.bus_number ? '' : 'text-danger'}`.trim();
     }
     if (meta) {
       meta.textContent = payload.raw_text
         ? `OCR read: ${payload.raw_text}`
-        : 'Detector responded; no text was read from this frame.';
+        : payload.advice || 'Detector responded; no text was read from this frame.';
     }
     showToast(payload.bus_number ? `Detected ${payload.bus_number}` : 'No plate in this frame.', payload.bus_number ? 'success' : 'error');
   } catch (error) {

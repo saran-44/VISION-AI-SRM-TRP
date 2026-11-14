@@ -246,3 +246,32 @@ def test_config_parser_accepts_rtsp_but_rejects_embedded_credentials():
         _parse_camera_streams(
             '{"cam": {"type": "mjpeg", "url": "http://u:p@host/stream", "label": "Cam"}}'
         )
+
+
+def test_scan_surfaces_reason_and_advice(client, users, monkeypatch):
+    """The route must pass the detector's diagnosis through to the caller."""
+    import backend.app as app_module
+    import backend.vision as vision
+
+    login_head_admin(client, users)
+
+    result = vision.DetectionResult(reason="below_threshold", advice="lower VISION_CONFIDENCE")
+    result.boxes_total = 2
+    result.best_confidence = 0.21
+    result.threshold = 0.35
+
+    monkeypatch.setattr(app_module, "decode_image", lambda payload: object())
+    monkeypatch.setattr(app_module, "detect", lambda image: result)
+
+    response = client.post(
+        "/api/detection/scan",
+        data={"image": (io.BytesIO(_png_bytes()), "frame.jpg")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["bus_number"] is None
+    assert payload["reason"] == "below_threshold"
+    assert payload["advice"] == "lower VISION_CONFIDENCE"
+    assert payload["detection"]["boxes_total"] == 2
+    assert payload["detection"]["best_confidence"] == pytest.approx(0.21)

@@ -180,6 +180,29 @@ If a half-finished install left you with only some of the packages, the card
 still works: it reports `Pillow is not installed` next to `torch: installed`,
 instead of the single sentence that made this confusing.
 
+### “It says no sticker, but there is one”
+
+The scan now says *why* it returned nothing — three different failures that used
+to read the same:
+
+| Status line | `reason` | What to do |
+| --- | --- | --- |
+| No sticker found in this frame | `no_detection` | No box even at 0.05. Fill more of the frame with the sticker, or check the model matches: `python scripts/inspect_model.py` |
+| Sticker seen, 22% — under the 35% threshold | `below_threshold` | It *is* being seen. `set VISION_CONFIDENCE=0.2` in `.env` to confirm, or raise `VISION_IMAGE_SIZE` |
+| Sticker found, but the number could not be read | `unreadable` | Detection works, OCR does not. Move closer, `VISION_IMAGE_SIZE=960`, or a stronger OCR engine |
+
+The second line under the plate (the `scan-meta` text) prints the API's
+`advice` field verbatim, including the measured crop width.
+
+Fastest way to debug without the browser — scan a photo of the sticker:
+
+```bash
+python scripts/scan_image.py frame.jpg
+# boxes: 2 found, 1 above threshold, best 0.91
+#   · sticker      0.91  bbox=[412, 288, 596, 352]  text='TN 12 AB 1234'
+# RESULT: TN 12 AB 1234  (0.91)
+```
+
 **IP / NVR camera (later, no code change).** Set `CAMERA_STREAM_URLS` to a JSON
 object and the same tiles switch source:
 

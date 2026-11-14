@@ -90,6 +90,17 @@ class DetectionResult:
     inference_ms: int = 0
     frame_width: int = 0
     frame_height: int = 0
+    # Diagnostics. "No sticker in this frame" used to cover three very different
+    # situations: nothing detected, something detected below the confidence
+    # threshold, and a sticker found whose number the OCR could not read. The
+    # counters below separate them.
+    boxes_total: int = 0
+    boxes_above_threshold: int = 0
+    best_confidence: float = 0.0
+    threshold: float = 0.0
+    image_size: int = 0
+    reason: str = ""
+    advice: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -98,6 +109,13 @@ class DetectionResult:
             "inference_ms": self.inference_ms,
             "frame_width": self.frame_width,
             "frame_height": self.frame_height,
+            "boxes_total": self.boxes_total,
+            "boxes_above_threshold": self.boxes_above_threshold,
+            "best_confidence": round(float(self.best_confidence), 4),
+            "threshold": round(float(self.threshold), 4),
+            "image_size": self.image_size,
+            "reason": self.reason,
+            "advice": self.advice,
         }
 
 
@@ -352,14 +370,21 @@ def max_crops() -> int:
 
 
 def detect(image, *, model=None, threshold: float | None = None) -> DetectionResult:
-    """Run the detector over an image and OCR each detected sticker."""
+    """Run the detector over an image and OCR each detected sticker.
+
+    The model is asked for boxes down to 0.05 confidence and filtered here, so
+    a "nothing found" answer can say *why*: no boxes at all, boxes under the
+    threshold, or a sticker whose number the OCR could not read.
+    """
     import time
 
     model = model or load_model()
     threshold = confidence_threshold() if threshold is None else threshold
+    probe_conf = min(threshold, 0.05)
+    size = image_size()
     started = time.perf_counter()
 
-    results = model.predict(source=image, conf=threshold, imgsz=image_size(), verbose=False)
+    results = model.predict(source=image, conf=probe_conf, imgsz=size, verbose=False)
     elapsed_ms = int((time.perf_counter() - started) * 1000)
 
     result = DetectionResult(
@@ -367,22 +392,37 @@ def detect(image, *, model=None, threshold: float | None = None) -> DetectionRes
         inference_ms=elapsed_ms,
         frame_width=getattr(image, "width", 0) or 0,
         frame_height=getattr(image, "height", 0) or 0,
+        threshold=float(threshold),
+        image_size=size,
     )
     if not results:
-        return result
+        return _explain(result)
 
     boxes = getattr(results[0], "boxes", None)
-    if boxes is None:
-        return result
+    if boxes is None or len(boxes) == 0:
+        return _explain(result)
 
     names = getattr(model, "names", {}) or {}
     limit = max_crops()
-    for index in range(min(len(boxes), limit)):
-        class_id = int(boxes.cls[index].item())
-        confidence = float(boxes.conf[index].item())
-        coords = [int(value) for value in boxes.xyxy[index].tolist()]
-        class_name = names.get(class_id, CLASS_LABELS.get(class_id, str(class_id)))
+    rows = []
+    for index in range(len(boxes)):
+        rows.append((
+            float(boxes.conf[index].item()),
+            int(boxes.cls[index].item()),
+            [int(value) for value in boxes.xyxy[index].tolist()],
+        ))
+    # Ultralytics sorts by confidence already; do not rely on it.
+    rows.sort(key=lambda row: row[0], reverse=True)
 
+    result.boxes_total = len(rows)
+    result.best_confidence = rows[0][0]
+
+    for confidence, class_id, coords in rows:
+        if confidence < threshold:
+            break  # everything after this one is weaker still
+        if len(result.candidates) >= limit:
+            break
+        class_name = names.get(class_id, CLASS_LABELS.get(class_id, str(class_id)))
         candidate = PlateCandidate(
             confidence=confidence,
             bbox=coords,
@@ -400,7 +440,42 @@ def detect(image, *, model=None, threshold: float | None = None) -> DetectionRes
             candidate.bus_number = normalize_plate(candidate.raw_text)
         result.candidates.append(candidate)
 
-    result.candidates.sort(key=lambda item: item.confidence, reverse=True)
+    result.boxes_above_threshold = len(result.candidates)
+    return _explain(result)
+
+
+def _explain(result: DetectionResult) -> DetectionResult:
+    """Fill in `reason`/`advice` so the caller never has to guess."""
+    readable = [candidate for candidate in result.candidates if candidate.bus_number]
+
+    if result.boxes_total == 0:
+        result.reason = "no_detection"
+        result.advice = (
+            "No box at all, even at 0.05 confidence. Point the camera at the sticker, "
+            "fill more of the frame with it, and check the model matches these stickers: "
+            "python scripts/inspect_model.py"
+        )
+    elif not result.candidates:
+        result.reason = "below_threshold"
+        result.advice = (
+            f"{result.boxes_total} box(es) found, best {result.best_confidence:.2f} is under the "
+            f"{result.threshold:.2f} threshold. Lower VISION_CONFIDENCE (0.15-0.25) to confirm the "
+            "sticker is being seen, or raise VISION_IMAGE_SIZE when it is small in the frame."
+        )
+    elif not readable:
+        largest = max(
+            (abs(candidate.bbox[2] - candidate.bbox[0]) for candidate in result.candidates),
+            default=0,
+        )
+        result.reason = "unreadable"
+        result.advice = (
+            f"Sticker detected at {result.candidates[0].confidence:.2f} but the OCR read no text. "
+            f"The crop was about {largest} px wide: get closer, raise VISION_IMAGE_SIZE, "
+            "or install a stronger OCR engine (see docs/DETECTION.md)."
+        )
+    else:
+        result.reason = "ok"
+        result.advice = ""
     return result
 
 
