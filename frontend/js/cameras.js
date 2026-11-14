@@ -214,8 +214,14 @@ export function renderCameraTile(options) {
   const container = el('div', { class: 'camera-container' }, [stateHost]);
   const controls = el('div', { class: 'camera-controls' });
   let stream = null;
+  let autoScanTimer = null;
+  let autoScanBusy = false;
 
   const stop = () => {
+    if (autoScanTimer) {
+      clearInterval(autoScanTimer);
+      autoScanTimer = null;
+    }
     stopStream(stream);
     stream = null;
   };
@@ -266,6 +272,35 @@ export function renderCameraTile(options) {
           if (blob) await onCapture(blob, { cameraId: id, label });
         },
       }, [icon('bx-scan'), el('span', { text: 'Scan plate' })]));
+
+      const autoScanButton = el('button', {
+        class: 'btn btn-outline camera-btn',
+        type: 'button',
+        onclick: async () => {
+          if (autoScanTimer) {
+            clearInterval(autoScanTimer);
+            autoScanTimer = null;
+            autoScanButton.classList.remove('active');
+            autoScanButton.replaceChildren(icon('bx-play'), el('span', { text: 'Auto scan' }));
+            return;
+          }
+          const scan = async () => {
+            if (autoScanBusy) return;
+            autoScanBusy = true;
+            try {
+              const blob = await grabFrame(video);
+              if (blob) await onCapture(blob, { cameraId: id, label, automatic: true });
+            } finally {
+              autoScanBusy = false;
+            }
+          };
+          await scan();
+          autoScanTimer = setInterval(scan, 3000);
+          autoScanButton.classList.add('active');
+          autoScanButton.replaceChildren(icon('bx-stop-circle'), el('span', { text: 'Stop auto' }));
+        },
+      }, [icon('bx-play'), el('span', { text: 'Auto scan' })]);
+      controls.append(autoScanButton);
     }
     return video;
   };
@@ -323,11 +358,13 @@ export function renderCameraTile(options) {
  */
 export function renderCameras(host, cameras = [], handlers = {}) {
   host.replaceChildren();
-  if (!cameras.length) {
+  const availableCameras = cameras.filter((camera) => !camera.demo && camera.stream_type);
+  host.dataset.cameraCount = String(availableCameras.length);
+  if (!availableCameras.length) {
     setState(host, 'empty', 'No camera tiles are configured.');
     return;
   }
-  cameras.forEach((camera) => {
+  availableCameras.forEach((camera) => {
     host.append(renderCameraTile({
       id: camera.id,
       label: camera.label,

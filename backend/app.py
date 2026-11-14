@@ -119,12 +119,15 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         response.headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()"
         csp = (
             "default-src 'self'; "
-            "script-src 'self'; "
+            "script-src 'self' https://apis.google.com https://www.gstatic.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
             "font-src 'self' https://fonts.gstatic.com https://unpkg.com data:; "
             "img-src 'self' data: https:; "
             "media-src 'self' blob: https:; "
-            "connect-src 'self' https:; "
+            "connect-src 'self' https://apis.google.com https://www.googleapis.com "
+            "https://*.googleapis.com https://*.firebaseapp.com https://securetoken.googleapis.com "
+            "https://identitytoolkit.googleapis.com; "
+            "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com; "
             "worker-src 'self' blob:; "
             "object-src 'none'; "
             "base-uri 'self'; "
@@ -632,7 +635,17 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
                 after={"error": str(exc), "source": payload.get("source", "device")},
                 flask_request=request,
             )
-            return jsonify({"error": str(exc)}), 503
+            return jsonify(
+                {
+                    "error": (
+                        "Cloud vision is unavailable on this Render Free service. "
+                        "Run VisionAI-GateAgent.exe on the gate computer for automatic scanning."
+                    ),
+                    "code": "vision_local_agent_required",
+                    "detail": str(exc),
+                    "auto_scan": {"available": False, "agent": "VisionAI-GateAgent.exe"},
+                }
+            ), 503
         except Exception as exc:  # pragma: no cover - defensive
             current_app.logger.exception("Detection failed")
             record_audit(

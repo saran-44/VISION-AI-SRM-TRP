@@ -88,6 +88,7 @@ function mountBrowserCamera(cameras) {
   if (!host) return;
   const existing = host.querySelector('[data-camera-id="browser-local"]');
   if (existing) existing.remove();
+  host.querySelector('.state-box')?.remove();
 
   if (!navigator.mediaDevices?.getUserMedia) {
     return; // Browser cannot access a camera; nothing to offer.

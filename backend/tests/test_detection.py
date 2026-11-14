@@ -276,3 +276,26 @@ def test_scan_surfaces_reason_and_advice(client, users, monkeypatch):
     assert payload["detection"]["boxes_total"] == 2
     assert payload["detection"]["best_confidence"] == pytest.approx(0.21)
     assert payload["detection"]["sticker_class"] == 1
+
+
+def test_scan_explains_when_cloud_vision_is_unavailable(client, users, monkeypatch):
+    import backend.app as app_module
+    from backend.vision import VisionUnavailable
+
+    login_head_admin(client, users)
+    monkeypatch.setattr(
+        app_module,
+        "decode_image",
+        lambda payload: (_ for _ in ()).throw(VisionUnavailable("Pillow is not installed")),
+    )
+
+    response = client.post(
+        "/api/detection/scan",
+        data={"image": (io.BytesIO(_png_bytes()), "frame.jpg")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 503
+    payload = response.get_json()
+    assert payload["code"] == "vision_local_agent_required"
+    assert payload["auto_scan"]["agent"] == "VisionAI-GateAgent.exe"

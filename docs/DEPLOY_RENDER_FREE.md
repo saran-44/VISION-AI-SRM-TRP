@@ -365,6 +365,12 @@ deliberately ships without torch. See [§10](#10-limits-of-the-free-plan).
 | Ephemeral disk | nothing persists locally | all state already lives in Supabase |
 | No CDN | static files come from gunicorn | acceptable here; revisit Cloud Run + Hosting later |
 
+For automatic gate scanning on the free deployment, install and run the Windows
+`VisionAI-GateAgent.exe` on the gate computer. It performs the vision cascade
+locally and uploads identified events with `X-Device-Key`; browser camera scans
+on the Render service return a clear `vision_local_agent_required` response
+instead of pretending that Pillow alone can enable the full detector stack.
+
 ---
 
 ## 11. Security checklist

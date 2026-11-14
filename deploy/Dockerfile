@@ -24,26 +24,42 @@ RUN apt-get update \
 
 COPY backend/requirements.txt /tmp/requirements.txt
 RUN python -m venv "$VIRTUAL_ENV" \
- && pip install --upgrade pip \
- && pip install -r /tmp/requirements.txt
+ && "$VIRTUAL_ENV/bin/python" -m pip install --upgrade pip \
+ && "$VIRTUAL_ENV/bin/python" -m pip install -r /tmp/requirements.txt
 
 # Vision extras are installed in a separate layer so the base image stays
 # small when detection is not needed. Set INSTALL_VISION=0 to skip them.
 ARG INSTALL_VISION=1
 COPY backend/requirements-vision.txt /tmp/requirements-vision.txt
 RUN if [ "$INSTALL_VISION" = "1" ]; then \
-      pip install --extra-index-url https://download.pytorch.org/whl/cpu \
-        -r /tmp/requirements-vision.txt; \
+      "$VIRTUAL_ENV/bin/python" -m pip install \
+        --index-url https://download.pytorch.org/whl/cpu \
+        --extra-index-url https://pypi.org/simple \
+        torch==2.9.1 torchvision==0.24.1; \
+      sed '/^torch==/d; /^torchvision==/d' /tmp/requirements-vision.txt \
+        > /tmp/requirements-vision-pypi.txt; \
+      "$VIRTUAL_ENV/bin/python" -m pip install \
+        --index-url https://pypi.org/simple \
+        -r /tmp/requirements-vision-pypi.txt; \
+      "$VIRTUAL_ENV/bin/python" -m pip uninstall -y opencv-python || true; \
+      "$VIRTUAL_ENV/bin/python" -m pip install --force-reinstall --no-deps \
+        opencv-python-headless==4.10.0.84; \
+      "$VIRTUAL_ENV/bin/python" -c "import cv2; import ultralytics"; \
     fi
 
 COPY backend/ /app/backend/
 COPY frontend/ /app/frontend/
 COPY best.pt /app/best.pt
+COPY anpr_best.pt /app/anpr_best.pt
+COPY scripts/fetch_vehicle_model.py /app/scripts/fetch_vehicle_model.py
+RUN if [ "$INSTALL_VISION" = "1" ]; then \
+      "$VIRTUAL_ENV/bin/python" /app/scripts/fetch_vehicle_model.py; \
+    fi
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD curl -fsS http://localhost:8080/api/health || exit 1
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "2", "--threads", "4", \
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "4", \
      "--timeout", "180", "--access-logfile", "-", "backend.app:create_app()"]

@@ -17,11 +17,11 @@ from backend.tests.conftest import HEAD_ADMIN_EMAIL, HEAD_ADMIN_PASSWORD
 ROOT = Path(__file__).resolve().parents[2]
 
 
-RENDER_ORIGIN = "https://srm-trp-transport.onrender.com"
+INSTABOX_ORIGIN = "https://8080-agq5ufybv2apmker5klcd7t7zi.instabox.tech"
 
 
-def test_hosting_redirects_every_path_to_the_free_render_backend():
-    """Hosting runs on the free Spark plan, which cannot rewrite to Cloud Run.
+def test_hosting_redirects_every_path_to_the_instabox_backend():
+    """Hosting redirects visitors to the full-vision InstaBox backend.
 
     A rewrite to ``run.serviceId`` needs Blaze billing, so the deployed config
     redirects instead: one capture rule keeps the path and query string, and a
@@ -33,16 +33,16 @@ def test_hosting_redirects_every_path_to_the_free_render_backend():
     assert hosting["public"] == "deploy/firebase/public"
     assert "rewrites" not in hosting, "Spark plan cannot rewrite to Cloud Run"
     redirects = hosting["redirects"]
-    assert redirects, "hosting must send visitors to the Render deployment"
+    assert redirects, "hosting must send visitors to the InstaBox deployment"
     assert all(rule["type"] == 302 for rule in redirects), "keep it temporary"
-    assert all(rule["destination"].startswith(RENDER_ORIGIN) for rule in redirects)
+    assert all(rule["destination"].startswith(INSTABOX_ORIGIN) for rule in redirects)
     # First rule keeps the path and query string; last rule is the catch-all.
     assert redirects[0] == {
         "source": "/:path*",
-        "destination": f"{RENDER_ORIGIN}/:path*",
+        "destination": f"{INSTABOX_ORIGIN}/:path*",
         "type": 302,
     }
-    assert redirects[-1] == {"source": "**", "destination": RENDER_ORIGIN, "type": 302}
+    assert redirects[-1] == {"source": "**", "destination": INSTABOX_ORIGIN, "type": 302}
 
 
 def test_hosting_public_directory_has_a_fallback_page():
@@ -56,7 +56,7 @@ def test_hosting_public_directory_has_a_fallback_page():
     index = ROOT / hosting["public"] / "index.html"
     assert index.is_file()
     html = index.read_text()
-    assert RENDER_ORIGIN in html
+    assert INSTABOX_ORIGIN in html
     assert "http-equiv=\"refresh\"" in html
 
 

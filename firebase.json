@@ -9,12 +9,12 @@
     "redirects": [
       {
         "source": "/:path*",
-        "destination": "https://srm-trp-transport.onrender.com/:path*",
+        "destination": "https://8080-agq5ufybv2apmker5klcd7t7zi.instabox.tech/:path*",
         "type": 302
       },
       {
         "source": "**",
-        "destination": "https://srm-trp-transport.onrender.com",
+        "destination": "https://8080-agq5ufybv2apmker5klcd7t7zi.instabox.tech",
         "type": 302
       }
     ]
