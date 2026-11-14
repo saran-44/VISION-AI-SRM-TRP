@@ -120,6 +120,24 @@ def confidence_threshold() -> float:
     return max(0.01, min(0.99, value))
 
 
+def image_size() -> int:
+    """Inference letterbox size for the detector.
+
+    A bus number plate occupies a small part of a 1080p gate frame, so the
+    default 640 px of a COCO model is often the limiting factor — not the
+    backbone. Raise it to 960 (or 1280) when the plates are far from the
+    camera; it costs quadratic compute, so it is an explicit trade-off.
+
+    Train at the size you infer at: a model fine-tuned at 640 and run at 960
+    is usually still fine, the reverse is not.
+    """
+    try:
+        value = int(os.getenv("VISION_IMAGE_SIZE", "640"))
+    except ValueError:
+        return 640
+    return max(320, min(1536, value))
+
+
 def ocr_engine_name() -> str:
     """Which OCR backend to use: `auto`, `tesseract`, `easyocr` or `none`."""
     return os.getenv("VISION_OCR_ENGINE", "auto").strip().lower() or "auto"
@@ -341,7 +359,7 @@ def detect(image, *, model=None, threshold: float | None = None) -> DetectionRes
     threshold = confidence_threshold() if threshold is None else threshold
     started = time.perf_counter()
 
-    results = model.predict(source=image, conf=threshold, verbose=False)
+    results = model.predict(source=image, conf=threshold, imgsz=image_size(), verbose=False)
     elapsed_ms = int((time.perf_counter() - started) * 1000)
 
     result = DetectionResult(
@@ -508,13 +526,24 @@ def _ocr_usable() -> bool:
 def vision_status() -> dict[str, Any]:
     """Describe what the vision stack can currently do."""
     path = model_path()
+    loaded = _model_cache.get("model")
     status: dict[str, Any] = {
         "model_path": str(path),
         "model_present": path.exists(),
-        "model_loaded": "model" in _model_cache,
+        "model_loaded": loaded is not None,
         "confidence_threshold": confidence_threshold(),
+        "image_size": image_size(),
         "ocr_engine": ocr_engine_name(),
-        "classes": {str(key): value for key, value in CLASS_LABELS.items()},
+        # The labels the loaded checkpoint actually carries. A freshly trained
+        # number-plate model (one class, "number_plate") must not be described
+        # with this repository's old sticker/red-circle pair.
+        "classes": {
+            str(key): value
+            for key, value in (
+                (getattr(loaded, "names", None) or CLASS_LABELS).items()
+            )
+        },
+        "classes_source": "model" if loaded is not None else "default",
         "available": False,
         "problems": [],
     }

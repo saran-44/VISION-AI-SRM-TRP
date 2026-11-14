@@ -46,3 +46,46 @@ def test_status_embeds_the_setup_block():
     assert status["setup"]["components"]
     # `available` stays the authoritative "can a scan work" flag.
     assert status["available"] is (not status["problems"])
+
+
+# ------------------------------------------------------------ model swapping
+def test_image_size_is_configurable_and_clamped(monkeypatch):
+    from backend.vision import image_size
+
+    monkeypatch.setenv("VISION_IMAGE_SIZE", "960")
+    assert image_size() == 960
+    monkeypatch.setenv("VISION_IMAGE_SIZE", "1280")
+    assert image_size() == 1280
+    monkeypatch.setenv("VISION_IMAGE_SIZE", "64")
+    assert image_size() == 320
+    monkeypatch.setenv("VISION_IMAGE_SIZE", "99999")
+    assert image_size() == 1536
+    monkeypatch.setenv("VISION_IMAGE_SIZE", "not-a-number")
+    assert image_size() == 640
+    monkeypatch.delenv("VISION_IMAGE_SIZE", raising=False)
+    assert image_size() == 640
+
+
+def test_status_labels_come_from_a_loaded_number_plate_model():
+    """A one-class plate checkpoint must not be described as sticker/red circle."""
+    from types import SimpleNamespace
+
+    import backend.vision as vision
+
+    vision._model_cache["model"] = SimpleNamespace(names={0: "number_plate"})
+    try:
+        status = vision.vision_status()
+        assert status["classes"] == {"0": "number_plate"}
+        assert status["classes_source"] == "model"
+        assert status["model_loaded"] is True
+    finally:
+        vision._model_cache.pop("model", None)
+
+
+def test_status_falls_back_to_the_builtin_labels_without_a_model():
+    import backend.vision as vision
+
+    vision._model_cache.pop("model", None)
+    status = vision.vision_status()
+    assert status["classes_source"] == "default"
+    assert status["classes"]["1"] == "sticker"
