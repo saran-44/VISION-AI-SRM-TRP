@@ -205,8 +205,18 @@ python scripts/scan_image.py frame-20261114-113005.jpg
 ```
 
 `--camera 0` needs only OpenCV (not torch), saves the frame it used, and prints
-the path — keep that file, it is exactly what the detector received. On Windows
-close Teams/Zoom/Camera first; only one application may hold the webcam.
+the path — keep that file, it is exactly what the detector received. It requests
+1280×720 and warns when the driver hands back 640×480 instead:
+
+```text
+camera      : delivered 640×480 although 1280×720 was requested.
+              A 640×480 frame upscaled to 960 px only adds blur; try
+              --width 1920 --height 1080, or a phone photo instead.
+```
+
+On Windows close Teams/Zoom/Camera first; only one application may hold the
+webcam. And a webcam pointed at your desk correctly reports `0 found` — there is
+no sticker in the frame; use a photo of a bus.
 
 The other route needs nothing installed: **Save frame** on the Test Lab camera
 tile downloads the same JPEG the browser would have posted.

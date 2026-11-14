@@ -25,8 +25,19 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-def _grab_webcam(index: int, frames: int, save: str | None) -> Path | None:
-    """Grab the sharpest of a few webcam frames and write it to disk."""
+def _grab_webcam(
+    index: int,
+    frames: int,
+    save: str | None,
+    width: int = 1280,
+    height: int = 720,
+) -> Path | None:
+    """Grab the sharpest of a few webcam frames and write it to disk.
+
+    The capture size is requested explicitly: OpenCV's default is 640×480, and
+    upscaling that to the 960 px letterbox only adds blur. A webcam that cannot
+    deliver the requested size is reported, not silently accepted.
+    """
     try:
         import cv2  # type: ignore
     except ImportError:
@@ -39,6 +50,15 @@ def _grab_webcam(index: int, frames: int, save: str | None) -> Path | None:
         print(f"Could not open camera {index}.", file=sys.stderr)
         print("Close Teams/Zoom/Camera first - Windows only lets one app hold the webcam.", file=sys.stderr)
         return None
+
+    # Ask for the resolution before the first read; most drivers honour it.
+    capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    negotiated = (
+        int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0),
+        int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0),
+    )
 
     best = None
     best_score = -1.0
@@ -67,7 +87,21 @@ def _grab_webcam(index: int, frames: int, save: str | None) -> Path | None:
         print(f"Could not write {target}", file=sys.stderr)
         return None
     print(f"saved       : {target}  (sharpness {best_score:.0f})")
-    print("             keep this file - it is what the detector saw\n")
+    print("             keep this file - it is what the detector saw")
+    actual = (best.shape[1], best.shape[0])
+    if actual[0] < 900:
+        print(
+            f"camera      : delivered {actual[0]}×{actual[1]} although {width}×{height} was requested.",
+            file=sys.stderr,
+        )
+        print(
+            "             A 640×480 frame upscaled to 960 px only adds blur; try "
+            f"--width 1920 --height 1080, or a phone photo instead.",
+            file=sys.stderr,
+        )
+    else:
+        print(f"camera      : {actual[0]}×{actual[1]}")
+    print()
     return target
 
 
@@ -84,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--camera", type=int, default=None,
                         help="grab a frame from a local webcam instead (OpenCV index, usually 0)")
     parser.add_argument("--frames", type=int, default=5, help="frames to sample from the webcam (best is kept)")
+    parser.add_argument("--width", type=int, default=1280, help="requested capture width (default 1280)")
+    parser.add_argument("--height", type=int, default=720, help="requested capture height (default 720)")
     parser.add_argument("--save", default=None, help="where to write the webcam frame (default frame-<time>.jpg)")
     parser.add_argument("--conf", type=float, default=None, help="override VISION_CONFIDENCE")
     parser.add_argument("--imgsz", type=int, default=None, help="override VISION_IMAGE_SIZE")
@@ -103,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     from backend.vision import VisionUnavailable, best_candidate, decode_image, detect
 
     if args.camera is not None:
-        grabbed = _grab_webcam(args.camera, args.frames, args.save)
+        grabbed = _grab_webcam(args.camera, args.frames, args.save, args.width, args.height)
         if grabbed is None:
             return 2
         path = grabbed
