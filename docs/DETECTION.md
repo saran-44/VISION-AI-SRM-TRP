@@ -238,6 +238,24 @@ python -m venv .venv
 .venv/bin/pip install -r backend/requirements-vision.txt
 ```
 
+On Windows (Git Bash), `source .venv/Scripts/activate` first, then the same
+two commands. If the single `-r` line fails part-way, install the components in
+this order — each one is independent, and the Test Lab's **Detector setup** card
+shows which ones are already present:
+
+```bash
+python -m pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cpu
+python -m pip install ultralytics==8.4.20
+python -m pip install opencv-python-headless==4.10.0.84
+python -m pip install "Pillow>=10.0.0"
+python -m pip install rapidocr-onnxruntime==1.4.4
+```
+
+Budgets on a normal laptop: torch ≈ 200 MB download / 900 MB on disk (CPU
+wheel), ultralytics ≈ 15 MB, OpenCV ≈ 35 MB, Pillow ≈ 4 MB, RapidOCR ≈ 60 MB
+plus its bundled ONNX models. A full install is 5–10 minutes on a home
+connection; nothing else in the portal waits for it.
+
 `backend/requirements-vision.txt` pins the versions verified in this
 repository:
 

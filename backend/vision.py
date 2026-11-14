@@ -415,6 +415,96 @@ def best_candidate(result: DetectionResult) -> PlateCandidate | None:
 # --------------------------------------------------------------------------- #
 # Health reporting
 # --------------------------------------------------------------------------- #
+def _module_present(name: str) -> bool:
+    try:
+        __import__(name)
+        return True
+    except Exception:  # ImportError plus any broken native dependency
+        return False
+
+
+def vision_setup() -> dict[str, Any]:
+    """The one-screen install checklist the Test Lab shows.
+
+    A missing Pillow used to surface as a bare `503` sentence with a single
+    "install the vision extras" line. That is not actionable on a machine that
+    half-installed the stack, so every component reports its own state and the
+    exact command that fixes it.
+    """
+    requirements = "-r backend/requirements-vision.txt"
+    rows = [
+        {
+            "name": "torch",
+            "label": "PyTorch (model runtime)",
+            "present": _module_present("torch"),
+            "size": "~200 MB (CPU wheel)",
+            "command": "python -m pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cpu",
+        },
+        {
+            "name": "ultralytics",
+            "label": "Ultralytics (YOLO loader)",
+            "present": _module_present("ultralytics"),
+            "size": "~15 MB",
+            "command": "python -m pip install ultralytics==8.4.20",
+        },
+        {
+            "name": "opencv",
+            "label": "OpenCV headless (framing)",
+            "present": _module_present("cv2"),
+            "size": "~35 MB",
+            "command": "python -m pip install opencv-python-headless==4.10.0.84",
+        },
+        {
+            "name": "Pillow",
+            "label": "Pillow (image decode)",
+            "present": _module_present("PIL"),
+            "size": "~4 MB",
+            "command": 'python -m pip install "Pillow>=10.0.0"',
+        },
+        {
+            "name": "ocr",
+            "label": "OCR engine (reads the sticker)",
+            "present": _ocr_usable(),
+            "size": "~60 MB (RapidOCR, no system packages)",
+            "command": "python -m pip install rapidocr-onnxruntime==1.4.4",
+        },
+        {
+            "name": "model",
+            "label": "best.pt (trained weights)",
+            "present": DEFAULT_MODEL_PATH.exists(),
+            "size": "5.5 MB, tracked in git",
+            "command": "git checkout -- best.pt   # restore the tracked weights",
+        },
+    ]
+    missing = [row for row in rows if not row["present"]]
+    return {
+        "ready": not missing,
+        "missing": [row["name"] for row in missing],
+        "components": rows,
+        "install_all": f"python -m pip install {requirements}",
+        "note": (
+            "Everything stays optional: without these the console, tables, filters and "
+            "exports work normally and only the detector answers 503 with this checklist."
+        ),
+    }
+
+
+def _ocr_usable() -> bool:
+    """True when at least one configured OCR backend can be imported."""
+    engine = ocr_engine_name()
+    if engine == "none":
+        return False
+    probes = ("rapidocr", "tesseract", "easyocr") if engine == "auto" else (engine,)
+    loaders = {"rapidocr": _ocr_rapidocr, "tesseract": _ocr_tesseract, "easyocr": _ocr_easyocr}
+    for probe in probes:
+        try:
+            loaders[probe]()
+            return True
+        except (VisionUnavailable, KeyError):
+            continue
+    return False
+
+
 def vision_status() -> dict[str, Any]:
     """Describe what the vision stack can currently do."""
     path = model_path()
@@ -472,4 +562,5 @@ def vision_status() -> dict[str, Any]:
         status["problems"].append("OCR is disabled (VISION_OCR_ENGINE=none)")
 
     status["available"] = not status["problems"]
+    status["setup"] = vision_setup()
     return status

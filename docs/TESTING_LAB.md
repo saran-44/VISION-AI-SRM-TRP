@@ -149,13 +149,36 @@ answers `503` and the Test Lab prints exactly why:
 {"error": "Detection is unavailable: torch is not installed"}
 ```
 
-Run it locally with the vision extras:
+Run it locally with the vision extras. The **Detector setup** card in the Test
+Lab lists each component, marks the ones that are already there, and hands you
+the exact command for the missing ones (plus a copy button):
 
 ```bash
-pip install -r backend/requirements-vision.txt   # torch + ultralytics + opencv + easyocr
-python scripts/run_preview.py --port 4400
-curl -s http://localhost:4400/api/detection/status   # "available": true
+source .venv/Scripts/activate          # Git Bash on Windows
+python -m pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cpu
+python -m pip install ultralytics==8.4.20
+python -m pip install opencv-python-headless==4.10.0.84
+python -m pip install "Pillow>=10.0.0"
+python -m pip install rapidocr-onnxruntime==1.4.4
 ```
+
+or in one line, if you have the bandwidth:
+
+```bash
+python -m pip install -r backend/requirements-vision.txt
+```
+
+Then press **Re-check after installing** in the Test Lab — no restart needed for
+`Pillow`/`OpenCV`/OCR, because they are imported lazily on the next scan:
+
+```bash
+python scripts/run_preview.py --port 4400
+curl -s http://localhost:4400/api/detection/status | head -c 200   # "available": true
+```
+
+If a half-finished install left you with only some of the packages, the card
+still works: it reports `Pillow is not installed` next to `torch: installed`,
+instead of the single sentence that made this confusing.
 
 **IP / NVR camera (later, no code change).** Set `CAMERA_STREAM_URLS` to a JSON
 object and the same tiles switch source:
@@ -222,6 +245,32 @@ To roll it out to another surface, add the class in markup:
 
 Do **not** put it on a component that already uses `::before`/`::after`
 (`.stat-card`, `.login-container`) — the pseudo-elements would collide.
+
+### Layout: why `layout.css` exists
+
+`frontend/assets/layout.css` is loaded last on every page (before `login.css` on
+the sign-in page) and owns the shell geometry:
+
+| Problem it removes | Cause it replaces |
+| --- | --- |
+| The wheel did nothing over the sidebar, top bar or page gutter | `body { height: 100vh; overflow: hidden }` scrolled a nested `.main-content` box |
+| The last card hid under the phone's browser chrome | `100vh` instead of `100dvh`, no safe-area padding |
+| The whole page could be dragged sideways by a wide table | overflow on `body` instead of on `.table-container` |
+| Four stat cards squeezed to ~150 px on a laptop | fixed `repeat(4, 1fr)` grid |
+| A camera tile that jumped while the stream negotiated | no `aspect-ratio` on `.camera-container` |
+
+The document now scrolls natively, the sidebar is `position: sticky` on desktop
+and an off-canvas drawer below 1024 px, the content column is capped at 1560 px
+and centred, and the grids are `auto-fit`/`minmax` instead of fixed counts.
+
+Check it at four widths (DevTools device toolbar is enough):
+
+| Width | Expect |
+| --- | --- |
+| 1920 | content capped and centred; sidebar fixed, page scrolls; no horizontal scrollbar |
+| 1366 | four stat tiles per row; tables fit without horizontal scroll |
+| 1024 → 769 | sidebar becomes a drawer behind the ☰ button; backdrop closes it |
+| 390 | two stat tiles per row; filters stack; tables scroll inside their card; nothing cut off at the bottom |
 
 ---
 

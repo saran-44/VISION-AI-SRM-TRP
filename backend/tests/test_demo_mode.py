@@ -127,6 +127,10 @@ def test_demo_admin_alias_signs_in_and_reaches_the_lab(app, db):
     assert payload["demo_mode"] is True
     ids = {check["id"] for check in payload["checks"]}
     assert {"session", "database", "detection", "demo"} <= ids
+    # The Detector setup card renders from this block.
+    setup = payload["detection"]["setup"]
+    assert {"torch", "Pillow", "model"} <= {row["name"] for row in setup["components"]}
+    assert isinstance(setup["ready"], bool)
 
 
 def test_test_lab_event_insert_is_tagged_and_validated(app, db):

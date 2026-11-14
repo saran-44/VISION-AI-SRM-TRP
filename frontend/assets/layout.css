@@ -1,0 +1,522 @@
+/* ==========================================================================
+   VISION AI - SRM TRP — responsive shell
+   Loaded after styles.css and theme.css (before login.css on the sign-in
+   page), so it owns the shell geometry and every breakpoint in one place.
+
+   Why this file exists
+   --------------------
+   The original shell locked the document (`body { height: 100vh; overflow:
+   hidden }`) and scrolled a nested `.main-content` box. That fails in three
+   very visible ways:
+
+     * the wheel/trackpad does nothing while the pointer is over the sidebar,
+       the top bar or the page gutter — there is nothing to scroll there;
+     * on phones the 100vh box is taller than the visible area, so the last
+       card and the table footer sit under the browser chrome;
+     * `overflow-x` on the body let wide tables drag the whole layout sideways.
+
+   Here the document itself scrolls (native, always works, momentum and
+   address-bar collapse behave), the sidebar is sticky on desktop and an
+   off-canvas drawer on touch widths, and the content column is capped and
+   centred so it stops stretching on wide monitors.
+   ========================================================================== */
+
+:root {
+    --shell-sidebar: 272px;
+    --shell-pad-x: clamp(1rem, 3vw, 2.5rem);
+    --shell-gap: clamp(1rem, 1.6vw, 1.5rem);
+    --shell-max: 1560px;
+    --tap: 44px;
+}
+
+/* --------------------------------------------------------------------------
+   1. Document scrolling
+   -------------------------------------------------------------------------- */
+
+html {
+    height: auto;
+    min-height: 100%;
+    /* `clip` (not `hidden`) keeps the *viewport* the scrolling box, so
+       `position: sticky` on the top bar and the sidebar still works. `hidden`
+       is the fallback for browsers without `clip`. */
+    overflow-x: hidden;
+    overflow-x: clip;
+    scroll-behavior: smooth;
+}
+
+body {
+    display: block;
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    /* No scroll container of its own: with `overflow: auto` here the document
+       would scroll but sticky children would stick to a box that never moves. */
+    overflow: visible;
+    padding: 0;
+}
+
+/* A page that owns the whole viewport (sign-in) keeps its own rules. */
+body.login-page {
+    display: flex;
+    overflow: auto;
+}
+
+/* --------------------------------------------------------------------------
+   2. Shell: sticky sidebar, flowing content
+   -------------------------------------------------------------------------- */
+
+.app-container {
+    display: grid;
+    grid-template-columns: var(--shell-sidebar) minmax(0, 1fr);
+    align-items: start;
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow: visible;
+}
+
+.sidebar {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    width: auto;
+    height: 100vh;
+    height: 100dvh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    z-index: 40;
+}
+
+.main-content {
+    display: block;
+    min-width: 0;
+    overflow: visible;
+    padding-bottom: 0;
+}
+
+.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    gap: 0.75rem;
+    /* keep the top bar's contents aligned with the centred content column */
+    padding-block: 0.85rem;
+    padding-inline: max(var(--shell-pad-x), calc((100% - var(--shell-max)) / 2 + var(--shell-pad-x)));
+    background: var(--app-bg);
+    background: color-mix(in srgb, var(--app-bg) 88%, transparent);
+    border-bottom: 1px solid var(--card-border);
+    -webkit-backdrop-filter: blur(18px) saturate(1.25);
+    backdrop-filter: blur(18px) saturate(1.25);
+}
+
+.topbar .search-bar {
+    flex: 1 1 220px;
+    max-width: 420px;
+    min-width: 0;
+}
+
+.dashboard-content {
+    width: 100%;
+    max-width: var(--shell-max);
+    margin-inline: auto;
+    padding: 0 var(--shell-pad-x) clamp(2rem, 4vw, 3rem);
+    gap: var(--shell-gap);
+}
+
+/* --------------------------------------------------------------------------
+   3. Content density
+   -------------------------------------------------------------------------- */
+
+.stats-grid {
+    grid-template-columns: repeat(auto-fit, minmax(clamp(190px, 21vw, 250px), 1fr));
+    gap: var(--shell-gap);
+}
+
+.middle-grid {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    gap: var(--shell-gap);
+}
+
+.chart-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+    gap: var(--shell-gap);
+}
+
+.camera-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+    gap: var(--shell-gap);
+}
+
+.filter-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+    gap: 0.85rem 1rem;
+}
+
+.form-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+}
+
+.detail-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+}
+
+.card,
+.stat-card,
+.chart-card,
+.camera-tile {
+    min-width: 0;
+}
+
+.page-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.85rem 1.25rem;
+}
+
+.page-header > div:first-child {
+    min-width: min(100%, 24ch);
+}
+
+.page-header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.page-header-actions .btn {
+    white-space: nowrap;
+}
+
+.button-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+}
+
+/* Camera tiles keep a predictable 16:9 box. Without an explicit ratio the
+   <video> collapsed to its intrinsic size and the tile jumped around while the
+   stream negotiated. */
+.camera-container {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-radius: 14px;
+    background: #171029;
+}
+
+.camera-container > .camera-stream {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.camera-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    justify-content: center;
+    padding: 0.35rem;
+    margin-top: 0.75rem;
+}
+
+.card-header {
+    flex-wrap: wrap;
+    gap: 0.35rem 0.85rem;
+    align-items: center;
+}
+
+.number-plate {
+    word-break: break-word;
+}
+
+/* Tables scroll inside their card instead of pushing the layout sideways. */
+.table-container {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
+.table-container table {
+    min-width: 680px;
+}
+
+/* --------------------------------------------------------------------------
+   4. Touch ergonomics
+   -------------------------------------------------------------------------- */
+
+@media (pointer: coarse) {
+    .btn,
+    .icon-btn,
+    .nav-link,
+    .action-btn {
+        min-height: var(--tap);
+    }
+
+    .action-btn {
+        min-width: var(--tap);
+    }
+}
+
+/* --------------------------------------------------------------------------
+   5. Tablet and phone: off-canvas sidebar
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 1024px) {
+    .app-container {
+        display: block;
+    }
+
+    .sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        left: 0;
+        width: min(86vw, 312px);
+        height: 100vh;
+        height: 100dvh;
+        transform: translateX(-104%);
+        transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 24px 0 60px rgba(30, 10, 60, 0.28);
+        z-index: 80;
+    }
+
+    .sidebar.active {
+        left: 0;
+        transform: translateX(0);
+    }
+
+    .sidebar-overlay {
+        z-index: 70;
+        background: rgba(20, 10, 38, 0.45);
+        -webkit-backdrop-filter: blur(3px);
+        backdrop-filter: blur(3px);
+    }
+
+    .middle-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .topbar .menu-toggle {
+        display: inline-flex;
+    }
+
+    .dashboard-content {
+        padding-bottom: calc(2.5rem + env(safe-area-inset-bottom, 0px));
+    }
+}
+
+@media (max-width: 768px) {
+    :root {
+        --shell-pad-x: 1rem;
+        --shell-gap: 0.85rem;
+    }
+
+    .stats-grid {
+        /* two compact tiles per row beats one full-width card per stat */
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .stat-card {
+        padding: 1rem;
+        gap: 0.75rem;
+        border-radius: 1rem;
+    }
+
+    .stat-icon {
+        width: 44px;
+        height: 44px;
+        font-size: 1.25rem;
+        border-radius: 0.8rem;
+    }
+
+    .stat-details h3 {
+        font-size: 0.76rem;
+    }
+
+    .stat-details p {
+        font-size: 1.25rem;
+    }
+
+    .page-title {
+        font-size: 1.15rem;
+    }
+
+    .page-header-actions {
+        width: 100%;
+    }
+
+    .page-header-actions .btn {
+        flex: 1 1 auto;
+        justify-content: center;
+    }
+
+    /* 16px stops iOS from zooming the viewport on focus. */
+    .input-group input,
+    .input-group select,
+    .input-group textarea,
+    .search-bar input {
+        font-size: 16px;
+    }
+
+    .modal-content {
+        width: min(94vw, 620px);
+        max-height: 86vh;
+        max-height: 86dvh;
+        padding: 1.25rem;
+    }
+
+    .toast {
+        left: 1rem;
+        right: 1rem;
+        bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+        max-width: none;
+        justify-content: center;
+        text-align: center;
+    }
+
+    .number-plate {
+        font-size: 1.5rem;
+    }
+
+    .card {
+        padding: 1.1rem;
+        border-radius: 1.1rem;
+    }
+
+    .card-header {
+        align-items: flex-start;
+    }
+}
+
+@media (max-width: 380px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .filter-grid,
+    .form-grid,
+    .detail-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   6. Test Lab — detector setup checklist
+   -------------------------------------------------------------------------- */
+
+.setup-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr));
+    gap: 0.7rem;
+    margin: 0.85rem 0 1rem;
+}
+
+.setup-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.7rem;
+    padding: 0.8rem 0.9rem;
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    background: var(--surface-muted);
+}
+
+.setup-item .setup-state {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    font-size: 1rem;
+}
+
+.setup-item.is-ok .setup-state {
+    background: var(--success-bg);
+    color: var(--success);
+}
+
+.setup-item.is-missing {
+    border-style: dashed;
+}
+
+.setup-item.is-missing .setup-state {
+    background: var(--warning-bg);
+    color: var(--warning);
+}
+
+.setup-item .setup-body {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.setup-item .setup-label {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.setup-item .setup-meta {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+}
+
+.setup-item code {
+    display: block;
+    margin-top: 0.45rem;
+    padding: 0.45rem 0.55rem;
+    border-radius: 8px;
+    background: rgba(20, 10, 38, 0.06);
+    color: var(--text-main);
+    font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.72rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+body.dark-theme .setup-item code {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* --------------------------------------------------------------------------
+   7. Motion and print
+   -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+    html {
+        scroll-behavior: auto;
+    }
+
+    .sidebar {
+        transition: none;
+    }
+}
+
+@media print {
+    body {
+        overflow: visible;
+        background: #ffffff;
+    }
+
+    .sidebar,
+    .topbar,
+    .button-row,
+    .page-header-actions {
+        display: none !important;
+    }
+
+    .app-container {
+        display: block;
+    }
+
+    .dashboard-content {
+        max-width: none;
+        padding: 0;
+    }
+}
