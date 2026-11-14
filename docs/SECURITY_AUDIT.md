@@ -8,8 +8,14 @@ live Render/Supabase/Firebase deployment still needs the operator checks in
 Reproduce every automated check here with:
 
 ```bash
+source .venv/Scripts/activate        # Git Bash on Windows; pytest lives here
 bash scripts/audit_local.sh --with-tests
 ```
+
+The script picks `.venv` (or `$VIRTUAL_ENV`) automatically. If pytest is
+missing it reports an **environment gap, not a code failure**, and tells you how
+to install it — a red “pytest failed” from the system interpreter is not a
+finding.
 
 ---
 

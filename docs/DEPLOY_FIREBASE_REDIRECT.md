@@ -245,6 +245,7 @@ in `backend/tests/test_hosting_deployment.py` fails if anyone switches it to 301
 | Browser shows the Render site but with the `web.app` address | the redirect was cached — clear site data for `web.app` |
 | `auth/unauthorized-domain` after signing in | add the Render host in **Authorized domains** (step 7) |
 | `firebase: command not found` | `npm install -g firebase-tools`, then `hash -r` |
+| Untracked `firebase-redirect/` or `firebase.hosting.redirect.json` in `git status` | leftovers from an earlier `firebase init` or an ad-hoc deploy. Inspect them (`cat firebase.hosting.redirect.json`), then delete them — this repository's config is the tracked `firebase.json` |
 | Emulator port 5000 busy | another dev server owns it; change `emulators.hosting.port` in `firebase.json` |
 
 ---
