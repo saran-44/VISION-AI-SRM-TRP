@@ -60,6 +60,12 @@ GATE_DEFAULTS = {
     "VISION_IMAGE_SIZE": "1280",
     "VISION_CONFIDENCE": "0.25",
     "OCR_CONFIDENCE_THRESHOLD": "0.55",
+    # A gate camera sees stickers 40-60 px wide in the frame: 3x is what makes
+    # the digits legible to the OCR. 1 = the library default (off).
+    "VISION_STICKER_UPSCALE": "3",
+    # Measure the frame before loading a checkpoint and refuse the ones that
+    # cannot contain a sticker (a dark frame cost 13 s and read nothing).
+    "VISION_QUALITY_GATE": "refuse",
     "CAMERA_TIMEOUT": "8",
 }
 

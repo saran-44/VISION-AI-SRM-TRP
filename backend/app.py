@@ -809,10 +809,17 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
                 if result.frame_sharpness is not None
                 else None
             ),
+            "brightness": (
+                round(float(result.frame_brightness), 1)
+                if result.frame_brightness is not None
+                else None
+            ),
             "tiles": result.tiles,
             "saved": None,
         }
-        if not (candidate and candidate.bus_number):
+        # A refused frame carries no information beyond the measurements above,
+        # and a dark night would quietly rotate the ring with black JPEGs.
+        if not (candidate and candidate.bus_number) and result.reason != "frame_unusable":
             response["frame"]["saved"] = save_failed_frame(image)
 
         record_audit(

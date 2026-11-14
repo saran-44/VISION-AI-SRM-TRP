@@ -318,7 +318,8 @@ carries the facts:
 | `frame.width` / `height` | The frame **after** `decode_image` (downscale targets apply) | a 640×480 source can never resolve a sticker the way a 12 MP photo does |
 | `frame.sharpness` | Laplacian variance, the same number `scan_image.py` prints and `frame_report.py` reports | **under 60 means soft**: nothing will be detected, whatever the threshold |
 | `frame.tiles` | Tiles per axis used for the sticker stage (1 = whole frame) | 1 with a sticker under ~45 px means resolution is the limit |
-| `frame.saved` | JPEG of the frame that produced no number, when `VISION_SAVE_FAILURES` is on | `python scripts/frame_report.py <path>` prints an ASCII luminance map of what the detector saw |
+| `frame.brightness` | Mean luminance, 0-255, on the same frame | **under 12 means the frame is refused**: nothing is in it, day or night |
+| `frame.saved` | JPEG of the frame that produced no number, when `VISION_SAVE_FAILURES` is on | `python scripts/frame_report.py <path>` prints an ASCII luminance map of what the detector saw; a *refused* frame is not saved |
 
 The advice string now repeats those numbers, and suggests the fix that matches:
 
@@ -329,6 +330,35 @@ scanning again; if the sticker is smaller than about 45 px in the frame, set
 VISION_TILES=2 (or auto) to infer on overlapping crops; move closer so the
 sticker fills more of the frame; confirm the checkpoint matches these stickers…
 ```
+
+**The quality gate.** Before any checkpoint is loaded, `detect()` measures the
+frame (`frame_sharpness`, `frame_brightness`). A frame under
+`VISION_MIN_BRIGHTNESS` (12) or `VISION_MIN_SHARPNESS` (20) is refused with
+`reason: "frame_unusable"`, every stage reported as `skipped: "frame_unusable"`,
+and an advice sentence carrying the numbers:
+
+```
+Refused before inference (1280×720): the frame is too dark (mean brightness 6
+of 255, minimum 12). No threshold finds a sticker in a frame like this. Turn a
+light on the gate (or use the camera's own IR/illuminator), let autofocus
+settle, then scan again. Set VISION_QUALITY_GATE=off to scan anyway.
+```
+
+This is not a threshold trick: a dark frame has nothing in it to detect, and
+tiled inference on one costs ~13 s. The refusal takes milliseconds, and the
+frame is not written to `failed-frames/` (a night of black JPEGs would rotate
+the ring and lose the frames worth looking at). `VISION_QUALITY_GATE=off`
+restores the old behaviour — every frame through the cascade — for a host whose
+camera genuinely sees a dark subject (IR illuminators, night vision).
+
+**Small crops and the OCR.** The plate stage has always enlarged a small crop
+`VISION_PLATE_UPSCALE` (3) times first. The sticker stage did not, deliberately,
+because its numbers were already trusted. The cost of that choice is a sticker
+the detector finds at 0.85 and the OCR cannot read — a 50 px crop at 3× is
+150 px, which the engine handles. `VISION_STICKER_UPSCALE=3` turns the same
+enlargement on for the sticker path; `1` (the library default) leaves it alone.
+`VISION_IMAGE_SIZE` cannot help here: the crop is cut from the frame's own
+pixels, never from the letterboxed inference image.
 
 **Tiling.** `VISION_TILES=1` (default) is the validated baseline: one pass over
 the whole frame. `VISION_TILES=2..4` (or `auto`, which means 2 for anything
@@ -468,6 +498,10 @@ pytesseract>=0.3.10
 | `VISION_PLATE_MODEL_PATH` | `anpr_best.pt` | Plate checkpoint. Falls back to `weights/number_plate.pt` when the bundled file is absent. |
 | `VISION_PLATE_CONFIDENCE` | `0.25` | Minimum confidence for a plate box (independent of `VISION_CONFIDENCE`). |
 | `VISION_PLATE_UPSCALE` | `3` | Enlargement of small plate crops before OCR; `1` disables it. |
+| `VISION_STICKER_UPSCALE` | `1` | Enlargement of small sticker crops before OCR. `1` keeps the validated behaviour; `3` is what a sticker 50 px wide in the frame needs to become readable. Crops already wider than 480 px are never enlarged. |
+| `VISION_QUALITY_GATE` | `refuse` | Measure the frame first and refuse it, without loading a model, when it cannot contain a sticker. `off` scans anyway. |
+| `VISION_MIN_BRIGHTNESS` | `12` | Below this mean luminance (0-255) a frame is refused as too dark. |
+| `VISION_MIN_SHARPNESS` | `20` | Below this Laplacian variance a frame is refused as too soft. |
 | `VISION_VEHICLE_MODEL_PATH` | `weights/vehicle.pt` | Optional vehicle checkpoint. |
 | `VISION_VEHICLE_CONFIDENCE` | `0.35` | Minimum confidence for a vehicle box. |
 | `VISION_VEHICLE_CLASSES` | `bicycle,motorcycle,car,bus,truck` | Labels counted as a vehicle. |

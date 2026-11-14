@@ -219,6 +219,8 @@ to delete it on purpose.
 | `camera: could not open the RTSP stream` but the network answers | H.265-only stream | switch the camera's sub/main stream to H.264 |
 | `sharpness` under 60 | soft frame: focus, dirt, or a 720p substream | full-resolution snapshot, clean lens |
 | `no box at all` | sticker too small, or the frame is soft | read the `frame` line: `sharpness` under 60 → clean the lens/let it focus; otherwise move closer or set `VISION_TILES=auto` (costs 4× the sticker stage) |
+| "Refused before inference: the frame is too dark/too soft" | the subject is not lit: mean brightness under 12/255 or sharpness under 20 | turn a light on the gate (a phone torch across the sticker plate is enough), or use the camera's IR illuminator; every such frame was unreadable no matter the threshold. `VISION_QUALITY_GATE=off` in `gate.env` disables the check |
+| "Sticker detected … but the OCR read no text. The crop was about 50 px wide" | the box is real, the pixels are too few | set `VISION_STICKER_UPSCALE=3` in `gate.env` (a 50 px crop becomes 150 px), or scan from closer. `VISION_IMAGE_SIZE` does **not** help: the crop comes from the frame, not the tiles |
 | Failed scans leave no trace to inspect | `VISION_SAVE_FAILURES=false` | unset it: every scan that reads nothing writes `C:\ProgramData\VisionAI\failed-frames\fail-*.jpg` (newest 40), readable with `python scripts/frame_report.py` |
 | `port: already in use` | the portal is already running | open `http://127.0.0.1:8080/`; a second start reuses the running instance |
 | Browser says "site can't be reached" | the portal is not running | tray icon → Open portal, or Start Menu → the app |
