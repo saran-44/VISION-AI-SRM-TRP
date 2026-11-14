@@ -1,6 +1,6 @@
 # VISION AI - SRM TRP project handoff
 
-Last updated: 2026-11-14 18:20 IST
+Last updated: 2026-11-14 18:21 IST
 
 This file is intentionally non-secret. Never add passwords, API keys, SSH
 tokens, database URLs containing passwords, Firebase private keys, or
@@ -22,7 +22,8 @@ certificates here.
   are pending after the initial environment check. Verified `x86_64`, Docker
   29.8.2, Docker Compose 5.6.0, and Git 2.47.3.
 - **Deployable GitHub branch:** `agent/instabox-vision`, containing deployment
-  commit `20e89fb` and latest handoff commit `aec11b0`. The pull-request page is
+  commit `20e89fb` and latest handoff/template commits `aec11b0`, `87df755`,
+  and `acc9deb`. The pull-request page is
   `https://github.com/saran-44/VISION-AI-SRM-TRP/pull/new/agent/instabox-vision`.
 
 ## Completed in this session
