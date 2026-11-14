@@ -22,14 +22,24 @@ Two assistants share this repository and you are one of them.
 
 ```bash
 pwd                        # must be the repository root
-git rev-parse --short HEAD # a1ef06c or a descendant
-git status --short         # must not list files from another project
+git rev-parse --short HEAD # cd8cfbe or a descendant
+git status --short         # pristine, or only files you meant to change
 ls docs/                   # the real directory listing
 ```
 
-Stop and report if the folder is wrong, if HEAD is older than `a1ef06c` (the
-tree is stale — `git pull --ff-only origin main` and restart), or if the working
-tree holds another project's files.
+`docs/WORKSPACE_SYNC.md` is the version marker: it only exists at `cd8cfbe` and
+later. If `ls docs/` does not show it, the checkout is stale — `git pull
+--ff-only origin main` and restart.
+
+Stop and report if the folder is wrong, if the marker is absent, if HEAD is older
+than `cd8cfbe`, or if the working tree holds another project's files.
+
+**A partially-synced docs directory is impossible.** Every commit either has all
+of `WORKSPACE_SYNC.md`, `MASTER_PROMPT.md`, `MASTER_PROMPT_UIUX.md` and
+`TASK_ANPR_VSCODE.md`, or none of them. So if one is listed and another is not,
+nobody should believe the commit SHA in front of them: run
+`git status --short docs/` — a line starting with ` D ` is a **local deletion**,
+fixed with `git restore docs/`, not by pulling or by creating files.
 
 **If `ls docs/` shows a file that your own file search cannot find, your index is
 stale, not the file** (`docs/WORKSPACE_SYNC.md` has the full diagnosis). Say exactly that — *"my index does not include X, the
