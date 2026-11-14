@@ -155,6 +155,23 @@ python scripts/inspect_model.py best.pt
 the classic mistake — pointing at `last.pt`, or at a checkpoint trained on a
 different dataset — before a gate does.
 
+### A number-plate model is the optional second stage
+
+Keep the sticker model in `best.pt`: it is the stage that reads the number off
+the sticker, and the one this project validates against. If you also train a
+plain number-plate detector (one class, `number_plate`), do **not** overwrite
+`best.pt` with it — drop it beside the sticker model instead:
+
+```bash
+cp ~/Downloads/best.pt weights/number_plate.pt
+python scripts/inspect_model.py weights/number_plate.pt
+```
+
+`backend/vision.py` then uses it as the fallback stage: sticker first, plate
+only when the sticker read nothing, and `VISION_PLATE_MODEL_PATH` points
+elsewhere if you prefer. `weights/` is git-ignored, so the file never reaches
+GitHub.
+
 Prefer not to touch git? Leave the file anywhere and set:
 
 ```bash

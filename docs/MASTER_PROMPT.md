@@ -53,6 +53,8 @@ DETECTION SETTINGS - ALREADY TUNED, DO NOT SILENTLY CHANGE
                           class 0 ("red circle") is counted, never read. A
                           single-class checkpoint uses its only class.
 - VISION_CONFIDENCE=0.25  a sticker box below this never reaches the OCR
+- STAGES sticker -> plate -> vehicle (VISION_STAGE_*), each switchable per scan;
+  a missing optional checkpoint is `skipped`, never a 503
 - POST /api/detection/scan returns: candidates[], bus_number, confidence,
   raw_text, reason, advice, detection{boxes_total, boxes_above_threshold,
   boxes_other_class, best_confidence, threshold, image_size, sticker_class,

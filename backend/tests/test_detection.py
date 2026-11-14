@@ -261,7 +261,7 @@ def test_scan_surfaces_reason_and_advice(client, users, monkeypatch):
     result.threshold = 0.25
 
     monkeypatch.setattr(app_module, "decode_image", lambda payload: object())
-    monkeypatch.setattr(app_module, "detect", lambda image: result)
+    monkeypatch.setattr(app_module, "detect", lambda image, stages=None: result)
 
     response = client.post(
         "/api/detection/scan",

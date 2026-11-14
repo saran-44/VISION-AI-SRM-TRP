@@ -100,12 +100,73 @@ extras.
 | Function | Purpose |
 | --- | --- |
 | `load_model()` | Lazily loads `best.pt` through Ultralytics; cached for the process lifetime. |
-| `detect(image, model=None)` | Runs inference, crops every detected sticker, OCRs each crop and returns ranked candidates. |
+| `detect(image, model=None, stages=None)` | Runs the cascade below, crops each plate/sticker, OCRs each crop and returns ranked candidates. |
 | `decode_image(payload)` | Decodes raw bytes, a `data:` URL or bare base64 into a PIL image. |
 | `read_text(image, engine=None)` | Runs OCR through the configured engine. |
 | `normalize_plate(text)` | Cleans OCR output into a canonical plate string. |
-| `best_candidate(result)` | Picks the highest-confidence candidate. |
+| `best_candidate(result)` | Picks the highest-confidence sticker candidate. |
+| `best_identification(result)` | Picks the best number across the cascade (sticker first, then plate). |
 | `vision_status()` | Reports model presence, load state, class names and OCR availability. |
+
+### The detection cascade
+
+`detect()` reads a frame with up to three stages, cheapest and most specific
+first. Each stage can be switched off per host (`VISION_STAGE_*`) or per scan
+(the Test Lab switches, `POST /api/detection/scan` with `sticker=0`).
+
+| # | Stage | Checkpoint | Runs when | Answers |
+| --- | --- | --- | --- | --- |
+| 1 | `sticker` | `best.pt` (bundled) | always, unless switched off | the bus number, read off the sticker panel |
+| 2 | `number_plate` | `weights/number_plate.pt` (optional) | stage 1 read no number | the registration number off the plate |
+| 3 | `vehicle` | `weights/vehicle.pt` (optional) | every scan, unless switched off | `bus`, `car`, `bike`, `truck` |
+
+Rules that keep this honest:
+
+* **Stage 1 short-circuits.** A sticker whose number was read ends the cascade;
+  stage 2 is reported as `skipped: not_needed`, not as a failure.
+* **A stage 3 failure is never a scan failure.** A missing checkpoint is
+  reported as `skipped: model_missing` with the exact path that was expected —
+  the response still carries whatever the other stages found.
+* **Only stage 1 is required.** Without `best.pt` the endpoint answers `503`
+  with the install checklist, exactly as before.
+* **The old fields keep their meaning.** `detection.candidates` still holds the
+  sticker crops; plate-stage crops live in `detection.plate_candidates`. Clients
+  that never learned about the cascade see no change, and `bus_number` is filled
+  from whichever stage read a number.
+
+Every response now also carries:
+
+```json
+"cascade": "sticker | number_plate | vehicle | none",
+"vehicle": {"label": "bus", "class_name": "bus", "confidence": 0.88, "bbox": [...]},
+"stages": [
+  {"name": "sticker", "enabled": true, "ran": true, "found": 1,
+   "skipped": "", "result": "identified", "ms": 96, "detail": ""}
+]
+```
+
+The Test Lab draws one switch per stage and remembers the choice in the
+browser (`localStorage["vision-stages"]`); the dashboard sends the same choice
+with its own scans, so a stage switched off on the bench stays off at the gate.
+
+#### Installing the two optional stages
+
+| Stage | Command | Result |
+| --- | --- | --- |
+| vehicle | `python scripts/fetch_vehicle_model.py` | downloads `yolo11n.pt` into `weights/vehicle.pt` (git-ignored) |
+| number plate | train, then `cp best.pt weights/number_plate.pt` | stage 2 runs whenever no sticker number was read |
+
+`weights/` and `runs/` are git-ignored on purpose: checkpoints stay on the
+machine that trained them. The only tracked weights are the sticker model at
+`best.pt`.
+
+Try the cascade from the terminal, without the server:
+
+```bash
+python scripts/scan_image.py --camera 0                 # all enabled stages
+python scripts/scan_image.py frame.jpg --stages vehicle # classification only
+python scripts/scan_image.py frame.jpg --stages sticker=0,plate=1,vehicle=1
+```
 
 ### OCR engines
 
@@ -330,4 +391,11 @@ pytesseract>=0.3.10
 | `VISION_STICKER_CLASS` | `1` | The only class id that is cropped and OCR'd (`1` = sticker in the shipped model; a single-class checkpoint uses class 0 automatically). |
 | `VISION_OCR_ENGINE` | `auto` | `auto`, `rapidocr`, `tesseract`, `easyocr` or `none`. |
 | `VISION_MAX_CROPS` | `8` | Maximum sticker crops OCR'd per frame. |
+| `VISION_STAGE_STICKER` | `1` | Host default for the sticker stage. |
+| `VISION_STAGE_PLATE` | `1` | Host default for the number-plate stage. |
+| `VISION_STAGE_VEHICLE` | `1` | Host default for the vehicle stage. |
+| `VISION_PLATE_MODEL_PATH` | `weights/number_plate.pt` | Optional plate checkpoint. |
+| `VISION_VEHICLE_MODEL_PATH` | `weights/vehicle.pt` | Optional vehicle checkpoint. |
+| `VISION_VEHICLE_CONFIDENCE` | `0.35` | Minimum confidence for a vehicle box. |
+| `VISION_VEHICLE_CLASSES` | `bicycle,motorcycle,car,bus,truck` | Labels counted as a vehicle. |
 | `OCR_CONFIDENCE_THRESHOLD` | `0.75` | Below this an event is flagged `low_ocr_confidence`. |

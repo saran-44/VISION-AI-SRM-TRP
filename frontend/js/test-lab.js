@@ -8,9 +8,44 @@
 import { apiGet, apiPost } from './api.js';
 import { renderCameraTile } from './cameras.js';
 import { mountShell } from './layout.js';
+import {
+  STAGES,
+  appendStagesToForm,
+  currentStageFlags,
+  describeScan,
+  renderStageChips,
+  setStageFlag,
+} from './detection-stages.js';
 import { badge, clear, el, icon, setState, showToast } from './ui.js';
 
 const STATUS_VARIANT = { pass: 'status-in', warn: 'status-out', fail: 'status-out' };
+
+/**
+ * The cascade itself (order, switches, storage) lives in detection-stages.js so
+ * the dashboard and this bench read the same switch state.
+ */
+let stageStatus = {};
+
+function stageNote(stage) {
+  const notes = [stage.note];
+  const info = stageStatus[stage.key];
+  if (info && info.model_present === false && !info.required) {
+    notes.push('checkpoint not installed yet');
+  }
+  return notes.join(' \u00b7 ');
+}
+
+/** Remember the status rows and re-draw the toggles with the new notes. */
+function applyStageStatus(rows) {
+  if (!Array.isArray(rows) || !rows.length) return;
+  stageStatus = {};
+  for (const row of rows) {
+    stageStatus[row.name] = row;
+    // The panel says "plate", the API says "number_plate": index both.
+    stageStatus[String(row.name).replace('number_plate', 'plate')] = row;
+  }
+  renderStageToggles();
+}
 
 /** Last /api/test-lab/checks payload's detection.setup, for the copy button. */
 let lastSetup = null;
@@ -47,6 +82,7 @@ function renderChecks(payload) {
       : 'demo mode off';
   }
   renderSetup(payload.detection && payload.detection.setup);
+  applyStageStatus(payload.detection && payload.detection.stages);
 }
 
 /**
@@ -142,6 +178,8 @@ async function scanFrame(blob) {
     const body = new FormData();
     body.append('image', blob, 'frame.jpg');
     body.append('source', 'test-lab');
+    // One switch per stage, exactly as the panel shows them.
+    appendStagesToForm(body);
     // The session cookie is the credential; no device key in the browser.
     const response = await fetch('/api/detection/scan', {
       method: 'POST',
@@ -152,25 +190,20 @@ async function scanFrame(blob) {
     if (!response.ok) throw new Error(payload?.error || `Scan failed (${response.status}).`);
     if (plate) plate.textContent = payload.bus_number || 'UNKNOWN';
     // The response says *why* it has no number: nothing detected, everything
-    // below the confidence threshold, or a sticker whose text the OCR missed.
-    // All three used to read "no sticker in this frame".
+    // below the confidence threshold, a plate the OCR missed — and which stage
+    // answered when one did.
     const detection = payload.detection || {};
-    const reason = payload.reason || '';
+    const { good, text } = describeScan(payload);
     if (status) {
-      status.textContent = payload.bus_number
-        ? `Read ${payload.bus_number} (${Math.round((payload.confidence || 0) * 100)}%)`
-        : reason === 'below_threshold'
-          ? `Sticker seen, ${Math.round((detection.best_confidence || 0) * 100)}% — under the ${Math.round((detection.threshold || 0) * 100)}% threshold.`
-          : reason === 'unreadable'
-            ? 'Sticker found, but the number could not be read.'
-            : 'No sticker found in this frame.';
-      status.className = `scan-status ${payload.bus_number ? '' : 'text-danger'}`.trim();
+      status.textContent = text;
+      status.className = `scan-status ${good ? '' : 'text-danger'}`.trim();
     }
     if (meta) {
       meta.textContent = payload.raw_text
         ? `OCR read: ${payload.raw_text}`
         : payload.advice || 'Detector responded; no text was read from this frame.';
     }
+    drawStageChips(payload.stages || detection.stages);
     showToast(payload.bus_number ? `Detected ${payload.bus_number}` : 'No plate in this frame.', payload.bus_number ? 'success' : 'error');
   } catch (error) {
     if (status) {
@@ -183,6 +216,56 @@ async function scanFrame(blob) {
     showToast(error.message || 'Scan failed.', 'error');
     loadChecks();
   }
+}
+
+/**
+ * Draw one switch per stage.
+ *
+ * The switch is a real checkbox, so keyboard and screen readers get the
+ * semantics for free; the visual switch is styling only.
+ */
+function renderStageToggles() {
+  const host = document.getElementById('stageToggles');
+  const stamp = document.getElementById('stageStamp');
+  if (!host) return;
+  clear(host);
+  for (const stage of STAGES) {
+    const id = `stage-${stage.key}`;
+    const input = el('input', {
+      type: 'checkbox',
+      id,
+      class: 'stage-switch-input',
+      checked: currentStageFlags()[stage.key],
+    });
+    // `el()` drops false-valued props, so set the live state explicitly.
+    input.checked = Boolean(currentStageFlags()[stage.key]);
+    input.addEventListener('change', () => {
+      setStageFlag(stage.key, input.checked);
+      updateStageStamp(stamp);
+    });
+    host.append(el('label', { class: 'stage-toggle', for: id }, [
+      el('span', { class: 'stage-switch' }, [input, el('span', { class: 'stage-switch-track', 'aria-hidden': 'true' })]),
+      el('span', { class: 'stage-toggle-body' }, [
+        el('span', { class: 'stage-toggle-label', text: stage.label }),
+        el('span', { class: 'stage-toggle-note', text: stageNote(stage) }),
+      ]),
+    ]));
+  }
+  updateStageStamp(stamp);
+}
+
+function updateStageStamp(stamp) {
+  if (!stamp) return;
+  const flags = currentStageFlags();
+  const on = STAGES.filter((stage) => flags[stage.key]).map((stage) => stage.label);
+  stamp.textContent = on.length
+    ? `Running: ${on.join(' → ')}`
+    : 'Every stage is off — scans will report no detection.';
+}
+
+/** Draw the per-stage chips for the last scan into this page's host. */
+function drawStageChips(stages) {
+  renderStageChips(document.getElementById('labStages'), stages);
 }
 
 function mountCamera() {
@@ -232,6 +315,7 @@ function wireEventForm() {
 
 async function main() {
   await mountShell({ active: 'test-lab', allowedRoles: ['head_admin'], pageTitle: 'Test Lab' });
+  renderStageToggles();
   mountCamera();
   wireEventForm();
   document.getElementById('refreshChecks').addEventListener('click', loadChecks);

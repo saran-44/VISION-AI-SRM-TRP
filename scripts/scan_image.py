@@ -123,6 +123,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--save", default=None, help="where to write the webcam frame (default frame-<time>.jpg)")
     parser.add_argument("--conf", type=float, default=None, help="override VISION_CONFIDENCE")
     parser.add_argument("--imgsz", type=int, default=None, help="override VISION_IMAGE_SIZE")
+    parser.add_argument(
+        "--stages",
+        default=None,
+        help=(
+            "which cascade stages to run, e.g. \"sticker=0,vehicle=1\" or \"plate\". "
+            "Names: sticker, plate, vehicle. Omitted stages keep the VISION_STAGE_* default."
+        ),
+    )
     parser.add_argument("--json", action="store_true", help="print the raw response instead of a summary")
     args = parser.parse_args(argv)
 
@@ -136,7 +144,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.imgsz is not None:
         os.environ["VISION_IMAGE_SIZE"] = str(args.imgsz)
 
-    from backend.vision import VisionUnavailable, best_candidate, decode_image, detect
+    from backend.vision import (
+        STAGE_LABELS,
+        VisionUnavailable,
+        best_identification,
+        decode_image,
+        detect,
+        stage_overrides_from_payload,
+    )
 
     if args.camera is not None:
         grabbed = _grab_webcam(args.camera, args.frames, args.save, args.width, args.height)
@@ -153,7 +168,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         image = decode_image(path.read_bytes())
-        result = detect(image)
+        # "sticker=0,vehicle=1" and "plate" are both accepted; see --stages.
+        overrides = stage_overrides_from_payload({"stages": args.stages}) if args.stages else None
+        result = detect(image, stages=overrides)
     except VisionUnavailable as exc:
         print(f"Detector unavailable: {exc}", file=sys.stderr)
         print("Install the extras: python -m pip install -r backend/requirements-vision.txt", file=sys.stderr)
@@ -164,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
-    candidate = best_candidate(result)
+    candidate = best_identification(result)
     print(f"image       : {path} ({result.frame_width}×{result.frame_height})")
     print(f"model       : {result.model}  @ {result.image_size}px, threshold {result.threshold:.2f}")
     print(f"inference   : {result.inference_ms} ms")
@@ -173,9 +190,21 @@ def main(argv: list[str] | None = None) -> int:
           + (f" ({result.boxes_other_class} box(es) of other classes were ignored)" if result.boxes_other_class else ""))
     for box in payload["candidates"]:
         print(f"  · {box['class_name']:<12} {box['confidence']:.2f}  bbox={box['bbox']}  text={box['raw_text']!r}")
+    for stage in payload["stages"]:
+        state = (
+            f"skipped: {stage['skipped']}"
+            if stage["skipped"]
+            else f"ran in {stage['ms']} ms, {stage['found']} box(es), {stage['result']}"
+        )
+        print(f"stage       : {STAGE_LABELS.get(stage['name'], stage['name']):<13} {state}")
+        if stage["skipped"] and stage["detail"]:
+            print(f"              {stage['detail']}")
+    vehicle = payload.get("vehicle")
+    if vehicle:
+        print(f"vehicle     : {vehicle['label']} ({vehicle['class_name']}, {vehicle['confidence']:.2f})")
     print()
     if candidate and candidate.bus_number:
-        print(f"RESULT      : {candidate.bus_number}  ({candidate.confidence:.2f})")
+        print(f"RESULT      : {candidate.bus_number}  ({candidate.confidence:.2f}, via {result.cascade})")
     else:
         print(f"RESULT      : no bus number — reason={result.reason}")
         print(f"ADVICE      : {result.advice}")
