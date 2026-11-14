@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import pytest
 from sqlalchemy import inspect
 
@@ -89,3 +92,24 @@ def test_private_tables_exist(db):
     inspector = inspect(db.engine)
     schema = "transport_portal" if db.engine.dialect.name == "postgresql" else None
     assert {"users", "buses", "drivers", "events", "audit_logs", "schema_version"} <= set(inspector.get_table_names(schema=schema))
+
+
+def test_local_dotenv_cannot_change_suite_defaults():
+    """A filled-in `.env` must not leak into the test run.
+
+    `backend.config` loads `.env` at import time, so without the session
+    fixture in conftest.py a laptop with `LEGACY_PASSWORD_LOGIN_ENABLED=true`
+    (the pre-Firebase default) fails the production-defaults tests that pass in
+    CI. This asserts the insulation instead of the individual values.
+    """
+    env_file = Path(__file__).resolve().parents[2] / ".env"
+    if not env_file.exists():
+        pytest.skip("no local .env file")
+    from dotenv import dotenv_values
+
+    leaked = sorted(
+        key
+        for key in dotenv_values(env_file)
+        if not key.startswith(("TEST_", "ALLOW_TEST_")) and os.getenv(key) is not None
+    )
+    assert leaked == [], f".env keys leaked into the test session: {leaked}"
