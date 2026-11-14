@@ -28,12 +28,13 @@ from .auth import (
     set_auth_cookie,
     verify_password,
 )
-from .config import Config
+from .config import DEMO_ADMIN_EMAIL, Config
 from .db import ASCENDING, DESCENDING, get_database_for_startup, iso_utc, public_doc, utc_naive, valid_id
 from .schemas import (
     AnalyticsFilter,
     BusCreate,
     BusUpdate,
+    DemoLoginSchema,
     DriverCreate,
     DriverUpdate,
     EventCreate,
@@ -126,7 +127,11 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             "object-src 'none'; "
             "base-uri 'self'; "
             "form-action 'self'; "
-            "frame-ancestors 'self' https://*.e2b.app"
+            # The hosted preview embed is a development convenience. Production
+            # must not be framable by a third-party origin (clickjacking).
+            + ("frame-ancestors 'self'"
+               if config.environment == "production"
+               else "frame-ancestors 'self' https://*.e2b.app")
         )
         response.headers["Content-Security-Policy"] = csp
         if request.path.startswith("/api/") or response.mimetype == "text/html":
@@ -143,10 +148,10 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             details.append({"field": location, "message": error.get("msg", "Invalid value")})
         return details
 
-    def validate(schema_cls, source: str = "json"):
+    def validate(schema_cls, source: str = "json", data: dict | None = None):
         if source == "args":
             data = {key: value for key, value in request.args.items() if value != ""}
-        else:
+        elif data is None:
             data = request.get_json(silent=True)
             if not isinstance(data, dict):
                 return None, (jsonify({"error": "A JSON object is required"}), 400)
@@ -247,6 +252,14 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
     def manage_page():
         return send_page("manage.html")
 
+    @app.get("/test-lab")
+    @require_page_roles("head_admin")
+    def test_lab_page():
+        """Isolated test bench. It does not exist outside DEMO_MODE."""
+        if not config.demo_mode:
+            return jsonify({"error": "Not found"}), 404
+        return send_page("test-lab.html")
+
     @app.get("/assets/<path:filename>")
     def assets(filename: str):
         return send_from_directory(frontend_dir / "assets", filename)
@@ -269,7 +282,16 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
     def login():
         if not config.legacy_password_login_enabled:
             return jsonify({"error": "Password sign-in is disabled on this deployment."}), 403
-        payload, error = validate(LoginSchema)
+        # Demo mode accepts the bare username "admin" as an alias so a test
+        # session needs no real-looking address. The alias does not exist
+        # outside DEMO_MODE, and demo mode cannot run in production.
+        supplied = request.get_json(silent=True)
+        if config.demo_mode and isinstance(supplied, dict):
+            typed = str(supplied.get("email", "")).strip().lower()
+            if typed in {"admin", "admin@demo.local", "admin@demo.invalid"}:
+                supplied = {**supplied, "email": DEMO_ADMIN_EMAIL}
+        schema = DemoLoginSchema if config.demo_mode else LoginSchema
+        payload, error = validate(schema, data=supplied if isinstance(supplied, dict) else None)
         if error:
             return error
         user = db.users.find_one({"email": payload.email})
@@ -300,6 +322,7 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
                 "auto_provision": config.firebase_auto_provision,
             },
             "legacy_password_login": config.legacy_password_login_enabled,
+            "demo_mode": config.demo_mode,
         })
 
     @app.post("/api/auth/firebase")
@@ -621,6 +644,101 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             flask_request=request,
         )
         return jsonify(response)
+
+    # ------------------------------------------------------------- test bench
+    @app.get("/api/test-lab/checks")
+    @require_roles("head_admin")
+    def test_lab_checks():
+        """One read-only health sweep for the Test Lab page.
+
+        Demo-only, like the page itself: in any other deployment this 404s so
+        the surface cannot be probed.
+        """
+        if not config.demo_mode:
+            return jsonify({"error": "Not found"}), 404
+        checks: list[dict[str, Any]] = []
+
+        checks.append({
+            "id": "session",
+            "label": "Authenticated session",
+            "status": "pass",
+            "detail": f"{g.current_user['role']} · {g.current_user['email']}",
+        })
+
+        try:
+            db.buses.count_documents({})
+            database_ok = True
+            database_detail = "Database reachable; tables respond."
+        except SQLAlchemyError:
+            database_ok = False
+            database_detail = "Database did not answer a count query."
+        checks.append({
+            "id": "database",
+            "label": "Database",
+            "status": "pass" if database_ok else "fail",
+            "detail": database_detail,
+        })
+
+        for name, collection in (("buses", db.buses), ("drivers", db.drivers), ("events", db.events)):
+            try:
+                total = collection.count_documents({})
+            except SQLAlchemyError:
+                total = None
+            checks.append({
+                "id": f"count-{name}",
+                "label": f"Stored {name}",
+                "status": "pass" if total is not None else "fail",
+                "detail": "unavailable" if total is None else f"{total} record(s)",
+            })
+
+        vision = vision_status()
+        checks.append({
+            "id": "detection",
+            "label": "Detection stack",
+            "status": "pass" if vision.get("available") else "warn",
+            "detail": (
+                "model, torch, ultralytics, OpenCV, PIL and OCR are ready"
+                if vision.get("available")
+                else "; ".join(vision.get("problems") or ["detector unavailable"])
+            ),
+        })
+
+        checks.append({
+            "id": "demo",
+            "label": "Demo mode",
+            "status": "pass",
+            "detail": "DEMO_MODE is on: seeded data, admin/admin alias, no real records.",
+        })
+        return jsonify({
+            "environment": config.environment,
+            "demo_mode": config.demo_mode,
+            "checked_at": iso_utc(naive_now()),
+            "checks": checks,
+            "detection": vision,
+        })
+
+    @app.post("/api/test-lab/events")
+    @limiter.limit("30 per minute")
+    @require_roles("head_admin")
+    def test_lab_event():
+        """Insert one test gate event so the tables, filters and exports have
+        fresh data. Demo-only; the event is tagged `source: test-lab`."""
+        if not config.demo_mode:
+            return jsonify({"error": "Not found"}), 404
+        payload, error = validate(EventCreate)
+        if error:
+            return error
+        event = ingest_event(db, payload, config, source="test-lab")
+        record_audit(
+            db,
+            g.current_user,
+            "test_lab_event",
+            "events",
+            event.get("id"),
+            after=event,
+            flask_request=request,
+        )
+        return jsonify({"event": event}), 201
 
     @app.get("/api/export/events.csv")
     @require_roles("head_admin")

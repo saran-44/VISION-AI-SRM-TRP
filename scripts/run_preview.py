@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.app import create_app  # noqa: E402
-from backend.config import Config, _bool, _firebase_config  # noqa: E402
+from backend.config import DEMO_ADMIN_EMAIL, DEMO_ADMIN_PASSWORD, Config, _bool, _firebase_config  # noqa: E402
 from backend.db import create_database_engine, get_database  # noqa: E402
 from backend.seed_demo import seed_demo_data  # noqa: E402
 
@@ -43,6 +43,9 @@ def build_config(database_url: str, jwt_secret: str) -> Config:
         firebase_auto_provision=_bool("FIREBASE_AUTO_PROVISION", True),
         firebase_default_role=os.getenv("FIREBASE_DEFAULT_ROLE", "transport_office").strip() or "transport_office",
         legacy_password_login_enabled=_bool("LEGACY_PASSWORD_LOGIN_ENABLED", True),
+        # A disposable preview is the one place the demo login belongs. The
+        # config refuses DEMO_MODE outright when ENVIRONMENT=production.
+        demo_mode=True,
     )
     cfg.validate()
     return cfg
@@ -72,7 +75,8 @@ def main() -> int:
     office_email = os.getenv("PREVIEW_TRANSPORT_EMAIL", "transport.office@example.invalid")
     if not args.no_seed:
         counts = seed_demo_data(db, config, head_password=password, office_password=password,
-                                head_email=head_email, office_email=office_email)
+                                head_email=head_email, office_email=office_email,
+                                demo_login=config.demo_mode)
         print(f"Seeded demo data: {counts['buses']} buses, {counts['drivers']} drivers, {counts['events']} events, {counts['users']} users.")
     app = create_app(config, database_engine=engine)
     print("=" * 72)
@@ -83,6 +87,8 @@ def main() -> int:
         print(f" Head admin   : {head_email}")
         print(f" Transport    : {office_email}")
         print(f" Password     : {password}   (fake demo data only)")
+        print(f" Demo login   : {DEMO_ADMIN_EMAIL} / {DEMO_ADMIN_PASSWORD}")
+        print(" DEMO MODE    : ON — Test Lab at /test-lab, no real records.")
     print("=" * 72)
     app.run(host=args.host, port=args.port, debug=False, threaded=True)
     return 0

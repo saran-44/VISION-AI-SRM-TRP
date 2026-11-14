@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Lab · VISION AI - SRM TRP</title>
+  <link rel="icon" type="image/png" href="/assets/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <link rel="stylesheet" href="/assets/theme.css">
+  <script type="module" src="/js/test-lab.js"></script>
+</head>
+<body>
+  <div id="app-shell"></div>
+  <template id="page-template">
+    <section class="page-header">
+      <div>
+        <h1 class="page-title">Test Lab</h1>
+        <p class="card-subtitle">Isolated demo bench — seeded records only. Nothing here can touch production data.</p>
+      </div>
+      <div class="page-header-actions">
+        <span id="labStamp" class="muted">—</span>
+        <button id="refreshChecks" class="btn btn-outline" type="button"><i class='bx bx-refresh' aria-hidden="true"></i> Re-run checks</button>
+      </div>
+    </section>
+
+    <section class="card glass3d">
+      <div class="card-header">
+        <h2 class="card-title"><i class='bx bx-camera-home' aria-hidden="true"></i> Detection bench</h2>
+        <span class="card-subtitle">Webcam today · IP cameras later via <code>CAMERA_STREAM_URLS</code></span>
+      </div>
+      <div class="camera-grid">
+        <div id="labCameraHost"></div>
+      </div>
+      <div class="scan-panel">
+        <div id="labScanStatus" class="scan-status">Camera idle. Allow camera access, then press “Scan plate”.</div>
+        <div id="labPlate" class="number-plate">—</div>
+        <div id="labScanMeta" class="scan-meta">A captured frame is posted to <code>/api/detection/scan</code> with your session cookie.</div>
+      </div>
+    </section>
+
+    <section class="card glass3d">
+      <div class="card-header">
+        <h2 class="card-title"><i class='bx bx-list-check' aria-hidden="true"></i> System checks</h2>
+        <span class="card-subtitle">Read-only sweep: session, database counts, detection stack, demo state</span>
+      </div>
+      <div id="checksState"></div>
+      <div class="table-container">
+        <table id="checksTable" class="data-table">
+          <thead><tr><th>Check</th><th>Result</th><th>Detail</th></tr></thead>
+          <tbody id="checksBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card glass3d">
+      <div class="card-header">
+        <h2 class="card-title"><i class='bx bx-plus-circle' aria-hidden="true"></i> Post a test entry</h2>
+        <span class="card-subtitle">Writes one <code>source: test-lab</code> event so tables, filters and exports have fresh rows</span>
+      </div>
+      <form id="testEventForm" class="filters" autocomplete="off">
+        <div class="filter-grid">
+          <div class="input-group">
+            <label for="testBus">Bus number</label>
+            <input id="testBus" name="bus_number" type="text" value="BUS-001" maxlength="20" required>
+          </div>
+          <div class="input-group">
+            <label for="testDirection">Direction</label>
+            <select id="testDirection" name="direction">
+              <option value="IN">IN</option>
+              <option value="OUT">OUT</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label for="testGate">Gate</label>
+            <input id="testGate" name="gate" type="text" value="Gate 1 Entry" maxlength="60" required>
+          </div>
+          <div class="input-group">
+            <label for="testCamera">Camera id</label>
+            <input id="testCamera" name="camera_id" type="text" value="test-lab" maxlength="60" required>
+          </div>
+        </div>
+        <div class="button-row">
+          <button id="testEventSubmit" class="btn btn-primary" type="submit"><i class='bx bx-check' aria-hidden="true"></i> Insert test event</button>
+        </div>
+      </form>
+      <div id="eventResult" class="state-box" hidden></div>
+    </section>
+  </template>
+</body>
+</html>

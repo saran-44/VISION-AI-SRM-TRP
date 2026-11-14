@@ -7,7 +7,7 @@ from datetime import timedelta
 
 
 from .auth import hash_password
-from .config import Config
+from .config import DEMO_ADMIN_EMAIL, DEMO_ADMIN_PASSWORD, Config
 from .db import get_database
 from .schemas import EventCreate
 from .services import aware_now, ingest_event, naive_now
@@ -105,11 +105,16 @@ def seed_demo_data(
     office_password: str,
     head_email: str = "head.admin@example.invalid",
     office_email: str = "transport.office@example.invalid",
+    demo_login: bool = False,
 ) -> dict[str, int]:
     """Insert the fake demo dataset into an existing database handle.
 
     Only fictional records are written: demo bus numbers, demo driver names and
     reserved `example.invalid` addresses.
+
+    With ``demo_login`` the known ``admin`` / ``admin`` account is added for the
+    isolated Test Lab. Callers must only pass it when ``DEMO_MODE`` is on, and
+    that flag is refused in production.
     """
     db.users.delete_many({"demo_user": True})
     db.buses.delete_many({"demo": True})
@@ -117,26 +122,34 @@ def seed_demo_data(
     db.events.delete_many({"demo": True})
 
     now = naive_now()
-    db.users.insert_many(
-        [
-            {
-                "email": head_email,
-                "password_hash": hash_password(head_password),
-                "role": "head_admin",
-                "active": True,
-                "demo_user": True,
-                "created_at": now,
-            },
-            {
-                "email": office_email,
-                "password_hash": hash_password(office_password),
-                "role": "transport_office",
-                "active": True,
-                "demo_user": True,
-                "created_at": now,
-            },
-        ]
-    )
+    users = [
+        {
+            "email": head_email,
+            "password_hash": hash_password(head_password),
+            "role": "head_admin",
+            "active": True,
+            "demo_user": True,
+            "created_at": now,
+        },
+        {
+            "email": office_email,
+            "password_hash": hash_password(office_password),
+            "role": "transport_office",
+            "active": True,
+            "demo_user": True,
+            "created_at": now,
+        },
+    ]
+    if demo_login:
+        users.append({
+            "email": DEMO_ADMIN_EMAIL,
+            "password_hash": hash_password(DEMO_ADMIN_PASSWORD),
+            "role": "head_admin",
+            "active": True,
+            "demo_user": True,
+            "created_at": now,
+        })
+    db.users.insert_many(users)
 
     for bus in DEMO_BUSES:
         db.buses.insert_one({**bus, "demo": True, "created_at": now, "updated_at": now})
@@ -152,7 +165,7 @@ def seed_demo_data(
         "buses": len(DEMO_BUSES),
         "drivers": len(DEMO_DRIVERS),
         "events": len(events),
-        "users": 2,
+        "users": len(users),
     }
 
 

@@ -143,6 +143,25 @@ It creates 4 buses, 3 drivers, 8 events (including one unregistered plate and
 one low-confidence read) and 2 users. Demo records are tagged `demo: true` and
 are deleted/replaced on the next explicit demo seed. Never seed a production database.
 
+### Test Lab (isolated demo, webcam testing)
+
+```bash
+python scripts/run_preview.py --port 4400
+# Demo login: admin / admin     →  http://localhost:4400/test-lab
+```
+
+A disposable in-memory preview with `DEMO_MODE` on: known `admin` / `admin`
+sign-in, a **Test Lab** page (system checks, webcam capture → sticker
+detection, one-click test gate events) and a gold `DEMO` chip in the top bar.
+Try detection, entries, filters, exports and every page without touching real
+records.
+
+`DEMO_MODE` is refused when `ENVIRONMENT=production`; the `admin` alias is
+rejected without it, the Test Lab route and its API return `404`, and the
+account is seeded only into a throwaway database. Webcam works today; IP
+cameras later via `CAMERA_STREAM_URLS` with no code change. Full walkthrough:
+[`docs/TESTING_LAB.md`](docs/TESTING_LAB.md).
+
 ## Detection / OCR integration
 
 The bus-sticker detector **is** part of this repository. `best.pt` (Ultralytics
@@ -392,6 +411,11 @@ through the Supabase Data API; the Flask server enforces user authorization.
   `Referrer-Policy` and `Permissions-Policy` headers.
 - Login attempts are rate limited; administrative changes are audited with
   actor, role, timestamp and IP address.
+
+Full findings, severity and the operator checklist live in
+[`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md). Reproduce every automated
+check with `bash scripts/audit_local.sh --with-tests` (read-only; it never
+prints a secret value, so its output is safe to paste).
 
 See [`docs/PRIVACY.md`](docs/PRIVACY.md) for who can see driver and vehicle
 data.

@@ -10,6 +10,8 @@ const NAV = {
     { id: 'drivers', label: 'Drivers', href: '/drivers', icon: 'bx-group' },
     { id: 'buses', label: 'Buses', href: '/buses', icon: 'bx-bus-school' },
     { id: 'audit', label: 'Audit Log', href: '/audit', icon: 'bx-history' },
+    // Demo-only: the route 404s unless the backend runs with DEMO_MODE on.
+    { id: 'test-lab', label: 'Test Lab', href: '/test-lab', icon: 'bx-test-tube', demoOnly: true },
   ],
   transport_office: [
     { id: 'manage', label: 'Manage Records', href: '/manage', icon: 'bx-plus-circle' },
@@ -47,8 +49,10 @@ function syncThemeButton(button, dark) {
   button.setAttribute('aria-pressed', String(dark));
 }
 
-function buildSidebar(user, active) {
-  const items = (NAV[user.role] || []).map((item) => el('li', {
+function buildSidebar(user, active, demoMode = false) {
+  const items = (NAV[user.role] || [])
+    .filter((item) => !item.demoOnly || demoMode)
+    .map((item) => el('li', {
     class: `nav-item ${item.id === active ? 'active' : ''}`.trim(),
   }, [el('a', {
     class: 'nav-link',
@@ -74,7 +78,7 @@ function buildSidebar(user, active) {
   ]);
 }
 
-function buildTopbar(user, pageTitle) {
+function buildTopbar(user, pageTitle, demoMode = false) {
   const clock = el('div', { class: 'live-clock', 'aria-label': 'Current time' }, [
     icon('bx-time'),
     el('span', { class: 'clock-time', text: '—' }),
@@ -104,6 +108,9 @@ function buildTopbar(user, pageTitle) {
     iconButton('Open navigation menu', 'bx-menu', null, 'menu-toggle'),
     searchBar,
     el('div', { class: 'topbar-right' }, [
+      demoMode
+        ? el('span', { class: 'demo-chip', title: 'DEMO_MODE: seeded data only, never production', text: 'DEMO' })
+        : null,
       clock,
       iconButton('Open search', 'bx-search', () => {
         searchBar.classList.add('active');
@@ -276,11 +283,16 @@ export async function mountShell({ active, allowedRoles = [], pageTitle = 'VISIO
 
   document.title = `${pageTitle} · VISION AI - SRM TRP`;
   applyTheme();
+  // The public auth config tells the shell whether this deployment is a demo,
+  // so the Test Lab link and its banner never appear in production.
+  const demoMode = await apiGet('/api/auth/config')
+    .then((config) => Boolean(config && config.demo_mode))
+    .catch(() => false);
   const shell = document.getElementById('app-shell');
   if (!shell) throw new Error('Missing #app-shell');
 
-  const sidebar = buildSidebar(user, active);
-  const topbar = buildTopbar(user, pageTitle);
+  const sidebar = buildSidebar(user, active, demoMode);
+  const topbar = buildTopbar(user, pageTitle, demoMode);
   const { overlay, body: searchBody } = buildSearchModal();
   const root = el('div', { class: 'dashboard-content', id: 'page-root' });
   const main = el('main', { class: 'main-content' }, [topbar, root]);

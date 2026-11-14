@@ -26,7 +26,13 @@ def test_production_rejects_unverified_database_connections(url):
 
 
 def test_production_accepts_verified_postgres_url():
-    build_config(environment="production", database_url="postgresql://localhost/db?sslmode=verify-full").validate()
+    # Password sign-in is off by default in production; demo/Test Lab hardening
+    # is covered in test_demo_mode.py.
+    build_config(
+        environment="production",
+        database_url="postgresql://localhost/db?sslmode=verify-full",
+        legacy_password_login_enabled=False,
+    ).validate()
 
 
 def test_cors_wildcards_are_rejected(monkeypatch):

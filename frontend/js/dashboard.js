@@ -123,10 +123,12 @@ async function scanFrame(blob, meta = {}) {
     body.append('direction', 'IN');
     body.append('source', 'browser');
 
+    // The session cookie is the credential here; the device API key must never
+    // be shipped to a browser (it would be readable by any script on the page
+    // and by anyone with DevTools).
     const response = await fetch('/api/detection/scan', {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'X-Device-Key': window.__SRM_DEVICE_KEY__ || '' },
       body,
     });
     const payload = await response.json().catch(() => null);
