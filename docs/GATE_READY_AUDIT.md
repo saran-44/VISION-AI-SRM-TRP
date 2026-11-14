@@ -70,7 +70,7 @@ launcher.py --setup (email, password, camera, port)
   → Created the head administrator (argon2 hash)
   → Created data/gate.db
 
-scripts/preflight.py --env-file gate.env
+scripts/preflight.py --env-file gate.env   (15 checks)
   PASS configuration / environment / data folder / disk / database /
        database write / frontend / models / port
   FAIL ocr        (no torch in this sandbox — the bundle ships it)
@@ -99,6 +99,7 @@ the frame reporter.
 |---|---|---|
 | Every model-load failure was reported as "Detection model not found at …" — including "ultralytics is not installed" | `backend/vision.py` `load_model()` caught `StageNotConfigured` and rebuilt the message; reproduced by scanning with no torch: the file was present and the message said it was not | the real reason is propagated (`model_missing` / `not_installed` / `load_failed`) |
 | The gate PC was told to "run VisionAI-GateAgent.exe on the gate computer" — about itself | 503 body from `/api/detection/scan` on a gate config | gate branch: `vision_unavailable`, points at `--check` |
+| A wizard stopped by a short password left a half-install that the preflight called READY — no `gate.env`, no account, nobody able to sign in | reproduced on the gate laptop: `--setup` aborted, `--check` printed `READY: 0 failed` | two new checks (`gate config`, `administrator`) fail that state; the wizard now retries the password three times and says nothing was written |
 | A windowed PyInstaller build would have made `--setup` and `--check` unusable (no stdio) | `desktop/gate/VisionAI.spec` | console program + `hide_console()` for normal runs |
 
 ---

@@ -63,7 +63,7 @@ The post-install step opens **First-time setup**, which asks for:
 | Prompt | What to enter |
 |---|---|
 | Administrator email | e.g. `transport.office@trp.srmtrichy.edu.in` |
-| Administrator password | 12+ characters. This account can edit every record |
+| Administrator password | 12+ characters, typed twice. Three attempts before the wizard stops; nothing is written until the password is accepted |
 | Camera source | see §3 — blank means "browser camera only" |
 | Portal port | Enter for 8080 |
 
@@ -118,17 +118,19 @@ threshold — clean the lens, check focus, or drop to a smaller sensor mode.
 "C:\Program Files\VisionAI\VisionAI.exe" --check --deep
 ```
 
-Thirteen checks. `--deep` adds a real inference pass (loads torch, ~10 s). Exit
+Fifteen checks. `--deep` adds a real inference pass (loads torch, ~10 s). Exit
 code is 0 only when nothing failed. Expected on a good install:
 
 ```
-VisionAI gate preflight — 13 checks
+VisionAI gate preflight — 15 checks
   PASS  configuration    loaded (gate)
+  PASS  gate config      C:\ProgramData\VisionAI\gate.env
   PASS  environment      ENVIRONMENT=gate, sqlite storage, demo off, password login
   PASS  data folder      C:\ProgramData\VisionAI is writable
   PASS  disk             118.4 GB free on the data drive
   PASS  database         schema v1, 0 bus row(s), sqlite at C:/ProgramData/VisionAI/data/gate.db
   PASS  database write   inserted and removed a probe row
+  PASS  administrator    1 active head_admin account(s)
   PASS  frontend         9 page(s), 22 script(s)
   PASS  models           best.pt 5594 KB, anpr_best.pt 5630 KB
   PASS  ocr              rapidocr is available
@@ -142,6 +144,11 @@ READY: 0 failed, 0 warning(s)
 
 `database write` is a real insert and delete. A read-only folder or a full disk
 passes every other check and fails the first scan of the day.
+
+`gate config` and `administrator` exist because of a real half-install: a wizard
+that stopped on a short password still left a working schema on disk, and every
+other check passed while **nobody could sign in**. Both now fail loudly, with the
+fix in the same line.
 
 ---
 
@@ -214,6 +221,7 @@ to delete it on purpose.
 | `detection: no box at all` | sticker smaller than ~45 px in the frame | move the camera closer, raise `VISION_IMAGE_SIZE`, or use the full-resolution snapshot |
 | `port: already in use` | the portal is already running | open `http://127.0.0.1:8080/`; a second start reuses the running instance |
 | Browser says "site can't be reached" | the portal is not running | tray icon → Open portal, or Start Menu → the app |
+| `--setup` said "Use at least 12 characters" | the wizard rejects short passwords: it can create a `head_admin` that edits every record | run `--setup` again; it asks three times before stopping, and writes nothing until a password is accepted |
 | Login says "Password sign-in is disabled" | `LEGACY_PASSWORD_LOGIN_ENABLED=false` in `gate.env` | set it back to `true` — the gate PC has no Firebase project |
 
 ---

@@ -261,11 +261,35 @@ def test_the_gate_scan_failure_talks_about_this_pc(tmp_path: Path, camera_server
     assert "Render" not in payload["error"]
 
 
+def add_admin(config: Config, email: str = "gate.admin@example.invalid") -> None:
+    """Create the account --setup would have created."""
+    from backend.db import get_database_for_startup
+    from backend.services import naive_now
+
+    database = get_database_for_startup(config)
+    now = naive_now()
+    database.users.insert_one(
+        {
+            "_id": "b" * 24,
+            "email": email,
+            "password_hash": "not-a-real-hash",
+            "role": "head_admin",
+            "active": True,
+            "auth_provider": "password",
+            "demo_user": False,
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+
+
 # --------------------------------------------------------------- preflight
 def test_the_preflight_checks_the_gate_it_is_configured_for(tmp_path: Path) -> None:
     from backend.preflight import FAIL, PASS, format_report, run
 
-    report = run(deep=False, port=8099, data_dir=tmp_path, config=gate_config(tmp_path))
+    config = gate_config(tmp_path)
+    add_admin(config)
+    report = run(deep=False, port=8099, data_dir=tmp_path, config=config)
     statuses = {check.name: check.status for check in report.checks}
 
     assert statuses["environment"] == PASS
@@ -273,6 +297,7 @@ def test_the_preflight_checks_the_gate_it_is_configured_for(tmp_path: Path) -> N
     assert statuses["database"] == PASS
     assert statuses["database write"] == PASS
     assert statuses["frontend"] == PASS
+    assert statuses["administrator"] == PASS
     assert statuses["camera"] != FAIL  # a warning when none is configured
     text = format_report(report)
     assert "VisionAI gate preflight" in text
@@ -296,3 +321,42 @@ def test_the_preflight_never_reports_a_skipped_check_as_ready(tmp_path: Path) ->
     detector = next(check for check in report.checks if check.name == "detector")
     assert detector.status == SKIP
     assert "--deep" in detector.detail
+
+
+def test_the_preflight_refuses_to_be_ready_with_nobody_able_to_sign_in(tmp_path: Path) -> None:
+    """The exact state after a half-finished --setup: schema on disk, no account."""
+    from backend.preflight import FAIL, run
+
+    report = run(deep=False, port=8099, data_dir=tmp_path, config=gate_config(tmp_path))
+    administrator = next(check for check in report.checks if check.name == "administrator")
+
+    assert administrator.status == FAIL
+    assert "nobody can sign in" in administrator.detail
+    assert report.ready is False
+
+
+def test_the_preflight_flags_a_gate_configuration_that_does_not_exist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from backend.preflight import FAIL, run
+
+    monkeypatch.setenv("VISION_GATE_CONFIG", str(tmp_path / "missing" / "gate.env"))
+    report = run(deep=False, port=8099, data_dir=tmp_path, config=gate_config(tmp_path))
+    gate_config_check = next(check for check in report.checks if check.name == "gate config")
+
+    assert gate_config_check.status == FAIL
+    assert "borrowed defaults" in gate_config_check.detail
+
+
+def test_the_preflight_accepts_the_configuration_setup_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from backend.preflight import PASS, run
+
+    written = tmp_path / "gate.env"
+    written.write_text("ENVIRONMENT=gate\n", encoding="utf-8")
+    monkeypatch.setenv("VISION_GATE_CONFIG", str(written))
+    report = run(deep=False, port=8099, data_dir=tmp_path, config=gate_config(tmp_path))
+    gate_config_check = next(check for check in report.checks if check.name == "gate config")
+
+    assert gate_config_check.status == PASS

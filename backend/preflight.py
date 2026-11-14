@@ -142,6 +142,49 @@ def check_environment(report: Report, config) -> None:
         )
 
 
+def check_gate_config(report: Report) -> None:
+    """Is the portal running on the configuration --setup wrote, or on defaults?
+
+    Without this check a gate PC whose wizard was never finished passes every
+    other test: the database is created on demand and the values come from
+    whatever .env happens to be in the checkout.
+    """
+    configured = os.environ.get("VISION_GATE_CONFIG", "").strip()
+    if not configured:
+        report.add("gate config", SKIP, "no gate configuration path was given")
+        return
+    path = Path(configured)
+    if path.exists():
+        report.add("gate config", PASS, str(path))
+    else:
+        report.add(
+            "gate config",
+            FAIL,
+            f"{path} does not exist: the portal is running on borrowed defaults, "
+            "not on a configuration created for this PC",
+            "Run VisionAI.exe --setup (the wizard only writes once it has a usable password)",
+        )
+
+
+def check_admin_account(report: Report, database) -> None:
+    """READY with nobody able to sign in is not ready."""
+    try:
+        admins = database.users.count_documents({"role": "head_admin", "active": True})
+    except Exception as exc:  # noqa: BLE001
+        report.add("administrator", FAIL, f"cannot read the users table ({type(exc).__name__})",
+                   "Run VisionAI.exe --setup")
+        return
+    if admins == 0:
+        report.add(
+            "administrator",
+            FAIL,
+            "no active head_admin account: nobody can sign in to the portal",
+            "Run VisionAI.exe --setup to create the administrator",
+        )
+    else:
+        report.add("administrator", PASS, f"{admins} active head_admin account(s)")
+
+
 def check_database(report: Report, config, database) -> None:
     try:
         from sqlalchemy import select
@@ -380,6 +423,7 @@ def run(deep: bool = False, port: int = 8080, data_dir: Path | None = None, conf
         report.add("configuration", FAIL, f"{exc}", "Run VisionAI.exe --setup to write the gate configuration")
         return report
     report.add("configuration", PASS, f"loaded ({config.environment})")
+    check_gate_config(report)
 
     check_env_gate = getattr(config, "environment", "")
     check_environment(report, config)
@@ -402,6 +446,7 @@ def run(deep: bool = False, port: int = 8080, data_dir: Path | None = None, conf
     if database is not None:
         check_database(report, config, database)
         check_database_write(report, database)
+        check_admin_account(report, database)
 
     check_frontend(report, config)
     check_models(report)

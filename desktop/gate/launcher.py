@@ -168,6 +168,7 @@ def apply_environment(values: dict[str, str] | None = None) -> dict[str, str]:
     merged = dict(GATE_DEFAULTS)
     merged.update(values if values is not None else read_env_file(config_file()))
     merged["VISION_DATA_DIR"] = str(data_dir())
+    merged["VISION_GATE_CONFIG"] = str(config_file())
     merged.setdefault("DATABASE_URL", f"sqlite:///{(data_dir() / 'data' / 'gate.db').as_posix()}")
     for key, value in merged.items():
         os.environ.setdefault(key, str(value))
@@ -300,11 +301,31 @@ def run_setup(email: str | None = None, password: str | None = None, camera: str
         print("An email address is required.", file=sys.stderr)
         return 2
     if password is None:
-        password = getpass.getpass("Administrator password (min 12 characters): ")
-        if password != getpass.getpass("Repeat the password: "):
-            print("The passwords do not match.", file=sys.stderr)
+        # Ask up to three times instead of aborting the whole wizard: a
+        # rejected password used to send the operator back through the email
+        # prompt with nothing written, which reads as "setup is broken".
+        for attempt in range(1, 4):
+            typed = getpass.getpass("Administrator password (min 12 characters): ")
+            if len(typed) < 12:
+                print(
+                    f"That was {len(typed)} characters; 12 is the minimum "
+                    f"(attempt {attempt} of 3).",
+                    file=sys.stderr,
+                )
+                continue
+            if typed != getpass.getpass("Repeat the password: "):
+                print(f"The passwords did not match (attempt {attempt} of 3).", file=sys.stderr)
+                continue
+            password = typed
+            break
+        else:
+            print(
+                "Setup stopped and NOTHING was written. Run it again when you have a "
+                "password of at least 12 characters.",
+                file=sys.stderr,
+            )
             return 2
-    if len(password or "") < 12:
+    elif len(password) < 12:
         print("Use at least 12 characters: this account can edit every record.", file=sys.stderr)
         return 2
     if camera is None:
