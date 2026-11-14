@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -348,3 +349,31 @@ def test_an_unreadable_upload_is_a_400_for_the_client_not_a_503_for_the_server(
     payload = response.get_json()
     assert payload["code"] == "image_rejected"
     assert "readable image" in payload["error"]
+
+
+def test_the_batch_scanner_survives_an_unreadable_file(tmp_path):
+    """`--dir` must count a bad frame and keep going.
+
+    Regression: `_scan_folder` caught `ImageRejected` without importing it, so
+    the first bad file — or a Ctrl-C on a slow CPU — raised NameError from
+    inside the except clause and buried the real cause.
+    """
+    pytest.importorskip("PIL.Image")
+    import subprocess
+    import sys
+
+    root = Path(__file__).resolve().parents[2]
+    (tmp_path / "broken.jpg").write_bytes(b"this is not a jpeg")
+
+    completed = subprocess.run(
+        [sys.executable, str(root / "scripts" / "scan_image.py"), "--dir", str(tmp_path)],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "Skipped broken.jpg" in completed.stderr
+    assert "NameError" not in completed.stderr
+    assert "image_rejected=1" in completed.stdout
