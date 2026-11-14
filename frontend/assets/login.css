@@ -216,6 +216,20 @@ body.dark-theme .login-container h1 {
     max-width: 38ch;
 }
 
+.login-note--demo {
+    margin-inline: auto;
+    padding: 0.55rem 0.8rem;
+    border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    color: var(--text-strong, var(--text));
+}
+
+.login-note--demo strong {
+    color: var(--primary);
+    letter-spacing: 0.02em;
+}
+
 .error-message {
     color: var(--danger);
     font-size: 0.84rem;

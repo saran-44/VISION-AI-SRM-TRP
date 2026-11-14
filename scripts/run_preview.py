@@ -98,8 +98,10 @@ def main() -> int:
         print(f" Head admin   : {head_email}")
         print(f" Transport    : {office_email}")
         print(f" Password     : {password}   (fake demo data only)")
-        print(f" Demo login   : {DEMO_ADMIN_EMAIL} / {DEMO_ADMIN_PASSWORD}")
+        print(f" Demo login   : {DEMO_ADMIN_EMAIL} / {DEMO_ADMIN_PASSWORD}  (login page: admin / admin)")
         print(" DEMO MODE    : ON — Test Lab at /test-lab, no real records.")
+        if config.firebase_project_id:
+            print(" Sign-in      : local demo account only; the Firebase project in .env is ignored here.")
     print("=" * 72)
     app.run(host=args.host, port=args.port, debug=False, threaded=True)
     return 0
