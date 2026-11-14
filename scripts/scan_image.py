@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,12 +32,20 @@ def _grab_webcam(
     save: str | None,
     width: int = 1280,
     height: int = 720,
+    warmup: float = 1.5,
 ) -> Path | None:
     """Grab the sharpest of a few webcam frames and write it to disk.
 
     The capture size is requested explicitly: OpenCV's default is 640×480, and
     upscaling that to the 960 px letterbox only adds blur. A webcam that cannot
     deliver the requested size is reported, not silently accepted.
+
+    Autofocus, auto-exposure and white balance all restart when the device is
+    opened. Sampling the first few frames — the old behaviour — therefore
+    measured a camera that had not converged yet: a hand-held test reported a
+    sharpness of 17-41 on frames that read 180 a moment later, and the model
+    found no box in any of them. `warmup` seconds of frames are read and thrown
+    away first, so the sample is taken from a settled camera.
     """
     try:
         import cv2  # type: ignore
@@ -59,6 +68,17 @@ def _grab_webcam(
         int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0),
         int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0),
     )
+
+    settled = 0
+    try:
+        deadline = time.perf_counter() + max(0.0, warmup)
+        while time.perf_counter() < deadline:
+            ok, _ = capture.read()
+            if not ok:
+                break
+            settled += 1
+    except Exception:  # noqa: BLE001 - a warm-up failure must not lose the capture
+        pass
 
     best = None
     best_score = -1.0
@@ -88,6 +108,17 @@ def _grab_webcam(
         return None
     print(f"saved       : {target}  (sharpness {best_score:.0f})")
     print("             keep this file - it is what the detector saw")
+    print(f"             warmed up for {warmup:g}s ({settled} frames discarded), kept the sharpest of {max(1, frames)}")
+    if best_score < 60:
+        # 180 is an ordinary hand-held frame; under 60 the sticker has no edge
+        # left to detect and re-running the detector wastes another 5 s.
+        print(
+            f"warning     : even the sharpest frame was soft (sharpness {best_score:.0f}, "
+            "useful is 150+). The detector will find nothing here - turn a light on, "
+            "hold the subject 25-40 cm away, and let the camera focus for a second "
+            "before running again.",
+            file=sys.stderr,
+        )
     actual = (best.shape[1], best.shape[0])
     if actual[0] < 900:
         print(
@@ -206,7 +237,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("image", nargs="?", help="path to a JPEG/PNG frame")
     parser.add_argument("--camera", type=int, default=None,
                         help="grab a frame from a local webcam instead (OpenCV index, usually 0)")
-    parser.add_argument("--frames", type=int, default=5, help="frames to sample from the webcam (best is kept)")
+    parser.add_argument("--frames", type=int, default=15,
+                        help="frames to sample after the warm-up from the webcam (best is kept)")
+    parser.add_argument("--warmup", type=float, default=1.5,
+                        help="seconds of frames to discard first, so autofocus and exposure settle (default 1.5)")
     parser.add_argument("--width", type=int, default=1280, help="requested capture width (default 1280)")
     parser.add_argument("--height", type=int, default=720, help="requested capture height (default 720)")
     parser.add_argument("--save", default=None, help="where to write the webcam frame (default frame-<time>.jpg)")
@@ -264,7 +298,9 @@ def main(argv: list[str] | None = None) -> int:
         return _scan_folder(Path(args.dir).expanduser(), overrides, args.json, limit=args.limit)
 
     if args.camera is not None:
-        grabbed = _grab_webcam(args.camera, args.frames, args.save, args.width, args.height)
+        grabbed = _grab_webcam(
+            args.camera, args.frames, args.save, args.width, args.height, args.warmup
+        )
         if grabbed is None:
             return 2
         path = grabbed
