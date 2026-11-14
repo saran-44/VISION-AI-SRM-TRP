@@ -23,14 +23,17 @@ ENVIRONMENT GATE - run these three before anything else
   pwd                      -> must be the repository root
   git rev-parse --short HEAD
   git status --short
+  ls docs/                 -> the real directory listing
 Stop and report if:
   - pwd is not the repository root (a different folder was opened);
-  - HEAD is older than af65914 (the tree you are reading is stale: run
+  - HEAD is older than a1ef06c (the tree you are reading is stale: run
     "git pull --ff-only origin main" and start again);
   - git status lists files from another project - do not touch or revert them.
-This prompt describes the tree at af65914. File names in it are checked against
-that tree: if a file it names is missing, the tree is wrong, not the prompt.
-Never create a file to make the prompt true.
+This prompt describes the tree at a1ef06c.
+If ls docs/ shows a file your own file search cannot find, your INDEX is stale,
+not the file: say so and ask for the window to be reloaded. The terminal listing
+is the ground truth. Never report a file as missing when the listing has it, and
+never create a file to make the prompt true.
 
 READ FIRST
 Read the repository before changing anything: README.md, docs/ARCHITECTURE.md,
