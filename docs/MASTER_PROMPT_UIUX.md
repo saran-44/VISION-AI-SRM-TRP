@@ -1,8 +1,8 @@
 # Master prompt for the VS Code assistant — UI/UX (with Flowstep) and backend triage
 
 Copy everything between the two rules into VS Code as **one message**. It
-assumes the repo is at or after `227ba7b` (the cascade + ANPR merge) and that the
-Flowstep extension is connected in this workspace.
+assumes the repo is at `af65914` or later and that the Flowstep extension is
+connected in this workspace. The first thing it does is prove that.
 
 ---
 
@@ -17,6 +17,19 @@ Two assistants share this repository and you are one of them.
   do **not** open pull requests.
 - **Flowstep** is a design tool, not an author. Its output is *reference*. It
   does not know this codebase, and nothing it generates is merged as-is.
+
+**ENVIRONMENT GATE — before you read anything**
+
+```bash
+pwd                        # must be the repository root
+git rev-parse --short HEAD # af65914 or a descendant
+git status --short         # must not list files from another project
+```
+
+Stop and report if the folder is wrong, if HEAD is older than `af65914` (the
+tree is stale — `git pull --ff-only origin main` and restart), or if the working
+tree holds another project's files. Never create a file to make this prompt
+true: if a file named below is missing, the tree is wrong.
 
 **READ FIRST — in this order**
 
@@ -186,8 +199,8 @@ STILL OPEN:      <what you did not do>
 
 **FIRST ACTION**
 
-Read the eight files at the top, run the three verification commands, then
-reply with exactly:
+Run the environment gate, read the eight files at the top, run the three
+verification commands, then reply with exactly:
 
 ```
 context loaded · pages: <count> · suite: <passed>/<skipped> · ready for the first slice
