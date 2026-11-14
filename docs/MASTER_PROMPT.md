@@ -19,26 +19,21 @@ requests; you own local experiments, Colab runs and private data. Neither side
 ever sees a secret value - only variable names. Never ask me for a password,
 token or connection string.
 
-ENVIRONMENT GATE - run these three before anything else
+ENVIRONMENT GATE - run these before anything else
   pwd                      -> must be the repository root
-  git rev-parse --short HEAD
-  git status --short
+  git status --short       -> pristine, or only files you meant to change
   ls docs/                 -> the real directory listing
-Version marker: docs/WORKSPACE_SYNC.md exists only at cd8cfbe and later. If the
-listing does not show it, the checkout is stale.
-Stop and report if:
-  - pwd is not the repository root (a different folder was opened);
-  - the marker is absent, or HEAD is older than cd8cfbe (run
-    "git pull --ff-only origin main" and start again);
-  - git status lists files from another project - do not touch or revert them.
-A partially-synced docs/ is impossible: every commit has all four prompt docs or
-none. If one is listed and another is not, run "git status --short docs/" - a
-line starting with " D " is a local deletion, fixed by "git restore docs/".
-This prompt describes the tree at cd8cfbe.
+Markers: docs/WORKSPACE_SYNC.md and docs/IP_CAMERA_GATEWAY.md must be listed.
+If either is missing, the checkout is stale: run "git pull --ff-only origin main"
+and start again. Compare the listing, not a commit SHA you were given earlier.
+Stop and report if pwd is not the repository root, if a marker is absent, or if
+git status lists files from another project - do not touch or revert them.
+A partially-synced docs/ is impossible: every commit has all of it or none. If
+one file is listed and another is not, run "git status --short docs/" - a line
+starting with " D " is a local deletion, fixed by "git restore docs/".
 If ls docs/ shows a file your own file search cannot find, your INDEX is stale,
-not the file: say so and ask for the window to be reloaded. The terminal listing
-is the ground truth. Never report a file as missing when the listing has it, and
-never create a file to make the prompt true.
+not the file: say so and ask for the window to be reloaded. Never report a file
+as missing when the listing has it, and never create a file to make this true.
 
 READ FIRST
 Read the repository before changing anything: README.md, docs/ARCHITECTURE.md,
