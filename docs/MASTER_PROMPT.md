@@ -10,7 +10,7 @@ Copy everything inside the block, including the first and last lines.
 
 ```text
 MASTER CONTEXT - VISION AI - SRM TRP
-Repository: saran-44/VISION-AI-SRM-TRP   (main at d5cc329)
+Repository: saran-44/VISION-AI-SRM-TRP   (current as of af65914)
 
 WHO YOU ARE WORKING WITH
 Two assistants share this repository. You (in VS Code, and in Colab for
@@ -18,6 +18,19 @@ training) and Arena AI. Arena writes what must reach main and opens the pull
 requests; you own local experiments, Colab runs and private data. Neither side
 ever sees a secret value - only variable names. Never ask me for a password,
 token or connection string.
+
+ENVIRONMENT GATE - run these three before anything else
+  pwd                      -> must be the repository root
+  git rev-parse --short HEAD
+  git status --short
+Stop and report if:
+  - pwd is not the repository root (a different folder was opened);
+  - HEAD is older than af65914 (the tree you are reading is stale: run
+    "git pull --ff-only origin main" and start again);
+  - git status lists files from another project - do not touch or revert them.
+This prompt describes the tree at af65914. File names in it are checked against
+that tree: if a file it names is missing, the tree is wrong, not the prompt.
+Never create a file to make the prompt true.
 
 READ FIRST
 Read the repository before changing anything: README.md, docs/ARCHITECTURE.md,
@@ -28,11 +41,13 @@ Reply "context loaded" and list anything you think is missing.
 ARCHITECTURE (what exists on main)
 - Flask backend: backend/app.py (all routes), backend/config.py (env config),
   backend/schemas.py (Pydantic), backend/auth.py (sessions, device keys),
-  backend/storage.py + backend/sql/001_initial.sql (PostgreSQL; SQLite only for
-  the disposable preview).
-- Vision pipeline: backend/vision.py - Ultralytics YOLO (best.pt) > crop > OCR
-  (RapidOCR, then Tesseract, then EasyOCR) > normalize_plate. When tuning
-  detection do NOT change the OCR engine, the camera code or the API routes.
+  backend/db.py + backend/sql/001_initial.sql (PostgreSQL through SQLAlchemy;
+  SQLite only for the disposable preview). There is no backend/storage.py.
+- Vision pipeline: backend/vision.py - Ultralytics YOLO > crop > OCR
+  (RapidOCR, then Tesseract, then EasyOCR) > normalize_plate, as a three-stage
+  cascade: best.pt (sticker) > anpr_best.pt (number plate) > weights/vehicle.pt.
+  When tuning detection do NOT change the OCR engine, the camera code or the
+  API routes.
 - Frontend: frontend/pages/*.html + ES modules in frontend/js/*.js +
   frontend/assets/{styles,theme,layout,login}.css. layout.css is loaded last on
   every page and owns the responsive shell - do not duplicate its rules.
@@ -132,6 +147,8 @@ implements or merges it on a branch, runs the four CI checks and opens a pull
 request. After it is merged I pull with: git pull --ff-only
 
 FIRST ACTION
+Run the environment gate above, read the files, then reply exactly
+"context loaded" plus the short SHA you are reading, and wait for the task.
 Read the repository, reply "context loaded", list anything missing from this
 description, and wait for my task. Do not edit anything yet.
 ```

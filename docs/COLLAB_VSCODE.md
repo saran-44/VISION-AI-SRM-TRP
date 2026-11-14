@@ -73,14 +73,21 @@ You are helping me work on the GitHub repository saran-44/VISION-AI-SRM-TRP
 before changing anything. Do not regenerate or restructure the project, and do
 not touch files I did not ask about.
 
+Before you answer, check that you are looking at the right tree:
+  pwd ; git rev-parse --short HEAD ; git status --short
+This description is current as of af65914. If HEAD is older, pull first; if a
+file named here is missing, say so and stop - do not create it.
+
 ARCHITECTURE (current main)
 - Backend: Flask app in backend/app.py, config in backend/config.py,
   Pydantic schemas in backend/schemas.py, auth in backend/auth.py.
   Database is PostgreSQL in production, SQLAlchemy + a small storage layer in
-  backend/storage.py; schema in backend/sql/001_initial.sql.
-- Vision: backend/vision.py holds the whole detector pipeline - Ultralytics YOLO
-  (best.pt, classes 0="red circle", 1="sticker"), crop, then OCR
-  (RapidOCR, Tesseract or EasyOCR fallback), then plate normalisation.
+  backend/db.py; schema in backend/sql/001_initial.sql. There is no
+  backend/storage.py - if your notes say otherwise they are out of date.
+- Vision: backend/vision.py holds the whole detector pipeline as a cascade -
+  best.pt (classes 0="red circle", 1="sticker"), then anpr_best.pt (one class,
+  "licence"), then optional weights/vehicle.pt; crop, OCR (RapidOCR, Tesseract
+  or EasyOCR fallback), plate normalisation.
   OCR, camera and app routes are NOT to be changed when tuning detection.
 - Frontend: static HTML in frontend/pages/*.html, ES modules in frontend/js/*.js,
   styles in frontend/assets/styles.css + theme.css + layout.css (+ login.css).
