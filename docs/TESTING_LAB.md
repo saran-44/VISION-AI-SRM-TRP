@@ -194,14 +194,25 @@ to read the same:
 The second line under the plate (the `scan-meta` text) prints the API's
 `advice` field verbatim, including the measured crop width.
 
-Fastest way to debug without the browser — scan a photo of the sticker:
+Fastest way to debug — scan one frame:
 
 ```bash
-python scripts/scan_image.py frame.jpg
-# boxes: 2 found, 1 above threshold, best 0.91
+python scripts/scan_image.py --camera 0        # this laptop's webcam, sharpest of 5 frames
+python scripts/scan_image.py frame-20261114-113005.jpg
+# boxes     : 2 found, 1 above threshold, best 0.91
 #   · sticker      0.91  bbox=[412, 288, 596, 352]  text='TN 12 AB 1234'
-# RESULT: TN 12 AB 1234  (0.91)
+# RESULT    : TN 12 AB 1234  (0.91)
 ```
+
+`--camera 0` needs only OpenCV (not torch), saves the frame it used, and prints
+the path — keep that file, it is exactly what the detector received. On Windows
+close Teams/Zoom/Camera first; only one application may hold the webcam.
+
+The other route needs nothing installed: **Save frame** on the Test Lab camera
+tile downloads the same JPEG the browser would have posted.
+
+If the model is fine and only the frame is bad, a phone photo of the sticker
+works just as well — the detector does not care where the pixels came from.
 
 **IP / NVR camera (later, no code change).** Set `CAMERA_STREAM_URLS` to a JSON
 object and the same tiles switch source:
