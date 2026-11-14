@@ -1,8 +1,9 @@
 # Master prompt for the VS Code assistant — UI/UX (with Flowstep) and backend triage
 
 Copy everything between the two rules into VS Code as **one message**. It
-assumes the repo is at `af65914` or later and that the Flowstep extension is
-connected in this workspace. The first thing it does is prove that.
+assumes the repo is current (`docs/IP_CAMERA_GATEWAY.md` in the listing) and that
+the Flowstep extension is connected in this workspace. The first thing it does is
+prove that.
 
 ---
 
@@ -22,31 +23,36 @@ Two assistants share this repository and you are one of them.
 
 ```bash
 pwd                        # must be the repository root
-git rev-parse --short HEAD # cd8cfbe or a descendant
 git status --short         # pristine, or only files you meant to change
 ls docs/                   # the real directory listing
 ```
 
-`docs/WORKSPACE_SYNC.md` is the version marker: it only exists at `cd8cfbe` and
-later. If `ls docs/` does not show it, the checkout is stale — `git pull
---ff-only origin main` and restart.
+Two marker files decide whether the tree is current:
 
-Stop and report if the folder is wrong, if the marker is absent, if HEAD is older
-than `cd8cfbe`, or if the working tree holds another project's files.
+```
+docs/WORKSPACE_SYNC.md      present since cd8cfbe
+docs/IP_CAMERA_GATEWAY.md   present since 1ab5313
+```
 
-**A partially-synced docs directory is impossible.** Every commit either has all
-of `WORKSPACE_SYNC.md`, `MASTER_PROMPT.md`, `MASTER_PROMPT_UIUX.md` and
-`TASK_ANPR_VSCODE.md`, or none of them. So if one is listed and another is not,
-nobody should believe the commit SHA in front of them: run
-`git status --short docs/` — a line starting with ` D ` is a **local deletion**,
-fixed with `git restore docs/`, not by pulling or by creating files.
+If either is missing from `ls docs/`, the checkout is stale — `git pull
+--ff-only origin main` and start again. **Do not compare commit SHAs**: compare
+the listing. A SHA you were told in a previous message is history, not a check.
 
-**If `ls docs/` shows a file that your own file search cannot find, your index is
-stale, not the file** (`docs/WORKSPACE_SYNC.md` has the full diagnosis). Say exactly that — *"my index does not include X, the
-directory listing does"* — and ask for the window to be reloaded. Do not report
-it as missing, and never create a file to make this prompt true. The terminal
-listing is the ground truth; a codebase index built before the last `git pull`
-is not.
+Stop and report if the folder is wrong, if a marker is absent, or if the working
+tree holds another project's files.
+
+A partially-synced docs directory is impossible. Every commit has all the
+documentation or none of it. So if one file is listed and another is not, do not
+trust the state in front of you: run `git status --short docs/` — a line starting
+with ` D ` is a local deletion, fixed with `git restore docs/`, not by pulling
+and never by creating a file.
+
+If `ls docs/` shows a file that your own file search cannot find, your index is
+stale, not the file (`docs/WORKSPACE_SYNC.md` has the full diagnosis). Say
+exactly that — "my index does not include X, the directory listing does" — and
+ask for the window to be reloaded. Do not report it as missing, and never create
+a file to make this prompt true. The terminal listing is the ground truth; a
+codebase index built before the last `git pull` is not.
 
 **READ FIRST — in this order**
 
@@ -163,7 +169,7 @@ Nine pages, all server-rendered shells plus one ES module each:
 
 ```bash
 node scripts/check_frontend.mjs          # every import and page reference resolves
-python -m pytest -o addopts="" -q        # 247 passed, 5 skipped at cd8cfbe
+python -m pytest -o addopts="" -q        # 249 passed, 5 skipped
 bash scripts/audit_local.sh              # secrets / ignore rules / frontend
 ```
 
