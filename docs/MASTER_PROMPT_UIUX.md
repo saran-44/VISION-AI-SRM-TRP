@@ -32,7 +32,7 @@ tree is stale — `git pull --ff-only origin main` and restart), or if the worki
 tree holds another project's files.
 
 **If `ls docs/` shows a file that your own file search cannot find, your index is
-stale, not the file.** Say exactly that — *"my index does not include X, the
+stale, not the file** (`docs/WORKSPACE_SYNC.md` has the full diagnosis). Say exactly that — *"my index does not include X, the
 directory listing does"* — and ask for the window to be reloaded. Do not report
 it as missing, and never create a file to make this prompt true. The terminal
 listing is the ground truth; a codebase index built before the last `git pull`
