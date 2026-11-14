@@ -1,4 +1,4 @@
-# Render Blueprint — free-tier backend for the SRM TRP Transport portal.
+# Render Blueprint — free-tier backend for the VISION AI - SRM TRP portal.
 #
 # The Flask API and the static frontend are served by ONE service, because
 # backend/app.py already serves frontend/ (index.html, assets, js, vendor and

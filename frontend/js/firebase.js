@@ -1,5 +1,5 @@
 /**
- * Firebase bootstrap for the SRM TRP Transport console.
+ * Firebase bootstrap for the VISION AI - SRM TRP console.
  *
  * The web configuration is fetched from the backend (`GET /api/config/firebase`)
  * rather than hard-coded, so the API key never has to live in the repository.

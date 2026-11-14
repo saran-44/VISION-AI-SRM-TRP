@@ -230,7 +230,7 @@ gcloud services enable \
   --project="$PROJECT_ID"
 
 gcloud artifacts repositories create "$REPO" --repository-format=docker \
-  --location="$REGION" --description='SRM TRP Transport backend images' \
+  --location="$REGION" --description='VISION AI - SRM TRP backend images' \
   --project="$PROJECT_ID"
 
 gcloud iam service-accounts create srm-trp-run \

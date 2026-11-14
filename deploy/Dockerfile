@@ -1,4 +1,4 @@
-# SRM TRP Transport — backend container image
+# VISION AI - SRM TRP — backend container image
 #
 # Build:
 #   docker build -f deploy/Dockerfile -t srm-trp-transport:latest .

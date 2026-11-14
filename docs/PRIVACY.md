@@ -1,6 +1,6 @@
-# Privacy note — SRM TRP Transport
+# Privacy note — VISION AI - SRM TRP
 
-_Last reviewed: 2026-11-12. Applies to the SRM TRP Transport campus bus gate
+_Last reviewed: 2026-11-12. Applies to the VISION AI - SRM TRP campus bus gate
 monitoring web application (dashboard, live logs, analytics, driver and bus
 records)._
 

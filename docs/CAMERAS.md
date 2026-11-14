@@ -1,6 +1,6 @@
 # Cameras — Browser Webcam, NVR/DVR, HLS, MJPEG and RTSP
 
-This document describes every way a video source reaches the SRM TRP Transport
+This document describes every way a video source reaches the VISION AI - SRM TRP
 console, and why raw RTSP is never loaded directly by a browser.
 
 ---

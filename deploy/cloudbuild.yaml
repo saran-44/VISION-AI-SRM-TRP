@@ -1,4 +1,4 @@
-# Google Cloud Build pipeline for the SRM TRP Transport backend.
+# Google Cloud Build pipeline for the VISION AI - SRM TRP backend.
 # Complete docs/DEPLOY_WINDOWS.md first: it creates the dedicated build and
 # runtime identities, secrets, Direct VPC egress and Cloud NAT. If Supabase
 # network restrictions are enabled, allow the NAT address before deployment.

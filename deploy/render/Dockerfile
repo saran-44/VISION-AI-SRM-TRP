@@ -1,4 +1,4 @@
-# SRM TRP Transport — free-tier container image
+# VISION AI - SRM TRP — free-tier container image
 #
 # Small variant of deploy/Dockerfile for free hosts such as Render (512 MB RAM),
 # Railway and Koyeb. It is the SAME application code; only the optional vision

@@ -76,7 +76,7 @@ def main() -> int:
         print(f"Seeded demo data: {counts['buses']} buses, {counts['drivers']} drivers, {counts['events']} events, {counts['users']} users.")
     app = create_app(config, database_engine=engine)
     print("=" * 72)
-    print(" SRM TRP Transport — local preview")
+    print(" VISION AI - SRM TRP — local preview")
     print(f" URL          : http://{args.host}:{args.port}/")
     print(f" Database     : {'in-memory SQLite (disposable)' if isolated else 'external PostgreSQL (URL hidden)'}")
     if not args.no_seed:

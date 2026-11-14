@@ -1,5 +1,5 @@
 /* ==========================================================================
-   SRM TRP Transport — sign-in surface ("Golden Amethyst")
+   VISION AI - SRM TRP — sign-in surface ("Golden Amethyst")
    Loaded after theme.css so it owns the login page entirely.
    ========================================================================== */
 
@@ -75,6 +75,22 @@ body.login-page.dark-theme {
     filter: drop-shadow(0 10px 22px rgba(59, 20, 107, 0.16));
     position: relative;
     z-index: 1;
+}
+
+/* Project title, shown above the headline on the sign-in card. */
+.login-container > .login-brand {
+    margin: 0 0 0.3rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent-strong, #8a6408);
+    position: relative;
+    z-index: 1;
+}
+
+body.dark-theme .login-container > .login-brand {
+    color: var(--accent, #a78bfa);
 }
 
 .login-container h1 {
