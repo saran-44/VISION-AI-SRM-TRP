@@ -41,7 +41,10 @@ RUN if [ "$INSTALL_VISION" = "1" ]; then \
       "$VIRTUAL_ENV/bin/python" -m pip install \
         --index-url https://pypi.org/simple \
         -r /tmp/requirements-vision-pypi.txt; \
-      "$VIRTUAL_ENV/bin/python" -c "import ultralytics"; \
+      "$VIRTUAL_ENV/bin/python" -m pip uninstall -y opencv-python || true; \
+      "$VIRTUAL_ENV/bin/python" -m pip install --force-reinstall --no-deps \
+        opencv-python-headless==4.10.0.84; \
+      "$VIRTUAL_ENV/bin/python" -c "import cv2; import ultralytics"; \
     fi
 
 COPY backend/ /app/backend/
