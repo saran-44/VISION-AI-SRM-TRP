@@ -97,6 +97,9 @@ def report(path: Path, width: int = 64) -> int:
         print("  python -m pip install -r backend/requirements-vision.txt", file=sys.stderr)
         return 2
 
+    if not path.exists():
+        print(f"{path}: no such file", file=sys.stderr)
+        return 2
     try:
         with Image.open(path) as opened:
             opened.load()
@@ -132,8 +135,25 @@ def report(path: Path, width: int = 64) -> int:
 
 
 def _expand(target: Path, limit: int) -> list[Path]:
+    """Files to report. A folder is listed newest first: the frame you want is
+    the one the scan just failed on, not the oldest in failed-frames/."""
+    if not target.exists():
+        print(
+            f"{target}: no such file or folder.\n"
+            "  The failed-frames folder is created by the first scan that reads no "
+            "number, so run a scan on the portal first.",
+            file=sys.stderr,
+        )
+        return []
     if target.is_dir():
-        files = sorted(item for item in target.iterdir() if item.suffix.lower() in IMAGE_SUFFIXES)
+        files = sorted(
+            (item for item in target.iterdir() if item.suffix.lower() in IMAGE_SUFFIXES),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )
+        if not files:
+            print(f"{target}: no frames in here yet (a scan that reads no number writes one)")
+            return []
         return files[:limit] if limit else files
     return [target]
 
@@ -152,9 +172,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     failures = 0
+    reported = 0
     for target in (Path(item).expanduser() for item in args.paths):
         for path in _expand(target, args.limit):
+            reported += 1
             failures += 1 if report(path, width=args.width) else 0
+    if not reported:
+        return 2
     return 2 if failures else 0
 
 
