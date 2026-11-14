@@ -18,6 +18,8 @@ from backend.auth import hash_password  # noqa: E402
 from backend.config import Config  # noqa: E402
 from backend.services import naive_now  # noqa: E402
 
+ENV_FILE = ROOT / ".env"
+
 HEAD_ADMIN_EMAIL = "head.admin@example.invalid"
 TRANSPORT_EMAIL = "transport.office@example.invalid"
 HEAD_ADMIN_PASSWORD = "HeadAdminPass123!"
@@ -42,6 +44,37 @@ def build_config(**overrides) -> Config:
         firebase_project_id="vision-ai-srmtrp",
     )
     return replace(base, **overrides) if overrides else base
+
+
+@pytest.fixture(scope="session", autouse=True)
+def ignore_local_dotenv():
+    """Keep the suite identical on a laptop and in CI.
+
+    `backend.config` calls load_dotenv() at import time, so a developer's
+    filled-in `.env` becomes part of os.environ for the whole session. Tests
+    that assert documented defaults (for example "cookies are Secure in
+    production") then depend on that person's local overrides instead of on the
+    code, which is why such failures never appear in CI and are hard to explain.
+
+    Every key your `.env` defines is removed for the run and restored
+    afterwards. Test-harness variables (TEST_*, ALLOW_TEST_*) are kept, so a
+    local PostgreSQL run still works. Anything a test needs is set explicitly
+    with monkeypatch.setenv inside the test.
+    """
+    if not ENV_FILE.exists():
+        yield
+        return
+    from dotenv import dotenv_values
+
+    patcher = pytest.MonkeyPatch()
+    try:
+        for key in dotenv_values(ENV_FILE):
+            if key.startswith(("TEST_", "ALLOW_TEST_")):
+                continue
+            patcher.delenv(key, raising=False)
+        yield
+    finally:
+        patcher.undo()
 
 
 @pytest.fixture(scope="session", autouse=True)

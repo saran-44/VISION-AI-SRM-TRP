@@ -128,6 +128,9 @@ fi
 if grep -qE '^[[:space:]]*DATABASE_URL=' .env 2>/dev/null; then
   printf '  %-38s %s\n' ".env DATABASE_URL" "set (hidden) — the preview ignores it; it uses in-memory SQLite"
 fi
+if grep -qE '^LEGACY_PASSWORD_LOGIN_ENABLED=(1|true|yes|on)' .env 2>/dev/null; then
+  printf '  %-38s %s\n' ".env legacy login" "on for local password sign-in — .env is ignored by the test suite; Render keeps it false"
+fi
 
 section "8. Frontend and documentation checks"
 if node scripts/check_frontend.mjs >/tmp/audit_frontend.txt 2>&1; then ok "$(tail -1 /tmp/audit_frontend.txt)"; else fail "frontend checks failed"; tail -5 /tmp/audit_frontend.txt; fi
@@ -150,7 +153,13 @@ if [ "$WITH_TESTS" = "1" ]; then
     printf '         fix: %s -m pip install -r backend/requirements.txt\n' "$PY"
     printf '         or : source .venv/Scripts/activate   (Git Bash, Windows)\n'
   else
-    if "$PY" -m pytest -o addopts="" -q 2>&1 | tail -3; then ok "pytest finished"; else fail "pytest failed"; fi
+    if "$PY" -m pytest -o addopts="" -q 2>&1 | tail -3; then
+      ok "pytest finished"
+    else
+      fail "pytest failed"
+      printf '         the suite ignores your .env; re-run with -x for the first failure:\n'
+      printf '         %s -m pytest -o addopts="" -q -x\n' "$PY"
+    fi
   fi
 fi
 

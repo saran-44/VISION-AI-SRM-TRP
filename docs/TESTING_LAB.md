@@ -73,6 +73,20 @@ source .venv/Scripts/activate     # Git Bash on Windows
 python scripts/run_preview.py --port 4400
 ```
 
+### A test that fails only on your machine
+
+`backend/config.py` reads `.env` when it is imported, so a filled-in `.env`
+becomes part of the environment for the whole test session. `conftest.py` now
+removes every key your `.env` defines for the duration of the run (keeping
+`TEST_*` / `ALLOW_TEST_*`), so the suite gives the same result on your laptop as
+in CI. A real example: a local `LEGACY_PASSWORD_LOGIN_ENABLED=true` — the
+pre-Firebase default — made
+`test_config.py::test_production_defaults_cookie_secure_to_true` fail with
+`Password sign-in must be off in production`, although the code was correct.
+
+`test_local_dotenv_cannot_change_suite_defaults` guards this: it skips when
+there is no `.env` (CI), and fails loudly if a `.env` key leaks in again.
+
 ---
 
 ## 2. What to test, in order
