@@ -109,7 +109,11 @@ function renderSetup(setup) {
         el('span', { class: 'setup-label', text: component.label }),
         el('span', {
           class: 'setup-meta',
-          text: ok ? `installed · ${component.size}` : `missing · ${component.size}`,
+          text: ok
+            ? `installed · ${component.size}`
+            : component.optional
+              ? `optional, not installed · ${component.size}`
+              : `missing · ${component.size}`,
         }),
         ok ? null : el('code', { text: component.command }),
       ]),
@@ -132,7 +136,7 @@ function renderSetup(setup) {
 
 async function copySetup() {
   const lines = (lastSetup?.components || [])
-    .filter((component) => !component.present)
+    .filter((component) => !component.present && !component.optional)
     .map((component) => component.command);
   if (!lines.length) {
     showToast('Nothing to install — every component is present.', 'success');

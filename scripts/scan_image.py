@@ -105,13 +105,76 @@ def _grab_webcam(
     return target
 
 
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+
+def _scan_folder(folder: Path, overrides, as_json: bool) -> int:
+    """Scan every image in a folder — the fastest way to tune the thresholds.
+
+    One line per frame, then a summary. Ten real gate frames answer "is the
+    recall good enough?" in a way one lucky frame never can.
+    """
+    from backend.vision import VisionUnavailable, best_identification, decode_image, detect
+
+    if not folder.is_dir():
+        print(f"Not a folder: {folder}", file=sys.stderr)
+        return 2
+    files = sorted(path for path in folder.iterdir() if path.suffix.lower() in IMAGE_SUFFIXES)
+    if not files:
+        print(f"No images in {folder} ({', '.join(sorted(IMAGE_SUFFIXES))})", file=sys.stderr)
+        return 2
+
+    rows = []
+    reasons: dict[str, int] = {}
+    cascades: dict[str, int] = {}
+    for path in files:
+        try:
+            result = detect(decode_image(path.read_bytes()), stages=overrides)
+        except VisionUnavailable as exc:
+            print(f"Detector unavailable: {exc}", file=sys.stderr)
+            print("Install the extras: python -m pip install -r backend/requirements-vision.txt", file=sys.stderr)
+            return 2
+        candidate = best_identification(result)
+        vehicle = result.vehicle or {}
+        rows.append({
+            "file": path.name,
+            "reason": result.reason,
+            "cascade": result.cascade,
+            "bus_number": candidate.bus_number if candidate and candidate.bus_number else None,
+            "confidence": round(candidate.confidence, 4) if candidate else None,
+            "vehicle": vehicle.get("label"),
+        })
+        reasons[result.reason] = reasons.get(result.reason, 0) + 1
+        cascades[result.cascade] = cascades.get(result.cascade, 0) + 1
+
+    if as_json:
+        print(json.dumps(rows, indent=2))
+        return 0
+
+    print(f"{folder}  ({len(rows)} image{'s' if len(rows) != 1 else ''})")
+    for row in rows:
+        number = row["bus_number"] or "-"
+        confidence = f"{row['confidence']:.2f}" if row["confidence"] is not None else "-"
+        print(
+            f"  {row['file']:<28} {row['reason']:<15} {row['cascade']:<13} "
+            f"{number:<16} {confidence:<5} {row['vehicle'] or '-'}"
+        )
+    read = sum(1 for row in rows if row["bus_number"])
+    print()
+    print(f"summary: {read}/{len(rows)} frames produced a number")
+    print("  reasons: " + ", ".join(f"{key}={value}" for key, value in sorted(reasons.items())))
+    print("  read by: " + ", ".join(f"{key}={value}" for key, value in sorted(cascades.items())))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Scan one image (or a live webcam frame) with the bus-sticker detector",
         epilog="Examples:\n"
                "  python scripts/scan_image.py frame.jpg\n"
                "  python scripts/scan_image.py --camera 0            # this laptop's webcam\n"
-               "  python scripts/scan_image.py --camera 0 --conf 0.15 --imgsz 1280",
+               "  python scripts/scan_image.py --camera 0 --conf 0.15 --imgsz 1280\n"
+               "  python scripts/scan_image.py --dir frames/        # one line per frame",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("image", nargs="?", help="path to a JPEG/PNG frame")
@@ -131,10 +194,15 @@ def main(argv: list[str] | None = None) -> int:
             "Names: sticker, plate, vehicle. Omitted stages keep the VISION_STAGE_* default."
         ),
     )
+    parser.add_argument(
+        "--dir",
+        default=None,
+        help="scan every image in this folder and print one line per frame (tuning mode)",
+    )
     parser.add_argument("--json", action="store_true", help="print the raw response instead of a summary")
     args = parser.parse_args(argv)
 
-    if not args.image and args.camera is None:
+    if not args.image and args.camera is None and not args.dir:
         parser.print_help()
         print("\nGive a file, or use --camera 0 to grab one from the webcam.", file=sys.stderr)
         return 2
@@ -153,6 +221,11 @@ def main(argv: list[str] | None = None) -> int:
         stage_overrides_from_payload,
     )
 
+    overrides = stage_overrides_from_payload({"stages": args.stages}) if args.stages else None
+
+    if args.dir:
+        return _scan_folder(Path(args.dir).expanduser(), overrides, args.json)
+
     if args.camera is not None:
         grabbed = _grab_webcam(args.camera, args.frames, args.save, args.width, args.height)
         if grabbed is None:
@@ -169,7 +242,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         image = decode_image(path.read_bytes())
         # "sticker=0,vehicle=1" and "plate" are both accepted; see --stages.
-        overrides = stage_overrides_from_payload({"stages": args.stages}) if args.stages else None
         result = detect(image, stages=overrides)
     except VisionUnavailable as exc:
         print(f"Detector unavailable: {exc}", file=sys.stderr)

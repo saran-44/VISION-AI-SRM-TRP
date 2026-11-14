@@ -92,8 +92,14 @@ STAGE_ENV = {
     STAGE_VEHICLE: "VISION_STAGE_VEHICLE",
 }
 
-# Optional checkpoints. `weights/` is git-ignored: drop the files there.
-DEFAULT_PLATE_MODEL_PATH = ROOT / "weights" / "number_plate.pt"
+# Optional checkpoints. `weights/` is git-ignored: drop your own files there.
+#
+# The bundled ANPR checkpoint (`anpr_best.pt`) is a YOLOv10n fine-tune of
+# `Car_License_Plates` — one class, `licence`, i.e. "this box is a number plate".
+# It localises the plate; the OCR still reads the characters. Train something
+# better on your own gate footage and point VISION_PLATE_MODEL_PATH at it.
+DEFAULT_PLATE_MODEL_PATH = ROOT / "anpr_best.pt"
+PLATE_MODEL_FALLBACKS = (ROOT / "weights" / "number_plate.pt",)
 DEFAULT_VEHICLE_MODEL_PATH = ROOT / "weights" / "vehicle.pt"
 
 # COCO names that count as "a vehicle", and how they are reported. A two-wheeler
@@ -442,15 +448,54 @@ def normalize_stages_subset(values: dict[str, Any]) -> dict[str, bool]:
 
 
 def plate_model_path() -> Path:
-    """Checkpoint used by the number-plate stage (`weights/number_plate.pt`)."""
+    """Checkpoint used by the number-plate stage.
+
+    Order: `VISION_PLATE_MODEL_PATH`, then the bundled `anpr_best.pt`, then a
+    model of your own in `weights/number_plate.pt`.
+    """
     configured = os.getenv("VISION_PLATE_MODEL_PATH", "").strip()
-    return Path(configured).expanduser() if configured else DEFAULT_PLATE_MODEL_PATH
+    if configured:
+        return Path(configured).expanduser()
+    if DEFAULT_PLATE_MODEL_PATH.exists():
+        return DEFAULT_PLATE_MODEL_PATH
+    for candidate in PLATE_MODEL_FALLBACKS:
+        if candidate.exists():
+            return candidate
+    return DEFAULT_PLATE_MODEL_PATH
 
 
 def vehicle_model_path() -> Path:
     """Checkpoint used by the vehicle stage (`weights/vehicle.pt`)."""
     configured = os.getenv("VISION_VEHICLE_MODEL_PATH", "").strip()
     return Path(configured).expanduser() if configured else DEFAULT_VEHICLE_MODEL_PATH
+
+
+def plate_threshold() -> float:
+    """Minimum confidence for a plate box (`VISION_PLATE_CONFIDENCE`).
+
+    Separate from VISION_CONFIDENCE on purpose: the sticker model and the ANPR
+    model are different checkpoints with different score distributions, and
+    tuning one must not silently retune the other.
+    """
+    try:
+        value = float(os.getenv("VISION_PLATE_CONFIDENCE", "0.25"))
+    except ValueError:
+        return 0.25
+    return max(0.01, min(0.99, value))
+
+
+def plate_upscale() -> int:
+    """How much a small plate crop is enlarged before OCR (`VISION_PLATE_UPSCALE`).
+
+    A plate that is 90 px wide in a 1280x720 frame carries ~10 px per character:
+    enough for a human, below what an OCR engine wants. Upscaling the crop is
+    the cheapest accuracy win there is, and it costs one resize.
+    """
+    try:
+        value = int(os.getenv("VISION_PLATE_UPSCALE", "3"))
+    except ValueError:
+        return 3
+    return max(1, min(6, value))
 
 
 def vehicle_threshold() -> float:
@@ -751,6 +796,37 @@ def _predict_rows(model, image, size: int, conf: float) -> list[tuple[float, int
     return rows
 
 
+def _prepare_plate_crop(crop):
+    """Enlarge a small plate crop so the OCR has pixels to work with.
+
+    Only the plate stage does this: the sticker path is validated as it is, and
+    changing the crops it feeds the OCR would move numbers that are already
+    trusted.
+    """
+    size = getattr(crop, "size", None)
+    try:
+        if not size or len(size) != 2:
+            return crop  # not a plain 2-D crop: hand it to the OCR untouched
+        width, height = int(size[0]), int(size[1])
+    except (TypeError, ValueError):
+        return crop
+    if width <= 0 or height <= 0:
+        return crop
+    factor = plate_upscale()
+    if factor <= 1 or width >= 480:
+        return crop
+    try:
+        Image = _require_pil()
+    except VisionUnavailable:
+        # No Pillow on this host: the OCR still gets the original crop.
+        return crop
+    resample = getattr(getattr(Image, "Resampling", Image), "LANCZOS", 1)
+    try:
+        return crop.resize((width * factor, height * factor), resample)
+    except Exception:  # pragma: no cover - defensive
+        return crop
+
+
 def _ocr_rows(
     image,
     rows: list[tuple[float, int, list[int]]],
@@ -759,11 +835,13 @@ def _ocr_rows(
     threshold: float,
     limit: int,
     class_filter: int | None = None,
+    upscale: bool = False,
 ) -> list[PlateCandidate]:
     """Crop the boxes above `threshold` and OCR each one.
 
     `class_filter` keeps a single class id; `None` keeps every class, which is
-    what a single-class number-plate checkpoint needs.
+    what a single-class number-plate checkpoint (`Class 0 = licence`) needs.
+    `upscale` enlarges small crops first; see `_prepare_plate_crop`.
     """
     candidates: list[PlateCandidate] = []
     for confidence, class_id, coords in rows:
@@ -782,6 +860,8 @@ def _ocr_rows(
         )
         crop = _crop(image, coords)
         if crop is not None:
+            if upscale:
+                crop = _prepare_plate_crop(crop)
             try:
                 raw = read_text(crop)
             except VisionUnavailable as exc:
@@ -852,13 +932,14 @@ def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: 
     if not path.exists():
         report.skipped = "model_missing"
         report.detail = (
-            f"No number-plate checkpoint at {path}. Train one (docs/TRAINING.md) and copy "
-            "best.pt there, or point VISION_PLATE_MODEL_PATH at it."
+            f"No number-plate checkpoint at {path}. Put an ANPR model there (the bundled "
+            "anpr_best.pt is the default) or point VISION_PLATE_MODEL_PATH at one."
         )
         return
+    gate = plate_threshold()
     try:
         model = load_stage_model(STAGE_NUMBER_PLATE)
-        rows = _predict_rows(model, image, size, min(threshold, 0.05))
+        rows = _predict_rows(model, image, size, min(gate, 0.05))
     except StageNotConfigured as exc:
         report.skipped = exc.reason
         report.detail = str(exc)
@@ -872,13 +953,24 @@ def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: 
     report.ms = int((time.perf_counter() - started) * 1000)
     names = getattr(model, "names", {}) or {}
     result.plate_candidates = _ocr_rows(
-        image, rows, names, threshold=threshold, limit=max_crops()
+        image,
+        rows,
+        names,
+        threshold=gate,
+        limit=max_crops(),
+        upscale=True,
     )
     report.found = len(result.plate_candidates)
     report.best_confidence = max(
         (candidate.confidence for candidate in result.plate_candidates), default=0.0
     )
     report.result = _stage_outcome(result.plate_candidates)
+    if not report.detail:
+        report.detail = (
+            f"{path.name} · classes: "
+            + ", ".join(str(name) for name in sorted(names.values()))
+            + f" · gate {gate:.2f}"
+        )
 
 
 def _run_vehicle_stage(image, result: DetectionResult, *, threshold: float, size: int) -> None:
@@ -1195,13 +1287,23 @@ def vision_setup() -> dict[str, Any]:
         },
         {
             "name": "model",
-            "label": "best.pt (trained weights)",
+            "label": "best.pt (sticker model)",
             "present": DEFAULT_MODEL_PATH.exists(),
             "size": "5.5 MB, tracked in git",
             "command": "git checkout -- best.pt   # restore the tracked weights",
         },
+        {
+            "name": "anpr",
+            "label": "anpr_best.pt (number-plate model)",
+            "present": plate_model_path().exists(),
+            "size": "5.8 MB, tracked in git",
+            "command": "git checkout -- anpr_best.pt   # restore the tracked weights",
+            "optional": True,
+        },
     ]
-    missing = [row for row in rows if not row["present"]]
+    # Only required components gate `ready`: the plate and vehicle stages are
+    # optional, and a missing one is a skipped stage, not a broken detector.
+    missing = [row for row in rows if not row["present"] and not row.get("optional")]
     return {
         "ready": not missing,
         "missing": [row["name"] for row in missing],
@@ -1257,7 +1359,9 @@ def stage_status() -> list[dict[str, Any]]:
             "env": STAGE_ENV[stage],
             "model": str(path),
             "model_present": path.exists(),
-            "bundled": path == default_paths[stage] and stage == STAGE_STICKER,
+            # Bundled = tracked in git and shipped with the repo (best.pt,
+            # anpr_best.pt). weights/vehicle.pt is fetched, never shipped.
+            "bundled": path in {DEFAULT_MODEL_PATH, DEFAULT_PLATE_MODEL_PATH},
             "required": stage == STAGE_STICKER,
             "note": notes[stage],
         })
