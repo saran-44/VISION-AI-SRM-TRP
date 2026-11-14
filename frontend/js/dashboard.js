@@ -122,8 +122,6 @@ function mountBrowserCamera(cameras) {
  */
 async function scanFrame(blob, meta = {}) {
   const statusNode = document.getElementById('scanStatus');
-  const plateNode = document.getElementById('plateValue');
-  const metaNode = document.getElementById('scanMeta');
   if (statusNode) {
     statusNode.textContent = 'Scanning frame…';
     statusNode.className = 'scan-status';
@@ -152,29 +150,78 @@ async function scanFrame(blob, meta = {}) {
       throw new Error(payload?.error || `Scan failed (${response.status}).`);
     }
 
-    const busNumber = payload.bus_number;
-    const confidence = payload.confidence;
-    if (plateNode) plateNode.textContent = busNumber || 'UNKNOWN';
-    if (statusNode) {
-      const { good, text } = describeScan(payload);
-      statusNode.textContent = text;
-      statusNode.className = `scan-status ${good ? '' : 'text-danger'}`.trim();
-    }
-    if (metaNode) metaNode.textContent = scanDetail(payload);
-    renderStageWarning();
-    analytics.detectionResult(busNumber, confidence);
-    analytics.captureFrame(meta.cameraId);
-    showToast(
-      busNumber ? `Detected bus ${busNumber}` : scanFailureText(payload),
-      busNumber ? 'success' : 'error',
-    );
-    refreshAll();
+    applyScanResult(payload, meta);
   } catch (error) {
     if (statusNode) {
       statusNode.textContent = error.message || 'Scan failed.';
       statusNode.className = 'scan-status text-danger';
     }
     showToast(error.message || 'Scan failed.', 'error');
+  }
+}
+
+/** Show one scan result in the Last Detected card, whichever path produced it. */
+function applyScanResult(payload, meta = {}) {
+  const statusNode = document.getElementById('scanStatus');
+  const plateNode = document.getElementById('plateValue');
+  const metaNode = document.getElementById('scanMeta');
+  const busNumber = payload.bus_number;
+  if (plateNode) plateNode.textContent = busNumber || 'UNKNOWN';
+  if (statusNode) {
+    const { good, text } = describeScan(payload);
+    statusNode.textContent = text;
+    statusNode.className = `scan-status ${good ? '' : 'text-danger'}`.trim();
+  }
+  if (metaNode) metaNode.textContent = scanDetail(payload);
+  renderStageWarning();
+  analytics.detectionResult(busNumber, payload.confidence);
+  analytics.captureFrame(meta.cameraId || 'gate-camera');
+  showToast(
+    busNumber ? `Detected bus ${busNumber}` : scanFailureText(payload),
+    busNumber ? 'success' : 'error',
+  );
+  refreshAll();
+}
+
+/**
+ * Scan the gate camera with no browser camera involved.
+ *
+ * `capture: true` tells the backend to grab the frame itself from CAMERA_SOURCE
+ * (an HTTP snapshot endpoint, an RTSP stream or a USB device) and scan it. This
+ * is the only path that works on a gate PC with an IP camera and no webcam,
+ * and the only path that can use RTSP at all.
+ */
+async function scanGateCamera(button) {
+  const statusNode = document.getElementById('scanStatus');
+  if (statusNode) {
+    statusNode.textContent = 'Grabbing a frame from the gate camera…';
+    statusNode.className = 'scan-status';
+  }
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch('/api/detection/scan', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        capture: true,
+        source: 'gate-camera',
+        gate: 'Gate 1 Entry',
+        direction: 'IN',
+        stages: currentStageFlags(),
+      }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.error || `Scan failed (${response.status}).`);
+    applyScanResult(payload, { cameraId: 'gate-camera' });
+  } catch (error) {
+    if (statusNode) {
+      statusNode.textContent = error.message || 'Scan failed.';
+      statusNode.className = 'scan-status text-danger';
+    }
+    showToast(error.message || 'Scan failed.', 'error');
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
@@ -243,6 +290,22 @@ function wire() {
     }, 0);
   });
   refreshButton.addEventListener('click', refreshAll);
+  const gateScan = document.getElementById('scanGateCamera');
+  if (gateScan) {
+    gateScan.addEventListener('click', () => scanGateCamera(gateScan));
+    // Offer it only when this PC has a camera configured. The status route
+    // returns the masked source, never the camera password.
+    apiGet('/api/camera/status')
+      .then((status) => {
+        if (status && status.configured) {
+          gateScan.style.display = '';
+          gateScan.title = `Gate camera: ${status.kind} ${status.source}`;
+        }
+      })
+      .catch(() => {
+        // No camera on this install: the browser camera tile still works.
+      });
+  }
   exportCsv.addEventListener('click', () => downloadExport('csv', exportParams(currentFilters), currentEvents));
   exportXlsx.addEventListener('click', () => downloadExport('xlsx', exportParams(currentFilters), currentEvents));
 

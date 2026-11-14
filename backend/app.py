@@ -28,8 +28,9 @@ from .auth import (
     set_auth_cookie,
     verify_password,
 )
-from .config import DEMO_ADMIN_EMAIL, Config
+from .config import DEMO_ADMIN_EMAIL, GATE_ENVIRONMENT, Config
 from .db import ASCENDING, DESCENDING, get_database_for_startup, iso_utc, public_doc, utc_naive, valid_id
+from .frame_source import FrameSourceError, describe as describe_camera, snapshot as camera_snapshot_frame
 from .schemas import (
     AnalyticsFilter,
     BusCreate,
@@ -590,6 +591,66 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         """Report whether the sticker-detection stack can run right now."""
         return jsonify(vision_status())
 
+    @app.get("/api/camera/status")
+    @require_roles("head_admin")
+    def camera_status():
+        """What camera the gate PC is configured with, without its password."""
+        return jsonify(describe_camera(config.camera_source))
+
+    @app.get("/api/camera/snapshot")
+    @require_device_key_or_roles("head_admin")
+    def camera_snapshot():
+        """Grab one frame from the gate camera itself.
+
+        The browser can only capture the webcam of the machine it runs on, and
+        it cannot open RTSP at all. This route lets the gate PC pull a still
+        from an HTTP snapshot endpoint, an RTSP stream or a USB device, so the
+        portal works with a real gate camera and with no browser camera.
+        The frame is returned as-is; `POST /api/detection/scan` with
+        `{"capture": true}` does both steps in one call.
+        """
+        requested = (request.args.get("source") or "").strip()
+        if requested and request.remote_addr not in {"127.0.0.1", "::1"}:
+            # A free-form URL here would be a request-forgery primitive for anyone
+            # holding a device key. Overriding the configured camera is a
+            # debugging aid for the gate PC itself, nothing more.
+            return jsonify(
+                {
+                    "error": "The camera source can only be overridden from the gate PC itself.",
+                    "code": "source_override_refused",
+                }
+            ), 403
+        source = (requested or config.camera_source or "").strip()
+        if not source:
+            return jsonify(
+                {
+                    "error": "No camera is configured. Set CAMERA_SOURCE in the gate "
+                             "configuration file, or open the portal with the browser camera.",
+                    "code": "camera_not_configured",
+                    "camera": describe_camera(config.camera_source),
+                }
+            ), 400
+        try:
+            frame = camera_snapshot_frame(source)
+        except FrameSourceError as exc:
+            # The camera is a device, not the internet: say which device failed.
+            record_audit(
+                db,
+                {"email": "device-client", "role": "device"},
+                "camera_snapshot_failed",
+                "events",
+                None,
+                after={"error": str(exc), "camera": describe_camera(config.camera_source)},
+                flask_request=request,
+            )
+            return jsonify({"error": str(exc), "code": "camera_unavailable"}), 502
+        response = Response(frame.data, mimetype=frame.content_type)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Camera-Source"] = frame.label
+        if frame.width and frame.height:
+            response.headers["X-Frame-Size"] = f"{frame.width}x{frame.height}"
+        return response
+
     @app.post("/api/detection/scan")
     @require_device_key_or_roles("head_admin")
     def detection_scan():
@@ -614,6 +675,15 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
                 return jsonify({"error": "A JSON object or image upload is required"}), 400
             image_source = body.get("image")
             payload = body
+
+        if not image_source and isinstance(payload, dict) and payload.get("capture"):
+            # One call: grab the frame from the gate camera and scan it. A gate
+            # operator should not have to fetch a JPEG and post it back.
+            try:
+                image_source = camera_snapshot_frame(config.camera_source).data
+            except FrameSourceError as exc:
+                return jsonify({"error": str(exc), "code": "camera_unavailable"}), 502
+            payload = {**payload, "source": payload.get("source", "gate-camera")}
 
         if not image_source:
             return jsonify({"error": "No image was supplied"}), 400
@@ -642,6 +712,21 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
                 after={"error": str(exc), "source": payload.get("source", "device")},
                 flask_request=request,
             )
+            if config.environment == GATE_ENVIRONMENT:
+                # On the gate PC this *is* the detector. Telling the operator to
+                # "run the agent on the gate computer" would describe the machine
+                # the message appears on.
+                return jsonify(
+                    {
+                        "error": (
+                            "The detector could not start on this PC. Open VisionAI.exe --check "
+                            "for the failing component."
+                        ),
+                        "code": "vision_unavailable",
+                        "detail": str(exc),
+                        "auto_scan": {"available": False, "agent": "VisionAI.exe"},
+                    }
+                ), 503
             return jsonify(
                 {
                     "error": (

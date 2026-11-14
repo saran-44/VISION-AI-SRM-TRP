@@ -1,3 +1,13 @@
+# Windows gate bundle: the whole portal as one executable.
+#
+# gunicorn (deploy/render/entrypoint.sh) needs fork() and does not run on
+# Windows, so the gate PC uses waitress, a pure-Python WSGI server.
+#
+# Build with desktop/gate/build_gate.ps1, which also installs the CPU torch
+# wheel (the default PyPI torch wheel pulls ~3 GB of CUDA libraries a gate PC
+# has no GPU for).
+
 -r backend/requirements-vision.txt
+waitress==3.0.2
 pystray==0.19.5
 pyinstaller==6.11.1

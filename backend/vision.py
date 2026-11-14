@@ -637,10 +637,13 @@ def load_model():
     try:
         return load_model_at(model_path(), "model", "Detection")
     except StageNotConfigured as exc:
-        raise VisionUnavailable(
-            f"Detection model not found at {model_path()}. Set VISION_MODEL_PATH to a "
-            "valid best.pt file."
-        ) from exc
+        # Report what actually failed. Collapsing "ultralytics is not installed"
+        # and "the checkpoint could not be loaded" into "model not found" sent
+        # operators to look for a file that was already on disk.
+        detail = str(exc) or f"Detection model at {model_path()} is unusable."
+        if exc.reason == "model_missing":
+            detail = f"{detail} Set VISION_MODEL_PATH to a valid best.pt file."
+        raise VisionUnavailable(detail) from exc
 
 
 def load_stage_model(stage: str):

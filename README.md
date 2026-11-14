@@ -424,6 +424,14 @@ prints a secret value, so its output is safe to paste).
 See [`docs/PRIVACY.md`](docs/PRIVACY.md) for who can see driver and vehicle
 data.
 
+### The gate PC
+
+The whole portal also installs on the gate computer as one Windows executable:
+waitress instead of gunicorn, its own SQLite database, and a server-side camera
+frame source so a real IP camera can be used without a browser. Build and install
+from [`docs/DEPLOY_GATE_PC.md`](docs/DEPLOY_GATE_PC.md); the readiness evidence is in
+[`docs/GATE_READY_AUDIT.md`](docs/GATE_READY_AUDIT.md).
+
 ## Not included
 
 - **Supabase project details and private database credentials.** Set them locally
@@ -449,9 +457,11 @@ frontend/           Static frontend (no build step)
   js/               ES modules (api, ui, layout, cameras, firebase, charts, tables, pages)
   pages/            dashboard, logs, analytics, drivers, buses, driver-details, audit, manage
   vendor/           Chart.js, hls.js, SheetJS, Firebase SDK (+ licences)
+desktop/gate/       Windows gate bundle: launcher, PyInstaller spec, Inno Setup installer
 deploy/             Dockerfile, Cloud Build pipeline, Firebase Hosting target
 docs/               upgrade specification, detection, cameras, Firebase, architecture,
-                    event contract, privacy note, Render + Firebase deploy guides
+                    event contract, privacy note, Render + Firebase deploy guides,
+                    DEPLOY_GATE_PC.md (the .exe install) and GATE_READY_AUDIT.md
 scripts/            frontend checks and secret scanner
 .github/workflows/  CI
 ```

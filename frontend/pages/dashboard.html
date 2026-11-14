@@ -62,6 +62,12 @@
           <div id="stageWarning"></div>
           <div id="scanStatus" class="scan-status">Awaiting first detection</div>
           <div id="scanMeta" class="scan-meta">No events have been ingested yet.</div>
+          <!-- Shown only when this PC has a gate camera configured: the gate PC
+               grabs the frame itself, because a browser cannot open RTSP and a
+               gate PC with no webcam has nothing to capture. -->
+          <button id="scanGateCamera" type="button" class="btn btn-primary scan-camera-btn" style="display:none">
+            <i class='bx bx-camera' aria-hidden="true"></i> Scan gate camera
+          </button>
         </div>
       </article>
     </section>
