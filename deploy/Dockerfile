@@ -24,15 +24,15 @@ RUN apt-get update \
 
 COPY backend/requirements.txt /tmp/requirements.txt
 RUN python -m venv "$VIRTUAL_ENV" \
- && pip install --upgrade pip \
- && pip install -r /tmp/requirements.txt
+ && "$VIRTUAL_ENV/bin/python" -m pip install --upgrade pip \
+ && "$VIRTUAL_ENV/bin/python" -m pip install -r /tmp/requirements.txt
 
 # Vision extras are installed in a separate layer so the base image stays
 # small when detection is not needed. Set INSTALL_VISION=0 to skip them.
 ARG INSTALL_VISION=1
 COPY backend/requirements-vision.txt /tmp/requirements-vision.txt
 RUN if [ "$INSTALL_VISION" = "1" ]; then \
-      pip install --extra-index-url https://download.pytorch.org/whl/cpu \
+      "$VIRTUAL_ENV/bin/python" -m pip install --extra-index-url https://download.pytorch.org/whl/cpu \
         -r /tmp/requirements-vision.txt; \
     fi
 
@@ -42,7 +42,7 @@ COPY best.pt /app/best.pt
 COPY anpr_best.pt /app/anpr_best.pt
 COPY scripts/fetch_vehicle_model.py /app/scripts/fetch_vehicle_model.py
 RUN if [ "$INSTALL_VISION" = "1" ]; then \
-      python /app/scripts/fetch_vehicle_model.py; \
+      "$VIRTUAL_ENV/bin/python" /app/scripts/fetch_vehicle_model.py; \
     fi
 
 EXPOSE 8080

@@ -18,10 +18,11 @@ certificates here.
   local logs, and device event upload.
 - **Firebase Hosting:** Redirects to the web/API service; it is not the AI
   compute host.
-- **InstaBox machine:** Created by the operator; SSH connection and deployment
-  are pending after the initial environment check. Verified `x86_64`, Docker
+- **InstaBox machine:** Created by the operator; verified `x86_64`, Docker
   29.8.2, Docker Compose 5.6.0, and Git 2.47.3. The repository is synced to
-  the deployable branch and the private `.env.instabox` placeholder exists.
+  the deployable branch, the private `.env.instabox` is configured, and the
+  Supabase CA certificate is present. The first image build exposed a virtual
+  environment path issue, which is fixed in the current Dockerfile.
   The minimal image does not include `nano`; use `vi` for private configuration.
 - **Deployable GitHub branch:** `agent/instabox-vision`, containing deployment
   commit `20e89fb` and latest handoff/template commits `aec11b0`, `87df755`,
@@ -43,9 +44,12 @@ certificates here.
 - Prepared InstaBox full-vision Docker Compose deployment.
 - Full Docker image now includes `best.pt`, `anpr_best.pt`, and downloads the
   vehicle model during build.
+- Docker build dependency installation and vehicle-model download now invoke
+  the `/opt/venv` interpreter explicitly.
 - Added `docs/DEPLOY_INSTABOX.md`.
-- Focused backend and frontend validation passed; Docker Compose validation is
-  deferred because Docker is not installed on this Windows workstation.
+- Focused backend and frontend validation passed. InstaBox Docker build reached
+  the vehicle-model step but failed because that step used system Python;
+  rebuild after pulling the Dockerfile fix.
 
 ## Release files
 
@@ -142,8 +146,8 @@ container. The real `.env.instabox` and `supabase-ca.crt` must stay private.
   controls are available locally in the agent window and system tray.
 - A reverse proxy/HTTPS hostname must be configured on InstaBox before
   production login.
-- The final cloud deployment has not been run because the InstaBox machine has
-  not been created yet.
+- The final cloud deployment is pending the corrected InstaBox image rebuild,
+  container start, health check, and HTTPS configuration.
 - Model licensing and dataset rights must be reviewed before corporate
   distribution.
 
