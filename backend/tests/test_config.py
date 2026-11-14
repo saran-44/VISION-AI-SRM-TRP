@@ -113,3 +113,41 @@ def test_local_dotenv_cannot_change_suite_defaults():
         if not key.startswith(("TEST_", "ALLOW_TEST_")) and os.getenv(key) is not None
     )
     assert leaked == [], f".env keys leaked into the test session: {leaked}"
+
+
+# The example in docs/IP_CAMERA_GATEWAY.md §5, verbatim. A guide that ships a
+# config the application rejects is worse than no guide, so the example is a
+# test: one HLS gateway camera and one MJPEG gateway camera.
+DOCUMENTED_GATEWAY_EXAMPLE = (
+    '{"gate-1-entry":{"type":"hls","url":"http://192.168.1.10:8888/gate1/index.m3u8",'
+    '"label":"Gate 1 Entry"},"gate-2-entry":{"type":"mjpeg",'
+    '"url":"http://192.168.1.10:8090/gate2","label":"Gate 2 Entry"}}'
+)
+
+
+def test_the_documented_gateway_example_is_accepted(monkeypatch):
+    monkeypatch.setenv("CAMERA_STREAM_URLS", DOCUMENTED_GATEWAY_EXAMPLE)
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    monkeypatch.setenv("JWT_SECRET", "a-very-long-secret-value-for-testing-1234")
+    config = Config.from_env()
+
+    assert config.camera_streams["gate-1-entry"] == {
+        "type": "hls",
+        "url": "http://192.168.1.10:8888/gate1/index.m3u8",
+        "label": "Gate 1 Entry",
+    }
+    assert config.camera_streams["gate-2-entry"]["type"] == "mjpeg"
+
+
+def test_gateway_credentials_belong_in_the_gateway_not_the_url(monkeypatch):
+    """The console refuses camera passwords in the URL on purpose."""
+    monkeypatch.setenv(
+        "CAMERA_STREAM_URLS",
+        '{"gate-1-entry": {"type": "hls", '
+        '"url": "http://admin:secret@192.168.1.10:8888/gate1/index.m3u8"}}',
+    )
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    monkeypatch.setenv("JWT_SECRET", "a-very-long-secret-value-for-testing-1234")
+
+    with pytest.raises(ValueError, match="credentials"):
+        Config.from_env()

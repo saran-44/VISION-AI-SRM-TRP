@@ -14,6 +14,11 @@ console, and why raw RTSP is never loaded directly by a browser.
 | **MJPEG** | NVR/DVR or the backend proxy | `multipart/x-mixed-replace` over HTTP(S) | ✅ Supported |
 | **Raw RTSP** | The IP camera | *impossible directly* — needs a gateway | ⚠️ Gateway required |
 
+> **Setting up a real NVR/DVR or IP camera?** The step-by-step gateway
+> configuration (MediaMTX, FFmpeg for MJPEG, the four camera IDs, verification
+> commands and the mixed-content trap) is in
+> [`IP_CAMERA_GATEWAY.md`](IP_CAMERA_GATEWAY.md).
+
 > **RTSP is not a browser protocol.** A browser cannot open a TCP/UDP RTSP
 > session, cannot negotiate RTSP's SDP/OPTIONS/DESCRIBE flow and cannot embed
 > `rtsp://…` in a `<video>` tag. Attempting it produces a media error, not a
