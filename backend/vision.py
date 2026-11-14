@@ -230,6 +230,7 @@ class DetectionResult:
     # Laplacian variance (soft frames explain most "no box at all"), and
     # `tiles` says whether the scan was tiled (see VISION_TILES).
     frame_sharpness: float | None = None
+    frame_brightness: float | None = None
     tiles: int = 1
     reason: str = ""
     advice: str = ""
@@ -258,6 +259,9 @@ class DetectionResult:
             "image_size": self.image_size,
             "frame_sharpness": (
                 round(float(self.frame_sharpness), 1) if self.frame_sharpness is not None else None
+            ),
+            "frame_brightness": (
+                round(float(self.frame_brightness), 1) if self.frame_brightness is not None else None
             ),
             "tiles": self.tiles,
             "reason": self.reason,
@@ -842,6 +846,73 @@ def frame_sharpness(image) -> float | None:
     return float(lap.var())
 
 
+def frame_brightness(image) -> float | None:
+    """Mean luminance of the frame, 0-255. The other half of "the frame is unusable"."""
+    try:
+        import numpy as np
+    except ImportError:
+        return None
+    try:
+        pixels = np.asarray(image.convert("L"), dtype=np.float64)
+    except Exception:  # noqa: BLE001 - a diagnostic must never break a scan
+        return None
+    if pixels.size == 0:
+        return None
+    return float(pixels.mean())
+
+
+def quality_gate() -> str:
+    """`VISION_QUALITY_GATE`: refuse (default) or off.
+
+    A frame that is 98 % black costs 13 seconds of tiled inference and cannot
+    produce a number. Refusing it before the model loads is the difference
+    between a 0.2 s answer and a 13 s shrug.
+    """
+    raw = os.getenv("VISION_QUALITY_GATE", "refuse").strip().lower()
+    return "off" if raw in {"off", "0", "false", "no", "none"} else "refuse"
+
+
+def _float_env(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def min_frame_brightness() -> float:
+    return _float_env("VISION_MIN_BRIGHTNESS", 12.0)
+
+
+def min_frame_sharpness() -> float:
+    return _float_env("VISION_MIN_SHARPNESS", 20.0)
+
+
+def frame_problems(result: "DetectionResult") -> list[str]:
+    """Measured reasons this frame cannot contain a detectable sticker."""
+    problems: list[str] = []
+    if result.frame_brightness is not None and result.frame_brightness < min_frame_brightness():
+        problems.append(
+            f"too dark (mean brightness {result.frame_brightness:.0f} of 255, "
+            f"minimum {min_frame_brightness():.0f})"
+        )
+    if result.frame_sharpness is not None and result.frame_sharpness < min_frame_sharpness():
+        problems.append(
+            f"too soft (sharpness {result.frame_sharpness:.0f}, minimum {min_frame_sharpness():.0f})"
+        )
+    return problems
+
+
+def frame_unusable_advice(result: "DetectionResult", problems: list[str]) -> str:
+    shape = f" ({result.frame_width}×{result.frame_height})" if result.frame_width else ""
+    return (
+        f"Refused before inference{shape}: the frame is "
+        + " and ".join(problems)
+        + ". No threshold finds a sticker in a frame like this. Turn a light on the gate "
+        "(or use the camera's own IR/illuminator), let autofocus settle, then scan again. "
+        "Set VISION_QUALITY_GATE=off to scan anyway."
+    )
+
+
 def tile_settings() -> int:
     """`VISION_TILES`: 1 (default, off), 2-4, or `auto`.
 
@@ -963,13 +1034,23 @@ def _predict_rows(model, image, size: int, conf: float) -> list[tuple[float, int
     return rows
 
 
-def _prepare_plate_crop(crop):
-    """Enlarge a small plate crop so the OCR has pixels to work with.
+def sticker_upscale() -> int:
+    """How much a small *sticker* crop is enlarged before OCR.
 
-    Only the plate stage does this: the sticker path is validated as it is, and
-    changing the crops it feeds the OCR would move numbers that are already
-    trusted.
+    `VISION_STICKER_UPSCALE`, default 1 (off). The sticker path is validated as
+    it is, so it stays off by default; but a sticker that is 50 px wide in the
+    frame — which tiling can find at 0.85 while the OCR cannot read it — gets
+    three times the pixels with this on, and the number usually appears.
     """
+    try:
+        value = int(os.getenv("VISION_STICKER_UPSCALE", "1"))
+    except ValueError:
+        return 1
+    return max(1, min(6, value))
+
+
+def _prepare_crop_for_ocr(crop, factor: int):
+    """Enlarge a small crop so the OCR has pixels to work with."""
     size = getattr(crop, "size", None)
     try:
         if not size or len(size) != 2:
@@ -979,7 +1060,6 @@ def _prepare_plate_crop(crop):
         return crop
     if width <= 0 or height <= 0:
         return crop
-    factor = plate_upscale()
     if factor <= 1 or width >= 480:
         return crop
     try:
@@ -994,6 +1074,11 @@ def _prepare_plate_crop(crop):
         return crop
 
 
+def _prepare_plate_crop(crop):
+    """The plate stage's enlargement, see `plate_upscale`."""
+    return _prepare_crop_for_ocr(crop, plate_upscale())
+
+
 def _ocr_rows(
     image,
     rows: list[tuple[float, int, list[int]]],
@@ -1003,12 +1088,14 @@ def _ocr_rows(
     limit: int,
     class_filter: int | None = None,
     upscale: bool = False,
+    upscale_factor: int | None = None,
 ) -> list[PlateCandidate]:
     """Crop the boxes above `threshold` and OCR each one.
 
     `class_filter` keeps a single class id; `None` keeps every class, which is
     what a single-class number-plate checkpoint (`Class 0 = licence`) needs.
-    `upscale` enlarges small crops first; see `_prepare_plate_crop`.
+    `upscale` applies the plate enlargement; `upscale_factor` applies an
+    explicit one (the sticker path passes `VISION_STICKER_UPSCALE`).
     """
     candidates: list[PlateCandidate] = []
     for confidence, class_id, coords in rows:
@@ -1027,7 +1114,9 @@ def _ocr_rows(
         )
         crop = _crop(image, coords)
         if crop is not None:
-            if upscale:
+            if upscale_factor and upscale_factor > 1:
+                crop = _prepare_crop_for_ocr(crop, upscale_factor)
+            elif upscale:
                 crop = _prepare_plate_crop(crop)
             try:
                 raw = read_text(crop)
@@ -1079,6 +1168,7 @@ def _run_sticker_stage(image, result: DetectionResult, *, model=None, threshold:
         threshold=threshold,
         limit=max_crops(),
         class_filter=sticker_id,
+        upscale_factor=sticker_upscale(),
     )
     result.boxes_above_threshold = len(result.candidates)
 
@@ -1242,10 +1332,30 @@ def detect(
         image_size=size,
         stage_flags=dict(enabled),
         frame_sharpness=frame_sharpness(image),
+        frame_brightness=frame_brightness(image),
         tiles=tile_count(
             getattr(image, "width", 0) or 0, getattr(image, "height", 0) or 0
         ),
     )
+
+    problems = frame_problems(result)
+    if problems and quality_gate() == "refuse":
+        # Asked and answered without touching a checkpoint: this frame cannot
+        # contain a readable sticker, and the caller gets the measurements.
+        for stage in STAGE_ORDER:
+            result.stages.append(
+                StageReport(
+                    name=stage,
+                    enabled=enabled[stage],
+                    skipped="frame_unusable",
+                    detail=frame_unusable_advice(result, problems),
+                )
+            )
+        result.reason = "frame_unusable"
+        result.advice = frame_unusable_advice(result, problems)
+        result.inference_ms = int((time.perf_counter() - started) * 1000)
+        result.cascade = CASCADE_NONE
+        return result
 
     if enabled[STAGE_STICKER]:
         _run_sticker_stage(image, result, model=model, threshold=threshold, size=size)
@@ -1363,10 +1473,22 @@ def _explain(result: DetectionResult) -> DetectionResult:
             default=0,
         )
         result.reason = "unreadable"
+        factor = sticker_upscale()
+        if factor <= 1:
+            # Raising VISION_IMAGE_SIZE does nothing here: the crop is taken from
+            # the frame's own pixels, not from the letterboxed inference image.
+            hint = (
+                "that is small for the OCR, and raising VISION_IMAGE_SIZE will not change it — "
+                "set VISION_STICKER_UPSCALE=3 to enlarge the crop before reading, or scan from closer"
+            )
+        else:
+            hint = (
+                f"still small even at VISION_STICKER_UPSCALE={factor}: scan from closer, or install a "
+                "stronger OCR engine (see docs/DETECTION.md)"
+            )
         result.advice = (
             f"Sticker detected at {result.candidates[0].confidence:.2f} but the OCR read no text. "
-            f"The crop was about {largest} px wide: get closer, raise VISION_IMAGE_SIZE, "
-            "or install a stronger OCR engine (see docs/DETECTION.md)."
+            f"The crop was about {largest} px wide — {hint}."
         )
     else:
         result.reason = "ok"

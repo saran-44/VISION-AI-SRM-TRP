@@ -102,6 +102,7 @@ const FAILURE_TEXT = {
   below_threshold: 'A plate was seen, but under the confidence threshold.',
   other_class: 'The red circle was found, but not the sticker panel.',
   unreadable: 'A plate was found, but the number could not be read.',
+  frame_unusable: 'The frame was refused before scanning: too dark or too soft to contain a sticker.',
 };
 
 export function scanFailureText(payload = {}) {

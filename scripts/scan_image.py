@@ -345,9 +345,15 @@ def main(argv: list[str] | None = None) -> int:
     candidate = best_identification(result)
     print(f"image       : {path} ({result.frame_width}×{result.frame_height})")
     print(f"model       : {result.model}  @ {result.image_size}px, threshold {result.threshold:.2f}")
-    if result.frame_sharpness is not None:
-        tiled = f", {result.tiles}×{result.tiles} tiled" if result.tiles > 1 else ""
-        print(f"frame       : sharpness {result.frame_sharpness:.0f}{tiled}")
+    if result.frame_sharpness is not None or result.frame_brightness is not None:
+        parts = []
+        if result.frame_sharpness is not None:
+            parts.append(f"sharpness {result.frame_sharpness:.0f}")
+        if result.frame_brightness is not None:
+            parts.append(f"brightness {result.frame_brightness:.0f}")
+        if result.tiles > 1:
+            parts.append(f"{result.tiles}×{result.tiles} tiled at {result.image_size}px")
+        print(f"frame       : {', '.join(parts)}")
     print(f"inference   : {result.inference_ms} ms")
     print(f"boxes       : {result.boxes_total} found, {result.boxes_above_threshold} above threshold, best {result.best_confidence:.2f}")
     print(f"class filter: only class {result.sticker_class} is OCR'd"
