@@ -21,8 +21,8 @@ certificates here.
 - **InstaBox machine:** Created by the operator; SSH connection and deployment
   are pending after the initial environment check. Verified `x86_64`, Docker
   29.8.2, Docker Compose 5.6.0, and Git 2.47.3.
-- **Deployable GitHub branch:** `agent/instabox-vision` at commit `20e89fb`.
-  The pull-request page is
+- **Deployable GitHub branch:** `agent/instabox-vision`, containing deployment
+  commit `20e89fb` and latest handoff commit `aec11b0`. The pull-request page is
   `https://github.com/saran-44/VISION-AI-SRM-TRP/pull/new/agent/instabox-vision`.
 
 ## Completed in this session
