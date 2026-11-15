@@ -78,8 +78,7 @@ from .vision import (
 
 def failed_frame_dir() -> Path:
     """Where a scan that produced no number leaves its frame."""
-    base = Path(os.getenv("VISION_DATA_DIR", "").strip() or Path.home() / "VisionAI")
-    return base / "failed-frames"
+    return diagnostics.failed_frames_dir()
 
 
 def save_failed_frame(image) -> str | None:

@@ -241,3 +241,55 @@ def test_a_failed_scan_is_recorded_through_the_api(client, users, monkeypatch, t
     text = diagnostics.read_errors(kinds=("SCAN",))
     assert "reason   : unreadable" in text
     assert "sharpness 93.0" in text
+
+
+# --------------------------------------------- one data dir, not three guesses
+def test_the_data_directory_has_a_single_definition(isolated_data_dir: Path) -> None:
+    assert diagnostics.data_root() == isolated_data_dir
+    assert diagnostics.failed_frames_dir() == isolated_data_dir / "failed-frames"
+    assert diagnostics.logs_dir() == isolated_data_dir / "logs"
+
+
+def test_the_portal_and_the_diagnostics_agree_on_the_data_dir(monkeypatch, tmp_path: Path) -> None:
+    """The portal used to write frames to the home folder on Windows while the
+    preflight checked PROGRAMDATA, so a report described the wrong directory."""
+    import backend.app as app_module
+
+    monkeypatch.setenv("VISION_DATA_DIR", str(tmp_path / "shared"))
+    assert app_module.failed_frame_dir() == diagnostics.failed_frames_dir()
+
+
+def test_the_preflight_checks_the_directory_the_portal_writes_to(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import backend.preflight as preflight
+
+    monkeypatch.setenv("VISION_DATA_DIR", str(tmp_path / "checked"))
+    report = preflight.Report()
+    preflight.check_data_dir(report, diagnostics.data_root())
+    assert str(tmp_path / "checked") in report.checks[0].detail
+
+
+def test_the_report_says_whether_the_portal_is_running(monkeypatch) -> None:
+    monkeypatch.setenv("PORT", "1")  # nothing listens on port 1
+    text = build_report(errors=1, scans=1, log_lines=1)
+    assert "--- 3a. Portal" in text
+    assert "not running" in text
+
+
+def test_the_gate_report_script_marks_the_config_file(monkeypatch, tmp_path: Path) -> None:
+    """`--env-file` has to set VISION_GATE_CONFIG, or the preflight's own
+    "gate config" check reports SKIP in a report about that exact file."""
+    import subprocess
+    import sys
+
+    config = tmp_path / "gate.env"
+    config.write_text("DATABASE_URL=sqlite:///gate.db\nENVIRONMENT=gate\n")
+    result = subprocess.run(
+        [sys.executable, "scripts/gate_report.py", "--env-file", str(config), "--errors", "1"],
+        capture_output=True, text=True, timeout=120,
+        env={**dict(__import__("os").environ), "VISION_DATA_DIR": str(tmp_path / "data")},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "gate config" in result.stdout
+    assert "SKIP  gate config" not in result.stdout

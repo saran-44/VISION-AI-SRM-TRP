@@ -248,9 +248,11 @@ python scripts/gate_report.py --clear               # empty the log afterwards
 ```
 
 The report holds, in order: the version and paths, the configuration (both the
-environment and `gate.env`), the vision settings, what the camera answered, the
-model files and their sizes, the full 16-check preflight, the recorded errors,
-the scans that produced no number, and the warnings from `portal.log`.
+environment and `gate.env`), the vision settings, what the camera answered,
+**whether the portal is running at all**, the model files and their sizes, the
+full 16-check preflight, the recorded errors, the scans that produced no
+number, and the warnings from `portal.log`. An empty error list means nothing
+if the portal has not been running since the change — that line says which.
 
 Every password, device key, bearer token and JWT is masked before it is
 written — `rtsp://admin:***@…`, `SECRET_KEY=***` — so the block can be pasted
