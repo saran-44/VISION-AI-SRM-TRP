@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import threading
 import time
 import urllib.request
 from datetime import date, datetime
@@ -74,6 +75,36 @@ from .vision import (
     stage_overrides_from_payload,
     vision_status,
 )
+
+
+def _seconds(name: str, default: float, *, low: float = 1.0, high: float = 3600.0) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return max(low, min(high, value))
+
+
+def sse_lifetime_seconds() -> float:
+    """How long one `/api/stream` connection is allowed to live.
+
+    A server-sent-events response occupies a worker thread until the client
+    disconnects, and a thread cannot notice a gone client until it next writes.
+    A free host gives the whole service a handful of threads (four when this was
+    written), so a few dashboards left open in a tab could take the portal down.
+    The stream now ends on its own
+    and `EventSource` reconnects (the `retry:` line tells it to), which recycles
+    the thread without the operator seeing a gap.
+    """
+    return _seconds("API_SSE_SECONDS", 210.0, low=5.0, high=1800.0)
+
+
+def sse_refresh_seconds() -> float:
+    return _seconds("API_SSE_REFRESH_SECONDS", 10.0, low=1.0, high=120.0)
+
+
+def sse_heartbeat_seconds() -> float:
+    return _seconds("API_SSE_HEARTBEAT_SECONDS", 5.0, low=1.0, high=60.0)
 
 
 def failed_frame_dir() -> Path:
@@ -762,12 +793,13 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             return jsonify(
                 {
                     "error": (
-                        "Cloud vision is unavailable on this Render Free service. "
-                        "Run VisionAI-GateAgent.exe on the gate computer for automatic scanning."
+                        "Cloud vision is unavailable on this plan: a CPU detector needs about "
+                        "2 GB of RAM. Detection runs on the gate PC — install VisionAI.exe there "
+                        "and let it post its scans to this portal with a device key."
                     ),
                     "code": "vision_local_agent_required",
                     "detail": str(exc),
-                    "auto_scan": {"available": False, "agent": "VisionAI-GateAgent.exe"},
+                    "auto_scan": {"available": False, "agent": "VisionAI.exe"},
                 }
             ), 503
         except Exception as exc:  # pragma: no cover - defensive
@@ -961,18 +993,56 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
     @app.get("/api/stream")
     @require_roles("head_admin")
     def stream():
+        """Server-sent events, deliberately finite.
+
+        Every open connection holds a thread. On a free instance the thread
+        count is the ceiling on open dashboards, and a closed tab is invisible
+        until the next write. The stream therefore ends after
+        `API_SSE_SECONDS` (default 210 s); the `retry:` line makes the browser
+        reconnect immediately, so it looks continuous and the thread is
+        recycled. `compute_stats()` is a full-table read, so it is shared
+        between clients for `API_STATS_CACHE_SECONDS`.
+        """
+        cache = current_app.extensions.setdefault(
+            "stream_cache", {"at": 0.0, "value": None, "lock": threading.Lock()}
+        )
+
+        def snapshot() -> dict:
+            ttl = _seconds("API_STATS_CACHE_SECONDS", 5.0, low=0.0, high=60.0)
+            with cache["lock"]:
+                fresh = cache["value"] is not None and time.monotonic() - cache["at"] < ttl
+                if fresh:
+                    return cache["value"]
+            recent = db.events.find({}, {"_id": 0}).sort(event_sort()).limit(8)
+            value = {
+                "type": "tick",
+                "generated_at": iso_utc(naive_now()),
+                "stats": compute_stats(db, config),
+                "recent_events": serialize_many(recent),
+            }
+            with cache["lock"]:
+                cache.update({"at": time.monotonic(), "value": value})
+            return value
+
         def generate():
-            yield "retry: 5000\n\n"
+            yield "retry: 3000\n\n"
+            started = time.monotonic()
+            next_tick = started
             while True:
-                recent = db.events.find({}, {"_id": 0}).sort(event_sort()).limit(8)
-                payload = {
-                    "type": "tick",
-                    "generated_at": iso_utc(naive_now()),
-                    "stats": compute_stats(db, config),
-                    "recent_events": serialize_many(recent),
-                }
-                yield "data: " + json.dumps(payload, default=str) + "\n\n"
-                time.sleep(10)
+                now = time.monotonic()
+                remaining = sse_lifetime_seconds() - (now - started)
+                if remaining <= 0:
+                    break
+                if now >= next_tick:
+                    yield "data: " + json.dumps(snapshot(), default=str) + "\n\n"
+                    next_tick = now + sse_refresh_seconds()
+                    continue
+                # Nothing new to say yet. A comment line keeps a buffering proxy
+                # from holding the stream and surfaces a socket that has gone to
+                # the server loop on the next write.
+                yield ": keep-alive\n\n"
+                time.sleep(max(0.05, min(sse_heartbeat_seconds(), next_tick - now, remaining)))
+            yield "event: end\ndata: {}\n\n"
 
         response = Response(stream_with_context(generate()), mimetype="text/event-stream")
         response.headers["Cache-Control"] = "no-cache"

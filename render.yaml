@@ -45,6 +45,16 @@ services:
       # In-memory limiter is per instance; fine for a single free instance.
       - key: RATELIMIT_STORAGE_URI
         value: memory://
+      # One worker (512 MB) with threads for the live stream and exports.
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: GUNICORN_THREADS
+        value: "8"
+      # A server-sent-events response holds a thread until it ends on its own.
+      # 210 s is under Render's idle timeouts and cycles threads every 3.5 min;
+      # the browser reconnects instantly (see app.py: sse_lifetime_seconds).
+      - key: API_SSE_SECONDS
+        value: "210"
       - key: OCR_CONFIDENCE_THRESHOLD
         value: "0.75"
       - key: OVERSTAY_HOURS

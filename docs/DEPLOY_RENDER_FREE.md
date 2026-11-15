@@ -365,8 +365,15 @@ deliberately ships without torch. See [§10](#10-limits-of-the-free-plan).
 | Ephemeral disk | nothing persists locally | all state already lives in Supabase |
 | No CDN | static files come from gunicorn | acceptable here; revisit Cloud Run + Hosting later |
 
+Two of these limits have code behind them, so you do not have to work around
+them: `/api/stream` ends itself after `API_SSE_SECONDS` (210 s) and the page
+reconnects instantly, which keeps a closed tab from holding a worker thread; and
+`/api/stats` only reads the last `STATS_LOOKBACK_DAYS` (45) of events. The
+reasoning, the InstaBox decision table and the move checklist are in
+[`DEPLOY_RENDER_HOBBY.md`](DEPLOY_RENDER_HOBBY.md).
+
 For automatic gate scanning on the free deployment, install and run the Windows
-`VisionAI-GateAgent.exe` on the gate computer. It performs the vision cascade
+`VisionAI.exe` on the gate computer. It performs the vision cascade
 locally and uploads identified events with `X-Device-Key`; browser camera scans
 on the Render service return a clear `vision_local_agent_required` response
 instead of pretending that Pillow alone can enable the full detector stack.

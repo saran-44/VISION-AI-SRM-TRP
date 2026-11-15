@@ -28,10 +28,13 @@ from __future__ import annotations
 import os
 import re
 import traceback
+import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 ERROR_LOG_MAX_BYTES = 1_000_000
 MAX_DETAIL_LINES = 60
@@ -150,6 +153,11 @@ def log_block(kind: str, *, lines: list[str] | None = None, request=None) -> str
         _rotate(path)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(payload)
+        # A hosted deployment (Render, Fly, Railway) has an ephemeral disk, so
+        # the file dies with the container and `--report` cannot read it. The
+        # platform's log stream is the only thing that survives there, so every
+        # block is mirrored to it as well.
+        logger.log(logging.INFO if kind.upper() == "SCAN" else logging.WARNING, "%s", payload.rstrip())
     except Exception:  # noqa: BLE001 - see the docstring
         pass
     return ref
