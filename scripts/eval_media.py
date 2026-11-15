@@ -470,6 +470,8 @@ def run_evaluation(
     }
     with open(out_dir / "results.json", "w", encoding="utf-8") as f:
         json.dump(results_payload, f, indent=2)
+    with open(out_dir / "results_round4_after.json", "w", encoding="utf-8") as f:
+        json.dump(results_payload, f, indent=2)
 
     print(f"\nResults written to: {out_dir / 'results.json'}")
     print(f"Annotated frames in: {annotated_dir}")

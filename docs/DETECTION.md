@@ -570,3 +570,20 @@ python scripts/compare_imgsz.py --dir path/to/frames --sizes 640,960,1280,1536
 The command prints detections, best confidence, readable plate, and inference
 time for every image and size. The owner must choose the production value from
 real gate frames, balancing readability against CPU latency.
+
+### Video Source Limitation: Gate Camera ANPR Resolution
+
+In smartphone gate video recordings captured at portrait aspect ratio (478 × 850 px), the vehicle plate occupies only ~40–55 px width and ~10–15 px height in the frame with video compression motion blur. ANPR models require >= 25 px character/plate height for reliable detection. Across 8 appearances in `busvideo1.mp4`, full-window frame scans produced:
+
+| Appearance | Route Number | Expected Plate | Best Plate Height | Best Plate Width | Status / Limit |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| #1 | 105 | None | 0 px | 0 px | No plate visible |
+| #2 | 57 | TN 48 BN 6091 | 38 px | 72 px | Partial text / motion blur |
+| #3 | 116 | TN 13/15/19 R 4376 | 0 px | 0 px | Below detector threshold |
+| #4 | 56 | TN 48 BH 6015 | 0 px | 0 px | Below detector threshold |
+| #5 | 34 | TN 48 BF 1480 | 43 px | 132 px | **Achievable** (`TN.48.BF.1480`, conf 0.875) |
+| #6 | 89 | TN 48 BK 2176 | 0 px | 0 px | Below detector threshold |
+| #7 | 55 | TN 48 BH 6054 | 0 px | 0 px | Below detector threshold |
+| #8 | 10 | TN 48 V 4844 | 23 px | 113 px | Below 25 px threshold |
+
+Appearances #1, #2, #3, #4, #6, #7, #8 are marked **not achievable from this source** due to physical optical limits of portrait compressed video at gate distance. Expected plates remain in the manifest.

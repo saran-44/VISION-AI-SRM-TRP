@@ -570,6 +570,20 @@ def plate_upscale() -> int:
     return max(1, min(6, value))
 
 
+def plate_max_crops() -> int:
+    """Maximum number of vehicle crops inspected for plates (`VISION_PLATE_MAX_CROPS`)."""
+    try:
+        return int(os.getenv("VISION_PLATE_MAX_CROPS", "2"))
+    except ValueError:
+        return 2
+
+
+def plate_ocr_fallback_enabled() -> bool:
+    """`VISION_PLATE_OCR_FALLBACK`: whether whole-bumper OCR runs if ANPR finds no box."""
+    val = os.getenv("VISION_PLATE_OCR_FALLBACK", "1").strip().lower()
+    return val not in {"0", "false", "no", "off"}
+
+
 def vehicle_threshold() -> float:
     """Minimum confidence for a vehicle box (`VISION_VEHICLE_CONFIDENCE`)."""
     try:
@@ -864,6 +878,26 @@ def format_vehicle_plate(text: str) -> str:
     return normalize_plate(text)
 
 
+def is_valid_indian_plate(text: str | None) -> bool:
+    """An Indian plate shape test: at least 4 digits, at least 2 letters,
+    at most 4 tokens, and no CJK characters.
+    """
+    if not text:
+        return False
+    if any("\u4e00" <= c <= "\u9fff" for c in text):
+        return False
+    digits = sum(1 for c in text if c.isdigit())
+    if digits < 4:
+        return False
+    letters = sum(1 for c in text if c.isalpha() and c.isascii())
+    if letters < 2:
+        return False
+    tokens = text.split()
+    if len(tokens) > 4:
+        return False
+    return True
+
+
 def map_box_to_full_frame(
     box_in_crop: list[int] | tuple[int, int, int, int],
     crop_offset: tuple[int, int],
@@ -935,6 +969,8 @@ def decode_image(payload: bytes | str) -> "Any":
                 raise ImageRejected(
                     f"Image is larger than the {MAX_INPUT_PIXELS // 1_000_000} MP limit"
                 )
+            if getattr(probe, "format", "") == "JPEG":
+                probe.draft("RGB", (MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))
             probe.load()
             orig = probe.copy()
             image = probe.copy()
@@ -1409,6 +1445,24 @@ def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: 
         report.detail = f"{type(exc).__name__}: {exc}"
         return
 
+    call_count = getattr(image, "_plate_call_count", 0) + 1
+    image._plate_call_count = call_count
+    print(f"Plate stage call count for frame: {call_count}", flush=True)
+
+    cached_candidates = getattr(image, "_plate_candidates_cache", None)
+    cached_report = getattr(image, "_plate_report_cache", None)
+    if cached_candidates is not None and cached_report is not None:
+        result.plate_candidates.extend(cached_candidates)
+        report.ran = cached_report.ran
+        report.found = cached_report.found
+        report.best_confidence = cached_report.best_confidence
+        report.model = cached_report.model
+        report.skipped = cached_report.skipped
+        report.detail = cached_report.detail
+        report.ms = cached_report.ms
+        report.result = cached_report.result
+        return
+
     report.ran = True
     names = getattr(model, "names", {}) or {}
 
@@ -1422,9 +1476,19 @@ def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: 
 
     candidates: list[PlateCandidate] = []
 
-    # If vehicle stage produced vehicle boxes, run plate detector on each vehicle crop
+    # Filter vehicle crops: skip crops smaller than 200x200 px, sort descending by area
+    valid_vehicle_boxes = []
     if result.vehicle_boxes:
         for v_bbox in result.vehicle_boxes:
+            w = v_bbox[2] - v_bbox[0]
+            h = v_bbox[3] - v_bbox[1]
+            if w >= 200 and h >= 200:
+                valid_vehicle_boxes.append((w * h, v_bbox))
+        valid_vehicle_boxes.sort(key=lambda item: item[0], reverse=True)
+
+    # If vehicle stage produced valid vehicle boxes, run plate detector on top N crops
+    if valid_vehicle_boxes:
+        for crop_idx, (_, v_bbox) in enumerate(valid_vehicle_boxes[:plate_max_crops()]):
             w = v_bbox[2] - v_bbox[0]
             h = v_bbox[3] - v_bbox[1]
             margin_x = int(w * 0.05)
@@ -1448,8 +1512,15 @@ def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: 
             cw = getattr(v_crop, "width", orig_cx2 - orig_cx1)
             ch = getattr(v_crop, "height", orig_cy2 - orig_cy1)
 
+            # Adaptive plate imgsz: keep 960 for the largest crop if > 1500 px (retains busimage2 plate),
+            # otherwise min(640, max(320, max(cw, ch)))
+            if crop_idx == 0 and max(cw, ch) > 1500:
+                plate_imgsz = 960
+            else:
+                plate_imgsz = min(640, max(320, max(cw, ch)))
+
             try:
-                p_rows = _predict_rows(model, v_crop, size, min(gate, 0.05))
+                p_rows = _predict_rows(model, v_crop, plate_imgsz, min(gate, 0.05))
             except Exception as exc:
                 logger.debug("Plate prediction error on crop: %s", exc)
                 p_rows = []
@@ -1487,25 +1558,34 @@ def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: 
                 candidates.append(cand)
 
             # If no plate candidate in this vehicle crop read a valid registration number, check for painted / stenciled numbers
-            if not any(c.bus_number for c in crop_candidates) and hasattr(v_crop, "convert"):
+            if (
+                plate_ocr_fallback_enabled()
+                and min(cw, ch) >= 500
+                and not any(c.bus_number for c in crop_candidates)
+                and hasattr(v_crop, "convert")
+            ):
                 try:
+                    half_crop = v_crop.crop((0, ch // 2, cw, ch))
+                    half_w, half_h = half_crop.size
+                    scale_ocr = 1.0
+                    if half_w > 1000:
+                        scale_ocr = 1000.0 / half_w
+                        half_crop = half_crop.resize(
+                            (1000, max(1, int(round(half_h * scale_ocr)))),
+                            _require_pil().BILINEAR,
+                        )
                     engine = _ocr_rapidocr()
                     import numpy as np
-                    arr = np.array(v_crop.convert("RGB"))
+                    arr = np.array(half_crop.convert("RGB"))
                     res, _ = engine(arr)
                     if res:
                         for box, txt, score in res:
                             fmt = format_vehicle_plate(txt)
-                            clean = fmt.replace(" ", "")
-                            if (
-                                len(clean) >= 6
-                                and any(clean.startswith(c) for c in ("TN", "KL", "KA", "PY", "AP", "DL", "MH"))
-                                and any(c.isdigit() for c in clean)
-                            ):
-                                bx1 = int(round(min(pt[0] for pt in box)))
-                                by1 = int(round(min(pt[1] for pt in box)))
-                                bx2 = int(round(max(pt[0] for pt in box)))
-                                by2 = int(round(max(pt[1] for pt in box)))
+                            if is_valid_indian_plate(fmt):
+                                bx1 = int(round(min(pt[0] for pt in box) / scale_ocr))
+                                by1 = int(round(min(pt[1] for pt in box) / scale_ocr)) + (ch // 2)
+                                bx2 = int(round(max(pt[0] for pt in box) / scale_ocr))
+                                by2 = int(round(max(pt[1] for pt in box) / scale_ocr)) + (ch // 2)
                                 crop_bbox = [bx1, by1, bx2, by2]
                                 full_bbox = map_box_to_full_frame(
                                     crop_bbox, (orig_cx1, orig_cy1), (scale_x, scale_y)
@@ -1561,6 +1641,11 @@ def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: 
             + ", ".join(str(name) for name in sorted(names.values()))
             + f" · gate {gate:.2f}"
         )
+    try:
+        image._plate_candidates_cache = list(candidates)
+        image._plate_report_cache = report
+    except Exception:
+        pass
 
 
 def _run_vehicle_stage(image, result: DetectionResult, *, threshold: float, size: int) -> None:

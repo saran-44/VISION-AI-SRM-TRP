@@ -616,3 +616,47 @@ def test_warm_models_reports_warm_status_and_latency(monkeypatch):
     status = vision.vision_status()
     assert status["warm"] is True
     assert status["warmup_ms"] >= 0
+
+
+def test_validate_fallback_text_rejects_campus_banner():
+    """A1: Fallback text must reject non-plate banners like '一 CHIRAPPALLCAMPUS'."""
+    banner = "一 CHIRAPPALLCAMPUS"
+    assert not vision.is_valid_indian_plate(banner)
+    assert not vision.is_valid_indian_plate("MEDICAL&ALLIEDENGINEERIN")
+    assert not vision.is_valid_indian_plate("MANAGEMENT PHYSIOTE")
+    assert not vision.is_valid_indian_plate("STOP")
+    # Valid Indian plates must pass
+    assert vision.is_valid_indian_plate("TN 48 BK 2129")
+    assert vision.is_valid_indian_plate("TN.48.BF.1480")
+    assert vision.is_valid_indian_plate("TN48BK2129")
+
+
+def test_plate_stage_cached_per_frame(monkeypatch):
+    """A2: If plate stage is called multiple times on one frame, it runs once and caches."""
+    from pathlib import Path
+    from PIL import Image
+
+    calls = 0
+
+    def fake_predict(model, crop, size, conf):
+        nonlocal calls
+        calls += 1
+        return []
+
+    monkeypatch.setattr(vision, "_predict_rows", fake_predict)
+    monkeypatch.setattr(vision, "load_stage_model", lambda s: object())
+    monkeypatch.setattr(vision, "plate_model_path", lambda: Path("fake.pt"))
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+
+    img = Image.new("RGB", (640, 480))
+    res1 = vision.DetectionResult(vehicle_boxes=[[10, 10, 250, 250]])
+    vision._run_plate_stage(img, res1, threshold=0.25, size=640)
+    assert getattr(img, "_plate_call_count", 0) == 1
+    assert calls == 1
+
+    # Second run on the same image frame
+    res2 = vision.DetectionResult(vehicle_boxes=[[10, 10, 250, 250]])
+    vision._run_plate_stage(img, res2, threshold=0.25, size=640)
+    assert getattr(img, "_plate_call_count", 0) == 2
+    # Inference did not run again
+    assert calls == 1
