@@ -43,6 +43,8 @@ a searchable history of drivers, buses and changes.
 - **Drivers and buses** — searchable records; the transport office can add,
   edit and delete them, and every change is written to the audit log.
 - **Audit log** — who changed what, when, from which IP address.
+- **Gate-PC mode** — an offline SQLite local-server bundle can run on a
+  Windows gate PC without Firebase or Supabase.
 - **Camera tiles** — HLS or MJPEG streams when a URL is configured; otherwise the
   tile is explicitly labelled **“Demo footage”**.
 
@@ -60,6 +62,7 @@ browser ──HTTP(S)──▶ Flask API (backend/)  ──▶ Supabase PostgreS
 | Data | Supabase PostgreSQL | Private `transport_portal` schema; apply the SQL migration before startup |
 
 Detailed module-by-module notes live in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Review the detector licensing constraints in [`docs/LICENSING_NOTE.md`](docs/LICENSING_NOTE.md).
 
 ## Roles
 

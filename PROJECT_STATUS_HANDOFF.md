@@ -20,7 +20,7 @@ certificates here.
 - **Authentication:** Firebase Authentication.
 - **Full-vision cloud target:** One InstaBox Linux sandbox running
   `deploy/Dockerfile`.
-- **Gate fallback:** `dist/VisionAI-GateAgent/VisionAI-GateAgent.exe` runs the
+- **Gate fallback:** `dist/VisionAI/VisionAI.exe` runs the
   camera, OCR, ANPR fallback, vehicle classification, duplicate suppression,
   local logs, and device event upload.
 - **Firebase Hosting:** Redirects to the web/API service; it is not the AI
@@ -63,7 +63,7 @@ certificates here.
 - `desktop/detector_agent.py`
 - `requirements-desktop.txt`
 - `desktop/build_windows.ps1`
-- `dist/VisionAI-GateAgent/VisionAI-GateAgent.exe`
+- `dist/VisionAI/VisionAI.exe`
 - `deploy/Dockerfile`
 - `deploy/instabox/docker-compose.yml`
 - `deploy/instabox/.env.instabox.example`
