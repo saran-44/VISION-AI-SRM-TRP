@@ -9,7 +9,7 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const FRONTEND = join(ROOT, 'frontend');
@@ -149,7 +149,7 @@ for (const page of pages) {
 // unreadable and one whose stage was switched off must not read the same on
 // screen: that collapse is what made a silently disabled stage look like a bus
 // that was never there.
-const stageModule = await import(join(FRONTEND, 'js', 'detection-stages.js'));
+const stageModule = await import(pathToFileURL(join(FRONTEND, 'js', 'detection-stages.js')).href);
 
 function expect(condition, message) {
   if (!condition) problems.push(message);

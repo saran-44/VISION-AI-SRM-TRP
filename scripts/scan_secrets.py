@@ -52,7 +52,7 @@ def main() -> int:
             relative = path.relative_to(ROOT)
         except ValueError:
             continue
-        if any(str(relative).startswith(prefix) for prefix in IGNORED_PATHS):
+        if any(relative.as_posix().startswith(prefix) for prefix in IGNORED_PATHS):
             continue
         if relative.name == ".env.example":
             continue
