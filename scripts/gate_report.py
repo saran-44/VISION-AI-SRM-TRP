@@ -13,6 +13,7 @@ errors and the scans that produced no number. Paste it as one block.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -35,7 +36,11 @@ def main(argv: list[str] | None = None) -> int:
         try:
             from dotenv import load_dotenv
 
-            load_dotenv(Path(args.env_file).expanduser(), override=True)
+            config_path = Path(args.env_file).expanduser()
+            load_dotenv(config_path, override=True)
+            # The launcher always sets this; without it the preflight's
+            # "gate config" check reports SKIP and a green report means less.
+            os.environ["VISION_GATE_CONFIG"] = str(config_path)
         except ImportError:
             print("python-dotenv is required for --env-file", file=sys.stderr)
             return 2

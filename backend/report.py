@@ -65,6 +65,30 @@ def _configuration() -> list[str]:
     return lines or ["  (nothing set: the defaults in the code are in use)"]
 
 
+def _portal(port: int) -> list[str]:
+    """Whether the portal is up right now — an empty error log means nothing
+    if the process has not been running since the last change."""
+    import socket
+
+    if not port:
+        return ["  port not configured"]
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.3):
+            return [f"  running on http://127.0.0.1:{port}"]
+    except OSError:
+        return [
+            f"  not running (nothing answers on 127.0.0.1:{port}) — "
+            "scans are only recorded while it runs"
+        ]
+
+
+def _port() -> int:
+    try:
+        return int(os.getenv("PORT", "8080"))
+    except ValueError:
+        return 8080
+
+
 def _config_file() -> Path:
     return diagnostics.data_root() / "gate.env"
 
@@ -210,6 +234,7 @@ def build_report(*, deep: bool = False, errors: int = 20, scans: int = 15, log_l
         ("1. Configuration (environment)", _configuration() + _config_file_lines()),
         ("2. Vision stack", _vision()),
         ("3. Camera", _camera()),
+        ("3a. Portal", _portal(_port())),
         ("4. Model files", _models()),
         ("5. Preflight", _preflight(deep)),
         ("6. Recent errors", _errors(errors)),

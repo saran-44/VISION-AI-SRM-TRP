@@ -72,6 +72,17 @@ def logs_dir() -> Path:
     return data_root() / "logs"
 
 
+def failed_frames_dir() -> Path:
+    """Where a scan that produced no number leaves its frame.
+
+    Resolved here rather than in the two callers, because they disagreed: on
+    Windows the portal wrote to PROGRAMDATA/VisionAI/failed-frames while the
+    preflight reported (and checked) the home folder, so the "data folder" line
+    in a report described a directory nothing wrote to.
+    """
+    return data_root() / "failed-frames"
+
+
 def error_log_path() -> Path:
     return logs_dir() / "errors.log"
 

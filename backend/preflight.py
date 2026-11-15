@@ -465,7 +465,12 @@ def run(deep: bool = False, port: int = 8080, data_dir: Path | None = None, conf
         # checks so a laptop install gets useful output.
         pass
 
-    data_root = data_dir or Path(os.getenv("VISION_DATA_DIR", Path.home() / "VisionAI"))
+    # The same resolver the portal uses, so this check describes the directory
+    # the portal actually writes to. On Windows that is %PROGRAMDATA%\VisionAI,
+    # not the home folder.
+    from . import diagnostics
+
+    data_root = data_dir or diagnostics.data_root()
     check_data_dir(report, data_root)
     check_disk(report, data_root)
 
