@@ -282,6 +282,12 @@ class TableStore:
         with self.guard(), self.engine.connect() as conn:
             return conn.execute(stmt).scalar_one()
 
+    def distinct(self, field):
+        column = getattr(self.table.c, field)
+        stmt = select(column).distinct().where(column.is_not(None))
+        with self.guard(), self.engine.connect() as conn:
+            return list(conn.execute(stmt).scalars())
+
     def insert_one(self, document):
         data = dict(document)
         data.setdefault("_id", new_id())
