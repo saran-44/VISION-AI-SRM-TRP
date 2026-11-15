@@ -268,6 +268,11 @@ class DetectionResult:
             "boxes_total": self.boxes_total,
             "boxes_above_threshold": self.boxes_above_threshold,
             "boxes_other_class": self.boxes_other_class,
+            "boxes_total_by_stage": {
+                stage.name: stage.found
+                for stage in self.stages
+                if stage.name in {"sticker", "plate", "vehicle"}
+            },
             "sticker_class": self.sticker_class,
             "best_confidence": round(float(self.best_confidence), 4),
             "threshold": round(float(self.threshold), 4),

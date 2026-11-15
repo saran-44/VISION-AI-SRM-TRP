@@ -834,6 +834,11 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             "cascade": result.cascade,
             "vehicle": result.vehicle,
             "stages": [stage.to_dict() for stage in result.stages],
+            "frame": {
+                "downscaled": False,
+                "original_width": result.frame_width,
+                "original_height": result.frame_height,
+            },
         }
         # Measured frame facts travel with every answer, and a scan that read
         # nothing also leaves its frame on disk for `scripts/frame_report.py`.
