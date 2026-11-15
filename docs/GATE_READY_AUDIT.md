@@ -71,6 +71,7 @@ launcher.py --setup (email, password, camera, port)
   → Created data/gate.db
 
 scripts/preflight.py --env-file gate.env   (16 checks)
+VisionAI.exe --report                       (one copyable block: config, errors, scans)
   PASS configuration / environment / data folder / disk / database /
        database write / frontend / models / port
   FAIL ocr        (no torch in this sandbox — the bundle ships it)

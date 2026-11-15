@@ -357,6 +357,14 @@ the ring and lose the frames worth looking at). `VISION_QUALITY_GATE=off`
 restores the old behaviour — every frame through the cascade — for a host whose
 camera genuinely sees a dark subject (IR illuminators, night vision).
 
+**When a scan fails.** Every scan that produces no number is also written to
+`<data dir>/logs/errors.log` (the `frame` facts and the advice), and every
+unhandled exception the portal hits is written there with its traceback and a
+`ref` the response quotes back. `VisionAI.exe --report` (or
+`python scripts/gate_report.py`) prints that file next to the configuration,
+the camera answer and the preflight, with credentials masked — one block to
+paste. See `docs/DEPLOY_GATE_PC.md` §7.
+
 **Seeing the settings.** `GET /api/detection/status` carries a `quality` block
 (`quality_gate`, `min_brightness`, `min_sharpness`, `sticker_upscale`,
 `plate_upscale`, `tiles`, `image_size`, `confidence`, `save_failures`), and

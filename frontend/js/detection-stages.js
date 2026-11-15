@@ -105,6 +105,20 @@ const FAILURE_TEXT = {
   frame_unusable: 'The frame was refused before scanning: too dark or too soft to contain a sticker.',
 };
 
+/**
+ * The message for a response that failed outright.
+ *
+ * A 500 from the portal carries a `ref` matching the block it wrote to
+ * logs/errors.log, so the operator can quote one short code instead of
+ * describing the screen. `VisionAI.exe --report` prints those blocks.
+ */
+export function responseError(payload = {}, status = 0) {
+  const base = payload?.error || `Scan failed (${status}).`;
+  if (payload?.ref) return `${base} — reference ${payload.ref} (see VisionAI.exe --report)`;
+  if (payload?.detail) return `${base} — ${payload.detail}`;
+  return base;
+}
+
 export function scanFailureText(payload = {}) {
   return FAILURE_TEXT[payload.reason] || 'No plate detected in the frame.';
 }
