@@ -72,6 +72,11 @@ def logs_dir() -> Path:
     return data_root() / "logs"
 
 
+def failed_crops_dir() -> Path:
+    """The exact pixels the OCR was given, when it read nothing."""
+    return data_root() / "failed-crops"
+
+
 def failed_frames_dir() -> Path:
     """Where a scan that produced no number leaves its frame.
 
@@ -196,11 +201,42 @@ def log_scan(payload: dict[str, Any], *, source: str = "") -> str:
     ]
     if stages:
         pieces.append("stages   : " + ", ".join(stages))
+    crops = [
+        str(item.get("crop"))
+        for item in (payload.get("detection") or {}).get("candidates") or []
+        if item.get("crop")
+    ]
+    if crops:
+        pieces.append("crop     : " + ", ".join(crops[:3]))
     if payload.get("advice"):
         pieces.append(f"advice   : {payload['advice']}")
     if source:
         pieces.append(f"source   : {source}")
     return log_block("SCAN", lines=[f"reason   : {reason}", *pieces])
+
+
+def save_ocr_crop(image, keep: int = 20) -> str:
+    """Write the crop the OCR saw, so the pixels can be looked at.
+
+    "The crop was about 25 px wide" is a measurement; this file is the
+    evidence. Returns the path, or "" when saving is off or impossible.
+    """
+    if not enabled():
+        return ""
+    try:
+        directory = failed_crops_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / f"crop-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}.jpg"
+        image.save(target, format="JPEG", quality=95)
+        # Keep the newest `keep`, so a bad night cannot fill the disk.
+        for stale in sorted(directory.glob("crop-*.jpg"))[:-keep] if keep > 0 else []:
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+        return str(target)
+    except Exception:  # noqa: BLE001 - evidence collection must never fail a scan
+        return ""
 
 
 # ----------------------------------------------------------------- reading

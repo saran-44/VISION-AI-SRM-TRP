@@ -21,12 +21,15 @@ import base64
 import binascii
 import io
 import logging
+import math
 import os
 import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
+
+from . import diagnostics
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,13 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_PATH = ROOT / "best.pt"
 
 # Class ids as exported by the trained model.
+# A crop narrower than this has too few pixels for any OCR engine to read a
+# bus number out of; it is a property of the pixels, not of the engine.
+OCR_READABLE_CROP_PX = 120
+# Laplacian variance below this is visibly soft (a settled 720p capture of a
+# subject in focus reads 150-200).
+SOFT_SHARPNESS = 60
+
 CLASS_STICKER = 1
 CLASS_RED_CIRCLE = 0
 
@@ -155,6 +165,8 @@ class PlateCandidate:
     bbox: list[int] = field(default_factory=list)
     class_id: int = CLASS_STICKER
     class_name: str = "sticker"
+    # Where the OCR's own view of this box was saved, when it read nothing.
+    crop_path: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -164,6 +176,9 @@ class PlateCandidate:
             "bbox": list(self.bbox),
             "class_id": self.class_id,
             "class_name": self.class_name,
+            # Empty unless the OCR read nothing: then it is the file holding
+            # the exact pixels it was given.
+            "crop": self.crop_path,
         }
 
 
@@ -1150,6 +1165,10 @@ def _ocr_rows(
                 raw = ""
             candidate.raw_text = raw.strip()
             candidate.bus_number = normalize_plate(candidate.raw_text)
+            if not candidate.raw_text:
+                # The pixels the OCR was handed, kept for the report: a measured
+                # width says the crop is small, the file shows what it is.
+                candidate.crop_path = diagnostics.save_ocr_crop(crop)
         candidates.append(candidate)
     return candidates
 
@@ -1498,22 +1517,37 @@ def _explain(result: DetectionResult) -> DetectionResult:
             default=0,
         )
         result.reason = "unreadable"
+        # The advice is arithmetic, not a guess: a crop needs about this many
+        # pixels of real detail before any engine can read digits out of it.
+        hints = [f"the OCR needs about {OCR_READABLE_CROP_PX} px of real detail"]
+        if largest and largest < OCR_READABLE_CROP_PX:
+            hints.insert(
+                0, f"get about {math.ceil(OCR_READABLE_CROP_PX / largest)}× closer, or use a "
+                "higher-resolution camera"
+            )
+        if result.frame_sharpness is not None and result.frame_sharpness < SOFT_SHARPNESS:
+            hints.append(
+                f"the frame is soft as well (sharpness {result.frame_sharpness:.0f}): focus and "
+                "stillness matter as much as distance"
+            )
         factor = sticker_upscale()
-        if factor <= 1:
+        if factor > 1:
             # Raising VISION_IMAGE_SIZE does nothing here: the crop is taken from
             # the frame's own pixels, not from the letterboxed inference image.
-            hint = (
-                "that is small for the OCR, and raising VISION_IMAGE_SIZE will not change it — "
-                "set VISION_STICKER_UPSCALE=3 to enlarge the crop before reading, or scan from closer"
+            hints.append(
+                f"enlarging the crop ({factor}×, VISION_STICKER_UPSCALE) cannot add detail that "
+                "was never captured"
             )
         else:
-            hint = (
-                f"still small even at VISION_STICKER_UPSCALE={factor}: scan from closer, or install a "
-                "stronger OCR engine (see docs/DETECTION.md)"
+            hints.append(
+                "VISION_STICKER_UPSCALE=3 enlarges the crop first, but cannot invent detail"
             )
+        saved = next((item.crop_path for item in result.candidates if item.crop_path), "")
+        if saved:
+            hints.append(f"the crop the OCR saw is saved at {saved}")
         result.advice = (
             f"Sticker detected at {result.candidates[0].confidence:.2f} but the OCR read no text. "
-            f"The crop was about {largest} px wide — {hint}."
+            f"The crop was about {largest} px wide; " + "; ".join(hints) + "."
         )
     else:
         result.reason = "ok"

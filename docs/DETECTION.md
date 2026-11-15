@@ -379,6 +379,28 @@ That is the fastest way to answer "did my edit to `gate.env` reach the process
 that is serving?" — a value that is not in this line is not in effect, and the
 portal needs restarting.
 
+**When the box is found and the number is not.** The advice is arithmetic now,
+because "install a stronger OCR engine" was wrong: on the gate PC
+`auto -> rapidocr` is installed and usable, and it still could not read a
+25 px crop. A crop needs about **120 px of real detail** (that is
+`OCR_READABLE_CROP_PX`) before any engine can read digits out of it, so the
+advice states the crop, the factor, and the state of the frame:
+
+```
+Sticker detected at 0.72 but the OCR read no text. The crop was about 25 px
+wide; get about 5× closer, or use a higher-resolution camera; the OCR needs
+about 120 px of real detail; the frame is soft as well (sharpness 27): focus
+and stillness matter as much as distance; enlarging the crop (3×,
+VISION_STICKER_UPSCALE) cannot add detail that was never captured.
+```
+
+Upscaling cannot invent detail — `VISION_STICKER_UPSCALE` buys pixels, not
+information — which is why the same advice keeps naming distance and optics.
+And the crop the OCR was handed is **saved** to `<data>/failed-crops/`
+(newest 20, JPEG, `VISION_SAVE_FAILURES=false` disables it). The scan record
+and the report both carry its path: a measured width is a claim, the file is
+the evidence.
+
 **Small crops and the OCR.** The plate stage has always enlarged a small crop
 `VISION_PLATE_UPSCALE` (3) times first. The sticker stage did not, deliberately,
 because its numbers were already trusted. The cost of that choice is a sticker

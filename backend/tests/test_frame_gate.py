@@ -27,6 +27,14 @@ PIL = pytest.importorskip("PIL.Image")
 pytest.importorskip("numpy")
 
 
+@pytest.fixture(autouse=True)
+def isolated_data_dir(monkeypatch, tmp_path: Path):
+    """Crops and error blocks are written to a temp data dir, never the home one."""
+    monkeypatch.setenv("VISION_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("VISION_ERROR_LOG", raising=False)
+    return tmp_path
+
+
 def _dark_frame(width: int = 320, height: int = 240):
     """What the gate laptop actually sent at 23:30: a flat, black frame."""
     return PIL.new("RGB", (width, height), (5, 5, 5))
@@ -383,3 +391,116 @@ def test_the_deep_detector_check_is_not_refused_by_its_own_blank_frame(monkeypat
     import os
 
     assert os.environ["VISION_QUALITY_GATE"] == "refuse"  # put back
+
+
+# ------------------------------------------------- the unreadable advice, measured
+def _unreadable(sharpness: float = 26.8, box: tuple[int, int, int, int] = (100, 100, 125, 140)):
+    from backend.vision import PlateCandidate, _explain
+
+    width = box[2] - box[0]
+    result = DetectionResult(
+        frame_width=1280,
+        frame_height=720,
+        frame_sharpness=sharpness,
+        tiles=2,
+        boxes_total=1,
+        best_confidence=0.72,
+        threshold=0.25,
+    )
+    result.candidates = [
+        PlateCandidate(confidence=0.72, bbox=list(box), raw_text="", class_name="sticker")
+    ]
+    _explain(result)
+    assert width  # the box the advice is describing
+    return result
+
+
+def test_the_unreadable_advice_says_how_much_closer_to_get(monkeypatch) -> None:
+    monkeypatch.delenv("VISION_STICKER_UPSCALE", raising=False)
+    result = _unreadable()
+    assert result.reason == "unreadable"
+    assert "The crop was about 25 px wide" in result.advice
+    assert "get about 5× closer" in result.advice  # 120 / 25
+    assert "needs about 120 px" in result.advice
+    assert "soft as well (sharpness 27)" in result.advice
+
+
+def test_the_unreadable_advice_stops_blaming_the_ocr_engine(monkeypatch) -> None:
+    monkeypatch.setenv("VISION_STICKER_UPSCALE", "3")
+    result = _unreadable(sharpness=180.0)
+    assert "stronger OCR engine" not in result.advice
+    assert "cannot add detail" in result.advice
+    assert "3×" in result.advice
+    # A sharp frame does not get a focus lecture.
+    assert "soft as well" not in result.advice
+
+
+def test_a_large_crop_is_not_told_to_get_closer(monkeypatch) -> None:
+    monkeypatch.delenv("VISION_STICKER_UPSCALE", raising=False)
+    result = _unreadable(sharpness=180.0, box=(100, 100, 360, 200))  # 260 px wide
+    assert "closer" not in result.advice
+    assert "The crop was about 260 px wide" in result.advice
+
+
+def test_the_crop_the_ocr_saw_is_kept(monkeypatch) -> None:
+    """A measured width is a claim; the saved JPEG is the evidence."""
+    import backend.vision as vision
+
+    monkeypatch.setenv("VISION_STICKER_UPSCALE", "3")
+    monkeypatch.setattr(vision, "read_text", lambda crop, engine_name=None: "")
+
+    image = PIL.new("RGB", (1280, 720), (120, 120, 120))
+    candidates = vision._ocr_rows(
+        image,
+        [(0.72, 0, [100, 100, 125, 140])],
+        {0: "sticker"},
+        threshold=0.25,
+        limit=3,
+        class_filter=0,
+        upscale_factor=3,
+    )
+
+    saved = candidates[0].crop_path
+    assert saved and Path(saved).exists()
+    assert Path(saved).parent.name == "failed-crops"
+    assert candidates[0].to_dict()["crop"] == saved
+    # It is the upscaled crop, i.e. what the OCR was handed.
+    assert PIL.open(saved).size == (75, 120)
+
+
+def test_a_read_number_keeps_no_crop(monkeypatch) -> None:
+    import backend.vision as vision
+
+    monkeypatch.setattr(vision, "read_text", lambda crop, engine_name=None: "57")
+    image = PIL.new("RGB", (1280, 720), (120, 120, 120))
+    candidates = vision._ocr_rows(
+        image, [(0.72, 0, [100, 100, 125, 140])], {0: "sticker"},
+        threshold=0.25, limit=3, class_filter=0, upscale_factor=3,
+    )
+    assert candidates[0].crop_path == ""
+    assert not (Path(vision.diagnostics.failed_crops_dir())).exists()
+
+
+def test_only_the_newest_crops_are_kept(monkeypatch) -> None:
+    from backend import diagnostics
+
+    image = PIL.new("RGB", (20, 20), (10, 10, 10))
+    for _ in range(5):
+        assert diagnostics.save_ocr_crop(image, keep=3)
+    kept = list(diagnostics.failed_crops_dir().glob("crop-*.jpg"))
+    assert len(kept) == 3
+
+
+def test_the_scan_record_names_the_saved_crop() -> None:
+    from backend import diagnostics
+
+    image = PIL.new("RGB", (20, 20), (10, 10, 10))
+    saved = diagnostics.save_ocr_crop(image)
+    diagnostics.log_scan(
+        {
+            "reason": "unreadable",
+            "detection": {"candidates": [{"crop": saved}]},
+            "frame": {"width": 1280, "height": 720},
+        }
+    )
+    assert f"crop     : {saved}" in diagnostics.read_errors(kinds=("SCAN",))
