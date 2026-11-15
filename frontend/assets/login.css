@@ -21,6 +21,11 @@ body.login-page {
     color: var(--text-main);
 }
 
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+    outline: 3px solid var(--primary-color, #2563eb);
+    outline-offset: 2px;
+}
+
 body.login-page.dark-theme {
     background-image:
         radial-gradient(820px 560px at 10% -6%, rgba(224, 184, 74, 0.14), transparent 62%),
@@ -167,7 +172,7 @@ body.dark-theme .login-container h1 {
     width: 100%;
     background: transparent;
     border: none;
-    outline: none;
+    outline: 2px solid transparent;
     padding: 0.2rem 2rem 0.2rem 0;
     font-size: 0.95rem;
     color: var(--text-main);

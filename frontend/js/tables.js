@@ -4,11 +4,13 @@ import {
 } from './ui.js';
 
 export function showDetailsModal(title, entries = [], rawText = '') {
+  const trigger = document.activeElement;
+  const titleId = `modal-title-${Date.now()}`;
   const overlay = el('div', {
     class: 'modal-overlay active',
     role: 'dialog',
     'aria-modal': 'true',
-    'aria-label': title,
+    'aria-labelledby': titleId,
     onclick: (event) => { if (event.target === overlay) overlay.remove(); },
   });
   const close = actionButton('Close details', 'bx-x', () => overlay.remove(), 'modal-close');
@@ -18,7 +20,7 @@ export function showDetailsModal(title, entries = [], rawText = '') {
   ])));
   const children = [
     el('div', { class: 'modal-header' }, [
-      el('h2', { class: 'modal-title' }, [el('span', { text: title })]),
+      el('h2', { class: 'modal-title', id: titleId }, [el('span', { text: title })]),
       close,
     ]),
     list,
@@ -32,11 +34,31 @@ export function showDetailsModal(title, entries = [], rawText = '') {
   document.body.append(overlay);
   const onKey = (event) => {
     if (event.key === 'Escape') {
-      overlay.remove();
-      document.removeEventListener('keydown', onKey);
+      closeModal();
+      return;
+    }
+    if (event.key === 'Tab') {
+      const focusable = [...overlay.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     }
   };
+  const closeModal = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+    if (trigger && typeof trigger.focus === 'function') trigger.focus();
+  };
+  close.onclick = closeModal;
   document.addEventListener('keydown', onKey);
+  close.focus();
 }
 
 export function renderEventsTable(tbody, events, flagLabels = {}) {
