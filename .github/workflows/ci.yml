@@ -75,7 +75,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements-vision.txt \
-            --extra-index-url https://download.pytorch.org/whl/cpu
+            --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple
+          pip install --no-deps ultralytics==8.4.20
+          python scripts/check_env.py
 
       - name: The checkpoint must load and report its classes
         run: |

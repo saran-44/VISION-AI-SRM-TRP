@@ -336,6 +336,18 @@ def image_size() -> int:
     return max(320, min(1536, value))
 
 
+def sticker_image_size() -> int:
+    """Inference size for the sticker model, independent of ANPR stages."""
+    raw = os.getenv("VISION_STICKER_IMGSZ", "").strip()
+    if not raw:
+        return image_size()
+    try:
+        value = int(raw)
+    except ValueError:
+        return image_size()
+    return max(320, min(1536, value))
+
+
 def sticker_class_id(model=None) -> int:
     """Which class id counts as "the sticker".
 

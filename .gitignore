@@ -76,6 +76,9 @@ runs/
 !frontend/assets/logo-emblem.png
 !frontend/assets/logo-wordmark.png
 !frontend/assets/favicon.png
+!backend/tests/fixtures/
+!backend/tests/fixtures/detection/
+!backend/tests/fixtures/detection/**
 
 # --- Supabase CLI -----------------------------------------------------------
 # `supabase init` / `supabase link` write local state (and linked project refs)

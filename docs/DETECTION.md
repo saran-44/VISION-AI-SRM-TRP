@@ -539,6 +539,7 @@ pytesseract>=0.3.10
 | `VISION_MODEL_PATH` | `best.pt` | Path to the Ultralytics checkpoint. |
 | `VISION_CONFIDENCE` | `0.25` | Minimum confidence for a sticker to reach the OCR (the model is probed from 0.05). |
 | `VISION_IMAGE_SIZE` | `960` | Inference letterbox size. |
+| `VISION_STICKER_IMGSZ` | empty | Optional sticker-model inference size; empty keeps `VISION_IMAGE_SIZE`. |
 | `VISION_STICKER_CLASS` | `1` | The only class id that is cropped and OCR'd (`1` = sticker in the shipped model; a single-class checkpoint uses class 0 automatically). |
 | `VISION_OCR_ENGINE` | `auto` | `auto`, `rapidocr`, `tesseract`, `easyocr` or `none`. |
 | `VISION_MAX_CROPS` | `8` | Maximum sticker crops OCR'd per frame. |
@@ -556,3 +557,16 @@ pytesseract>=0.3.10
 | `VISION_VEHICLE_CONFIDENCE` | `0.35` | Minimum confidence for a vehicle box. |
 | `VISION_VEHICLE_CLASSES` | `bicycle,motorcycle,car,bus,truck` | Labels counted as a vehicle. |
 | `OCR_CONFIDENCE_THRESHOLD` | `0.75` | Below this an event is flagged `low_ocr_confidence`. |
+
+### Choosing an inference size
+
+Do not change `VISION_IMAGE_SIZE` based on a single frame. Compare the same
+owner-supplied gate frames at several sizes:
+
+```bash
+python scripts/compare_imgsz.py --dir path/to/frames --sizes 640,960,1280,1536
+```
+
+The command prints detections, best confidence, readable plate, and inference
+time for every image and size. The owner must choose the production value from
+real gate frames, balancing readability against CPU latency.

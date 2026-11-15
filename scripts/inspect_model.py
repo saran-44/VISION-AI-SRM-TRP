@@ -34,9 +34,8 @@ def main(argv: list[str]) -> int:
 
     try:
         from ultralytics import YOLO  # type: ignore
-    except ImportError:
-        print("ultralytics is not installed.", file=sys.stderr)
-        print("  python -m pip install ultralytics==8.4.20", file=sys.stderr)
+    except Exception as exc:
+        print(f"the vision stack failed to import: {exc}", file=sys.stderr)
         return 2
 
     print(f"checkpoint : {path}")
