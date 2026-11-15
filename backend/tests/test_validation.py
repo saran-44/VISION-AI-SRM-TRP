@@ -40,6 +40,12 @@ def test_event_rejects_future_timestamp(client, db, users):
     assert response.status_code == 400
 
 
+def test_event_rejects_timestamp_without_timezone_offset(client, db, users):
+    response = post_event(client, {**VALID_EVENT, "timestamp": "2026-11-12T09:00:00"})
+    assert response.status_code == 400
+    assert "+05:30" in response.get_json()["details"][0]["message"]
+
+
 def test_event_rejects_control_characters_in_gate(client, db, users):
     response = post_event(client, {**VALID_EVENT, "gate": "Gate\x00<script>"})
     assert response.status_code == 400

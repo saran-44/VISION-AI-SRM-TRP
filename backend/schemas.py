@@ -190,7 +190,7 @@ class EventCreate(StrictModel):
     @classmethod
     def validate_timestamp(cls, value: DateTime) -> DateTime:
         if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
+            raise ValueError("timestamp must include a timezone offset, e.g. +05:30")
         value = value.astimezone(timezone.utc)
         if value > DateTime.now(timezone.utc) + timedelta(minutes=5):
             raise ValueError("timestamp cannot be more than five minutes in the future")

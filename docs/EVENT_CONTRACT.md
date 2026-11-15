@@ -42,7 +42,7 @@ with no configured keys rejects all ingestion with `503`.
 | `gate` | string | 1–60 chars, free text (e.g. `"Gate 1"`). |
 | `camera_id` | string | 1–60 chars, identifies the camera that produced the read (e.g. `"gate-1-entry"`). |
 | `confidence` | number | `0.0`–`1.0`, the OCR/ANPR confidence of the plate read. |
-| `timestamp` | string | ISO-8601 date-time. Naive values are interpreted as UTC. Timestamps more than 5 minutes in the future are rejected. |
+| `timestamp` | string | ISO-8601 date-time with a timezone offset, e.g. `+05:30` or `Z`. Timestamps more than 5 minutes in the future are rejected. |
 
 `bus_number` must contain at least two normalized characters and at least one
 digit. OCR values such as `hello world`, `A`, and an empty string are rejected;
