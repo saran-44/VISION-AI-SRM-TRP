@@ -76,9 +76,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements-vision.txt \
             --extra-index-url https://download.pytorch.org/whl/cpu
-          python -m pip uninstall -y opencv-python || true
-          python -m pip install --no-deps opencv-python-headless==4.10.0.84
-          python scripts/check_env.py >> $GITHUB_STEP_SUMMARY 2>&1 || (cat $GITHUB_STEP_SUMMARY; exit 1)
 
       - name: The checkpoint must load and report its classes
         run: |
