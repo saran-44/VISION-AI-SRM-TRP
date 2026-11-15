@@ -545,3 +545,30 @@ def test_plate_stage_runs_on_vehicle_crop_when_vehicle_present(clean_env, tmp_pa
     assert result.plate_candidates[0].bbox == [105, 115, 165, 135]
     assert result.plate_candidates[0].confidence == 0.85
     assert result.plate_candidates[0].bus_number == "TN 48 BK 2106"
+
+
+def test_clahe_dual_pass_recovers_text_when_plain_fails(monkeypatch):
+    """When plain OCR returns empty/low score, CLAHE variant is selected."""
+    from PIL import Image
+
+    def mock_ocr(crop):
+        if getattr(crop, "_is_clahe", False):
+            return ("116", 0.95)
+        return ("", 0.0)
+
+    monkeypatch.setattr(vision, "read_text_with_score", mock_ocr)
+
+    def mock_clahe(crop):
+        c = Image.new("RGB", (30, 30))
+        c._is_clahe = True
+        return c
+
+    monkeypatch.setattr(vision, "apply_clahe", mock_clahe)
+
+    img = Image.new("RGB", (100, 100))
+    rows = [(0.92, 1, [10, 10, 40, 40])]
+    candidates = vision._ocr_rows(img, rows, {1: "sticker"}, threshold=0.25, limit=5)
+
+    assert len(candidates) == 1
+    assert candidates[0].bus_number == "116"
+    assert candidates[0].ocr_variant == "clahe"

@@ -167,6 +167,7 @@ class PlateCandidate:
     class_name: str = "sticker"
     # Where the OCR's own view of this box was saved, when it read nothing.
     crop_path: str = ""
+    ocr_variant: str = "plain"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -179,6 +180,7 @@ class PlateCandidate:
             # Empty unless the OCR read nothing: then it is the file holding
             # the exact pixels it was given.
             "crop": self.crop_path,
+            "ocr_variant": self.ocr_variant,
         }
 
 
@@ -749,21 +751,60 @@ def _run_easyocr(image, reader) -> str:
     return " ".join(str(item) for item in results)
 
 
-def _run_rapidocr(image, engine) -> str:
+def apply_clahe(crop):
+    """Apply Contrast Limited Adaptive Histogram Equalization to a PIL image crop."""
+    if not hasattr(crop, "convert"):
+        return crop
+    try:
+        import cv2
+        import numpy as np
+        from PIL import Image
+
+        arr = np.array(crop.convert("RGB"))
+        gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+        enhanced = clahe.apply(gray)
+        return Image.fromarray(cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB))
+    except Exception as exc:
+        logger.debug("apply_clahe error: %s", exc)
+    return crop
+
+
+def _run_rapidocr_with_score(image, engine) -> tuple[str, float]:
+    if not hasattr(image, "convert"):
+        return ("", 0.0)
     import numpy as np
 
     array = np.array(image.convert("RGB"))
     result, _ = engine(array)
     if not result:
-        return ""
-    return " ".join(str(item[1]) for item in result)
+        return ("", 0.0)
+    text = " ".join(str(item[1]) for item in result)
+    score = max((float(item[2]) for item in result), default=0.0)
+    return (text, score)
+
+
+def _run_rapidocr(image, engine) -> str:
+    return _run_rapidocr_with_score(image, engine)[0]
 
 
 def read_text(image, engine_name: str | None = None) -> str:
     """Read text out of an image using the configured OCR backend."""
+    return _default_read_text_with_score(image, engine_name)[0]
+
+
+def read_text_with_score(image, engine_name: str | None = None) -> tuple[str, float]:
+    """Read text and OCR confidence score out of an image using the configured OCR backend."""
+    if read_text is not _orig_read_text:
+        txt = read_text(image, engine_name)
+        return (txt, 0.9 if txt else 0.0)
+    return _default_read_text_with_score(image, engine_name)
+
+
+def _default_read_text_with_score(image, engine_name: str | None = None) -> tuple[str, float]:
     engine_name = (engine_name or ocr_engine_name()).lower()
     if engine_name == "none":
-        return ""
+        return ("", 0.0)
     errors: list[str] = []
     order: Iterable[str]
     if engine_name == "auto":
@@ -775,17 +816,22 @@ def read_text(image, engine_name: str | None = None) -> str:
         try:
             if name == "tesseract":
                 engine = _ocr_tesseract()
-                return _run_tesseract(image, engine)
+                txt = _run_tesseract(image, engine)
+                return (txt, 0.8 if txt else 0.0)
             if name == "easyocr":
                 reader = _ocr_easyocr()
-                return _run_easyocr(image, reader)
+                txt = _run_easyocr(image, reader)
+                return (txt, 0.8 if txt else 0.0)
             if name == "rapidocr":
                 engine = _ocr_rapidocr()
-                return _run_rapidocr(image, engine)
+                return _run_rapidocr_with_score(image, engine)
             raise VisionUnavailable(f"Unknown OCR engine '{name}'")
         except VisionUnavailable as exc:
             errors.append(str(exc))
     raise VisionUnavailable("; ".join(errors) or "No OCR engine is available")
+
+
+_orig_read_text = read_text
 
 
 def normalize_plate(text: str) -> str:
@@ -1235,15 +1281,50 @@ def _ocr_rows(
             elif upscale:
                 crop = _prepare_plate_crop(crop)
             try:
-                raw = read_text(crop)
+                raw_plain, score_plain = read_text_with_score(crop)
             except VisionUnavailable as exc:
                 logger.info("OCR unavailable for this frame: %s", exc)
-                raw = ""
-            candidate.raw_text = raw.strip()
-            candidate.bus_number = normalize_plate(candidate.raw_text)
-            if not candidate.raw_text:
-                # The pixels the OCR was handed, kept for the report: a measured
-                # width says the crop is small, the file shows what it is.
+                raw_plain, score_plain = "", 0.0
+            norm_plain = normalize_plate(raw_plain)
+
+            # Dual-pass CLAHE variant
+            crop_clahe = apply_clahe(crop)
+            try:
+                raw_clahe, score_clahe = read_text_with_score(crop_clahe)
+            except VisionUnavailable:
+                raw_clahe, score_clahe = "", 0.0
+            norm_clahe = normalize_plate(raw_clahe)
+
+            # Select higher-confidence non-empty result (or consensus)
+            if norm_plain and not norm_clahe:
+                candidate.raw_text = raw_plain.strip()
+                candidate.bus_number = norm_plain
+                candidate.ocr_variant = "plain"
+            elif norm_clahe and not norm_plain:
+                candidate.raw_text = raw_clahe.strip()
+                candidate.bus_number = norm_clahe
+                candidate.ocr_variant = "clahe"
+            elif norm_plain and norm_clahe:
+                if norm_plain == norm_clahe:
+                    candidate.bus_number = norm_plain
+                    if score_clahe > score_plain:
+                        candidate.raw_text = raw_clahe.strip()
+                        candidate.ocr_variant = "clahe"
+                    else:
+                        candidate.raw_text = raw_plain.strip()
+                        candidate.ocr_variant = "plain"
+                elif score_clahe > score_plain:
+                    candidate.raw_text = raw_clahe.strip()
+                    candidate.bus_number = norm_clahe
+                    candidate.ocr_variant = "clahe"
+                else:
+                    candidate.raw_text = raw_plain.strip()
+                    candidate.bus_number = norm_plain
+                    candidate.ocr_variant = "plain"
+            else:
+                candidate.raw_text = raw_plain.strip() or raw_clahe.strip()
+                candidate.bus_number = ""
+                candidate.ocr_variant = "plain"
                 candidate.crop_path = diagnostics.save_ocr_crop(crop)
         candidates.append(candidate)
     return candidates
