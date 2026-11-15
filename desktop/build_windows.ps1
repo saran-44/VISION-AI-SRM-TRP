@@ -1,22 +1,17 @@
+# Superseded. This script built a second, older agent called
+# "VisionAI-GateAgent" from desktop/detector_agent.py, with a different config
+# folder (%APPDATA%\VisionAI\GateAgent) and without the gate setup wizard,
+# `--check` or `--report`. Shipped builds are produced by the script below,
+# which is why `/api/detection/scan` on a cloud instance tells operators to run
+# VisionAI.exe and why nothing anywhere should mention GateAgent.
+#
+# Kept only so an old shortcut or a wiki page does not fail with "file not
+# found": it forwards to the supported build.
 $ErrorActionPreference = "Stop"
 
-Set-Location (Split-Path -Parent $PSScriptRoot)
-python -m pip install -r requirements-desktop.txt `
-  --extra-index-url https://download.pytorch.org/whl/cpu
+Write-Host "desktop\build_windows.ps1 is superseded - building VisionAI.exe instead."
+Write-Host "The supported entry point is: desktop\gate\build_gate.ps1"
+Write-Host ""
 
-if (-not (Test-Path "weights\vehicle.pt")) {
-    python scripts\fetch_vehicle_model.py
-}
-
-python -m PyInstaller --noconfirm --clean --onedir --windowed `
-  --name "VisionAI-GateAgent" `
-  --collect-all ultralytics `
-  --collect-all rapidocr_onnxruntime `
-  --collect-all onnxruntime `
-  --collect-all torch `
-  --add-data "best.pt;." `
-  --add-data "anpr_best.pt;." `
-  --add-data "weights\vehicle.pt;weights" `
-  desktop\detector_agent.py
-
-Write-Host "Build complete: dist\VisionAI-GateAgent\VisionAI-GateAgent.exe"
+& (Join-Path $PSScriptRoot "gate\build_gate.ps1") @args
+exit $LASTEXITCODE

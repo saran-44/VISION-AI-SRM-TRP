@@ -299,7 +299,11 @@ def test_scan_explains_when_cloud_vision_is_unavailable(client, users, monkeypat
     assert response.status_code == 503
     payload = response.get_json()
     assert payload["code"] == "vision_local_agent_required"
-    assert payload["auto_scan"]["agent"] == "VisionAI-GateAgent.exe"
+    # The binary shipped by desktop/gate/VisionAI.spec is VisionAI.exe; an older
+    # message told operators to run "VisionAI-GateAgent.exe", which never existed.
+    assert payload["auto_scan"]["agent"] == "VisionAI.exe"
+    assert "VisionAI.exe" in payload["error"]
+    assert "GateAgent" not in payload["error"]
 
 
 def _oversized_jpeg(width=4096, height=3072):

@@ -113,6 +113,7 @@ automatically). `.env.example` lists variables with placeholders and public Fire
 | `APP_TIMEZONE` | no | `Asia/Kolkata` | Timezone for “today” and chart buckets |
 | `OCR_CONFIDENCE_THRESHOLD` | no | `0.75` | Below this, a vehicle is flagged as low confidence |
 | `OVERSTAY_HOURS` | no | `12` | Hours inside before a bus is flagged as overstaying |
+| `STATS_LOOKBACK_DAYS` | no | `45` | How far back the live counters read; bounds the `/api/stats` scan |
 | `CAMERA_STREAM_URLS` | no | empty | JSON map of camera → `{type, url, label}` (`hls` or `mjpeg`) |
 | `FLASK_DEBUG` | no | `false` | Debug mode; ignored outside `development`, rejected in production |
 | `HOST` / `PORT` | no | `0.0.0.0` / `5000` | Dev server bind address |
@@ -375,9 +376,14 @@ complete security audit.
 runs the whole portal — Flask API and frontend — on a **single free Render
 service** with Supabase as the database and Firebase for sign-in. No card, no
 Cloud Run, no Hosting rewrite. The trade-offs are a sleeping instance, 512 MB
-of RAM (so no torch/OCR detector) and one application instance. The optional
+of RAM (so no torch/OCR detector) and one application instance; what that means
+for the detector, and whether the old LAN host is still needed, is decided in
+[the Render hobby notes](docs/DEPLOY_RENDER_HOBBY.md). The optional
 `vision-ai-srmtrp.web.app` address is a redirect to that service — see
 [the Firebase redirect guide](docs/DEPLOY_FIREBASE_REDIRECT.md).
+
+Handing the remaining work to an agent? [The Antigravity prompt](docs/ANTIGRAVITY_PROMPT.md)
+is a copy-paste brief with acceptance tests.
 
 Fast path on a fresh Git Bash install: the
 [Git Bash quickstart](docs/DEPLOY_GITBASH_QUICKSTART.md) walks through Supabase

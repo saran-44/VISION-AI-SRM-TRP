@@ -116,6 +116,9 @@ jobs:
       - name: Check lazy Firebase SDK loading
         run: node scripts/check_firebase_loader.mjs
 
+      - name: Check the live stream reconnects instead of falling back to polling
+        run: node scripts/check_live_stream.mjs
+
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest

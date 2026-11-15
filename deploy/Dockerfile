@@ -61,5 +61,8 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD curl -fsS http://localhost:8080/api/health || exit 1
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "4", \
-     "--timeout", "180", "--access-logfile", "-", "backend.app:create_app()"]
+# 8 threads: `/api/stream` holds one thread per open dashboard until it ends on
+# its own (API_SSE_SECONDS), and 4 was too few for four admin tabs plus a scan.
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "8", \
+     "--timeout", "180", "--graceful-timeout", "30", "--max-requests", "800", \
+     "--max-requests-jitter", "80", "--access-logfile", "-", "backend.app:create_app()"]

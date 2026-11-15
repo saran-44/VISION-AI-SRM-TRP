@@ -142,9 +142,15 @@ def ingest_event(db, payload: EventCreate, config: Config, *, source: str = "dev
 def compute_stats(db, config: Config) -> dict[str, Any]:
     now = naive_now()
     start, end = day_bounds(config)
+    # "Inside" is the latest event of each bus, so the scan is bounded to the
+    # lookback window instead of reading every row ever written: on the free
+    # instance this runs once every few seconds and must not grow with the
+    # table. `STATS_LOOKBACK_DAYS` (default 45) is deliberately far longer than
+    # a bus stays on campus, so nothing that is still inside can be missed.
+    cutoff = now - timedelta(days=config.stats_lookback_days)
     all_events = list(
         db.events.find(
-            {},
+            {"timestamp": {"$gte": cutoff}},
             {
                 "bus_number": 1,
                 "direction": 1,

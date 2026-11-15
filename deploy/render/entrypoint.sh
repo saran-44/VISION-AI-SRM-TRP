@@ -17,11 +17,21 @@ if [ -n "${PGSSLROOTCERT_B64:-}" ]; then
 fi
 
 # A single worker keeps memory inside a 512 MB free instance; threads carry the
-# concurrent SSE and export requests. Raise --workers if the plan allows it.
+# concurrent SSE, scan and export requests. `/api/stream` bounds its own
+# lifetime (API_SSE_SECONDS, default 210 s) so a thread is never held by a tab
+# that was closed — with 4 threads, four left-open dashboards used to hang the
+# whole service.
+#
+# --max-requests recycles the worker periodically: a free instance runs for days
+# without a restart, and this is the cheapest bound on slow memory growth.
 exec gunicorn \
   --bind "0.0.0.0:${PORT:-10000}" \
   --workers "${WEB_CONCURRENCY:-1}" \
-  --threads "${GUNICORN_THREADS:-4}" \
+  --threads "${GUNICORN_THREADS:-8}" \
   --timeout 180 \
+  --graceful-timeout 30 \
+  --max-requests 800 \
+  --max-requests-jitter 80 \
   --access-logfile - \
+  --error-logfile - \
   "backend.app:create_app()"

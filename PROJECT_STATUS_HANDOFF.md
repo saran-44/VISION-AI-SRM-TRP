@@ -1,5 +1,12 @@
 # VISION AI - SRM TRP project handoff
 
+> **Historical document.** It records the state of the project at the time it was
+> written and is not maintained. Two details are outdated: the gate binary is
+> now `VisionAI.exe` (built by `desktop/gate/build_gate.ps1`, see
+> `docs/DEPLOY_RENDER_FREE.md`), and `desktop/build_windows.ps1` now forwards to
+> that script instead of producing `VisionAI-GateAgent.exe`.
+
+
 Last updated: 2026-11-14 18:23 IST
 
 This file is intentionally non-secret. Never add passwords, API keys, SSH
