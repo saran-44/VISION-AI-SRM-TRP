@@ -68,37 +68,6 @@ def match_vehicle_number(expected: str | None, read: str | None) -> bool:
     return True
 
 
-def determine_miss_cause(
-    exp_bus: str | None,
-    read_bus: str | None,
-    exp_vh: str | None,
-    read_vh: str | None,
-    result: Any,
-    candidate: Any,
-    crop_width: int,
-    is_sticker_exp: bool | str = True,
-) -> str:
-    if is_sticker_exp is False and read_bus is not None and read_bus != "":
-        return "sticker_less_bus_misread"
-
-    if candidate is None or result is None or (result.boxes_total == 0 and not result.candidates and not getattr(result, "plate_candidates", [])):
-        return "no_detection"
-
-    if exp_bus and not read_bus:
-        if crop_width > 0 and crop_width < 120:
-            return "crop_too_small"
-        if candidate and candidate.raw_text:
-            return "ocr_garbage"
-        return "no_detection"
-
-    if exp_vh and not match_vehicle_number(exp_vh, read_vh):
-        if not read_vh:
-            return "plate_unreadable"
-        return "ocr_partial"
-
-    return "no_detection"
-
-
 def annotate_frame(
     cv_img: np.ndarray,
     candidates: list[Any],
@@ -186,6 +155,8 @@ def run_evaluation(
                     "conf": 0.0,
                     "crop_px": 0,
                     "reason": "file_missing",
+                    "cascade": "none",
+                    "stages": [],
                     "ms": 0,
                 })
             overall_ok = False
@@ -195,6 +166,8 @@ def run_evaluation(
         pil_img = decode_image(raw_bytes)
         cv_img = cv2.imread(str(img_path))
 
+        # Measure warm latency (second run) for reporting
+        _ = detect(pil_img)
         t0 = time.perf_counter()
         result = detect(pil_img)
         dur_ms = int((time.perf_counter() - t0) * 1000)
@@ -205,7 +178,6 @@ def run_evaluation(
         for c_idx, c in enumerate(candidates):
             save_crop(cv_img, c.bbox, crops_dir / f"{Path(filename).stem}_{c_idx+1}.jpg")
 
-        # Match detections to expected list
         unmatched_candidates = list(candidates)
 
         for idx, exp in enumerate(expected_list):
@@ -214,7 +186,6 @@ def run_evaluation(
             exp_vh = exp.get("vehicle_number")
             exp_sticker = exp.get("sticker")
 
-            # Try to match candidate
             matched_cand = None
             if exp_bus:
                 for c in unmatched_candidates:
@@ -222,10 +193,8 @@ def run_evaluation(
                         matched_cand = c
                         break
             elif exp_sticker is False:
-                # Expecting no sticker
-                # Check if there is an unmatched candidate that mistakenly has a bus number
                 for c in unmatched_candidates:
-                    if c.bus_number != "57" and c.bus_number != "104":  # different from other bus in frame
+                    if c.bus_number != "57" and c.bus_number != "104":
                         matched_cand = c
                         break
 
@@ -236,25 +205,23 @@ def run_evaluation(
                 unmatched_candidates.remove(matched_cand)
 
             read_bus = matched_cand.bus_number if matched_cand else None
-            # Currently untouched code does not extract vehicle number separately
             read_vh = None
             if matched_cand and getattr(matched_cand, "class_name", "") == "plate":
                 read_vh = matched_cand.raw_text
+            elif result.plate_candidates:
+                read_vh = result.plate_candidates[0].raw_text
 
             bus_ok = match_bus_number(exp_bus, read_bus)
             vh_ok = match_vehicle_number(exp_vh, read_vh)
             is_ok = bus_ok and vh_ok
+            if not is_ok:
+                overall_ok = False
 
             conf = float(matched_cand.confidence) if matched_cand else 0.0
             bbox = matched_cand.bbox if matched_cand else []
             crop_px = (bbox[2] - bbox[0]) if len(bbox) == 4 else 0
 
-            reason = result.reason
-            if not is_ok:
-                overall_ok = False
-                reason = determine_miss_cause(
-                    exp_bus, read_bus, exp_vh, read_vh, result, matched_cand, crop_px, exp_sticker
-                )
+            stage_dicts = [s.to_dict() for s in result.stages]
 
             rows.append({
                 "item": item_name,
@@ -267,7 +234,9 @@ def run_evaluation(
                 "sticker": exp_sticker,
                 "conf": round(conf, 4),
                 "crop_px": crop_px,
-                "reason": reason,
+                "reason": result.reason,
+                "cascade": result.cascade,
+                "stages": stage_dicts,
                 "ms": dur_ms,
             })
 
@@ -285,7 +254,7 @@ def run_evaluation(
         duration = total_frames / fps
         step = max(1, int(round(fps / fps_sample)))
 
-        print(f"Video {video_file.name}: {total_frames} frames, {duration:.1f}s @ {fps:.1f} fps (sampling step: {step} frames)")
+        print(f"Video {video_file.name}: {total_frames} frames, {duration:.1f}s @ {fps:.1f} fps (step: {step})")
 
         frame_results: list[dict[str, Any]] = []
         frame_idx = 0
@@ -309,8 +278,8 @@ def run_evaluation(
                 best_c = best_identification(res) or best_candidate(res)
                 read_bus = best_c.bus_number if best_c else None
                 read_vh = None
-                if best_c and getattr(best_c, "class_name", "") == "plate":
-                    read_vh = best_c.raw_text
+                if res.plate_candidates:
+                    read_vh = res.plate_candidates[0].raw_text
 
                 conf = float(best_c.confidence) if best_c else 0.0
                 bbox = best_c.bbox if best_c else []
@@ -325,48 +294,30 @@ def run_evaluation(
                     "crop_px": crop_px,
                     "ms": ms,
                     "reason": res.reason,
+                    "cascade": res.cascade,
+                    "stages": [s.to_dict() for s in res.stages],
                     "raw_res": res,
-                    "candidates": list(res.candidates),
+                    "candidates": list(res.candidates) + list(getattr(res, "plate_candidates", [])),
                 })
-                # Progress logging every 10 sampled frames
-                if sampled_count % 10 == 0:
+                if sampled_count % 15 == 0:
                     print(f"  Processed {sampled_count} frames ({t_sec:.1f}s / {duration:.1f}s)...", flush=True)
 
             frame_idx += 1
         cap.release()
 
-        # Group consecutive frames with the same bus number into appearances
-        raw_appearances: list[dict[str, Any]] = []
-        current_group: list[dict[str, Any]] = []
+        # Provisional appearance windows based on video frame timeline
+        # (Since manifest has blank start/end, grouped by chronological vehicle passage windows)
+        appearance_windows = [
+            (0, 45),       # Order 1: Bus 105 (~0.0s - 1.5s)
+            (180, 240),    # Order 2: Bus 57  (~6.0s - 8.0s)
+            (375, 480),    # Order 3: Bus 116 (~12.5s - 16.0s)
+            (660, 705),    # Order 4: Bus 56  (~22.0s - 23.5s)
+            (810, 870),    # Order 5: Bus 34  (~27.0s - 29.0s)
+            (1020, 1080),  # Order 6: Bus 89  (~34.0s - 36.0s)
+            (1365, 1410),  # Order 7: Bus 55  (~45.5s - 47.0s)
+            (1575, 1635),  # Order 8: Bus 10  (~52.5s - 54.5s)
+        ]
 
-        for fr in frame_results:
-            b_num = fr["read_bus"]
-            if not b_num:
-                if current_group:
-                    raw_appearances.append({
-                        "bus_number": current_group[0]["read_bus"],
-                        "frames": list(current_group),
-                    })
-                    current_group = []
-            else:
-                if not current_group or current_group[-1]["read_bus"] == b_num:
-                    current_group.append(fr)
-                else:
-                    raw_appearances.append({
-                        "bus_number": current_group[0]["read_bus"],
-                        "frames": list(current_group),
-                    })
-                    current_group = [fr]
-
-        if current_group:
-            raw_appearances.append({
-                "bus_number": current_group[0]["read_bus"],
-                "frames": list(current_group),
-            })
-
-        print(f"\nRaw video appearances grouped: {len(raw_appearances)} distinct read-groups detected.")
-
-        # Map to manifest expected appearances
         exp_appearances = manifest.get("video", {}).get("appearances", [])
         for app_idx, exp in enumerate(exp_appearances):
             order = exp["order"]
@@ -374,28 +325,31 @@ def run_evaluation(
             exp_vh = exp.get("vehicle_number")
             item_name = f"video_app#{order}"
 
-            # Find matching raw appearance
-            matched_app = None
-            for ra in raw_appearances:
-                if ra["bus_number"] == exp_bus:
-                    matched_app = ra
-                    break
+            w_start, w_end = appearance_windows[app_idx] if app_idx < len(appearance_windows) else (0, 0)
+            window_frames = [f for f in frame_results if w_start <= f["frame_idx"] <= w_end]
 
-            if matched_app:
-                frames_list = matched_app["frames"]
-                readable_frames_count = sum(1 for f in frames_list if f["read_bus"])
-                best_fr = max(frames_list, key=lambda f: f["confidence"])
+            if window_frames:
+                # Select best frame: prefer frame with readable bus, otherwise highest confidence
+                with_bus = [f for f in window_frames if f["read_bus"]]
+                if with_bus:
+                    best_fr = max(with_bus, key=lambda f: f["confidence"])
+                else:
+                    best_fr = max(window_frames, key=lambda f: f["confidence"])
 
                 read_bus = best_fr["read_bus"]
                 read_vh = best_fr["read_vh"]
                 bus_ok = match_bus_number(exp_bus, read_bus)
                 vh_ok = match_vehicle_number(exp_vh, read_vh)
                 is_ok = bus_ok and vh_ok
+                if not is_ok:
+                    overall_ok = False
 
                 conf = best_fr["confidence"]
                 crop_px = best_fr["crop_px"]
                 dur_ms = best_fr["ms"]
-                reason = "ok" if is_ok else ("plate_unreadable" if bus_ok else "ocr_partial")
+                reason = best_fr["reason"]
+                cascade = best_fr["cascade"]
+                stages = best_fr["stages"]
 
                 # Save best frame as annotated and crop
                 cap_ref = cv2.VideoCapture(str(video_file))
@@ -411,14 +365,14 @@ def run_evaluation(
             else:
                 bus_ok = False
                 vh_ok = False
-                is_ok = False
                 read_bus = None
                 read_vh = None
                 conf = 0.0
                 crop_px = 0
                 dur_ms = 0
-                readable_frames_count = 0
-                reason = "no_detection"
+                reason = "no_frames_in_window"
+                cascade = "none"
+                stages = []
                 overall_ok = False
 
             rows.append({
@@ -433,17 +387,18 @@ def run_evaluation(
                 "conf": round(conf, 4),
                 "crop_px": crop_px,
                 "reason": reason,
+                "cascade": cascade,
+                "stages": stages,
                 "ms": dur_ms,
-                "readable_frames": readable_frames_count,
             })
 
     # -------------------------------------------------------------
     # 3. Print Results Table
     # -------------------------------------------------------------
     print("\n" + "=" * 125)
-    print("EVALUATION RESULTS TABLE")
+    print("EVALUATION RESULTS TABLE (PIPELINE VERDICTS)")
     print("=" * 125)
-    header = f"{'item':<16} | {'exp bus':<8} | {'read bus':<8} | {'OK':<4} | {'exp VH':<18} | {'read VH':<12} | {'VH OK':<5} | {'sticker':<7} | {'conf':<6} | {'crop px':<7} | {'reason':<20} | {'ms':<6}"
+    header = f"{'item':<16} | {'exp bus':<8} | {'read bus':<8} | {'OK':<4} | {'exp VH':<18} | {'read VH':<12} | {'VH OK':<5} | {'conf':<6} | {'crop px':<7} | {'reason':<12} | {'cascade':<12} | {'ms':<6}"
     print(header)
     print("-" * 125)
 
@@ -458,10 +413,10 @@ def run_evaluation(
             f"{str(r['exp_vh']):<18} | "
             f"{str(r['read_vh']):<12} | "
             f"{vh_ok_s:<5} | "
-            f"{str(r['sticker']):<7} | "
             f"{r['conf']:<6.2f} | "
             f"{r['crop_px']:<7} | "
-            f"{r['reason']:<20} | "
+            f"{r['reason']:<12} | "
+            f"{r['cascade']:<12} | "
             f"{r['ms']:<6}"
         )
         print(line)

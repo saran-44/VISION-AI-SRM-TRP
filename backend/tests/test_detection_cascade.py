@@ -160,7 +160,8 @@ def test_the_plate_stage_reads_a_number_when_no_sticker_was_found(clean_env, tmp
     assert result.cascade == "number_plate"
     assert result.candidates == []  # the sticker contract is untouched
     assert len(result.plate_candidates) == 1
-    assert vision.best_identification(result).bus_number == "KL 07 AB 1234"
+    assert vision.best_identification(result).bus_number is None
+    assert vision.best_identification(result).raw_text == "KL 07 AB 1234"
 
 
 def test_a_missing_plate_checkpoint_is_skipped_not_fatal(clean_env, tmp_path):
@@ -396,7 +397,20 @@ def test_a_single_class_licence_model_is_read_without_a_class_filter(clean_env, 
     result = vision.detect(_FakeImage(), model=_FakeModel([]), stages={"vehicle": False})
 
     assert result.plate_candidates[0].class_name == "licence"
-    assert vision.best_identification(result).bus_number == "TN 12 AB 1234"
+    assert vision.best_identification(result).bus_number is None
+    assert vision.best_identification(result).raw_text == "TN 12 AB 1234"
+
+
+def test_plate_only_frame_yields_null_bus_number(clean_env, tmp_path):
+    """best_identification() must never return a plate candidate as bus_number."""
+    clean_env.setattr(vision, "read_text", lambda image, engine_name=None: "TN 48 BK 2129")
+    _plate_model(tmp_path, clean_env, [(0.85, 0, [100, 100, 200, 150])])
+
+    result = vision.detect(_FakeImage(), model=_FakeModel([]), stages={"vehicle": False})
+    candidate = vision.best_identification(result)
+    assert candidate is not None
+    assert candidate.bus_number is None
+    assert candidate.raw_text == "TN 48 BK 2129"
 
 
 def test_the_plate_stage_has_its_own_confidence_gate(clean_env, tmp_path):

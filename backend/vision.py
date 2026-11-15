@@ -1602,20 +1602,25 @@ def _crop(image, coords: list[int]):
 
 
 def best_identification(result: DetectionResult) -> PlateCandidate | None:
-    """Best candidate across the cascade: a readable number always wins.
+    """Best candidate across the cascade: a readable sticker number always wins.
 
     Sticker candidates are preferred over plate candidates at equal standing
     because the sticker is the trained-in path and its crop is the one the
-    operators recognise.
+    operators recognise. A plate candidate must never be returned as a
+    bus_number: on a plate-only frame, its bus_number is None (null in JSON).
     """
-    for pool in (result.candidates, result.plate_candidates):
+    for pool in (result.candidates,):
         with_number = [candidate for candidate in pool if candidate.bus_number]
         if with_number:
             return max(with_number, key=lambda candidate: candidate.confidence)
     pool = result.candidates or result.plate_candidates
     if not pool:
         return None
-    return max(pool, key=lambda candidate: candidate.confidence)
+    best = max(pool, key=lambda candidate: candidate.confidence)
+    if pool is result.plate_candidates or best in result.plate_candidates:
+        from dataclasses import replace
+        return replace(best, bus_number=None)
+    return best
 
 
 def best_candidate(result: DetectionResult) -> PlateCandidate | None:
