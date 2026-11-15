@@ -140,6 +140,24 @@ def test_stats_are_computed_from_events(client, db, users):
     assert stats["flagged_today"] == 2  # BUS-002 is unregistered
 
 
+def test_event_flags_distinguish_duplicate_entry_and_exit_without_entry(client, db, users):
+    first = post_event(client, event_payload(bus_number="BUS-101"))
+    duplicate = post_event(
+        client,
+        event_payload(bus_number="BUS-101", gate="Gate 2", timestamp=naive_now().isoformat() + "Z"),
+    )
+    exit_without_entry = post_event(
+        client,
+        event_payload(bus_number="BUS-202", direction="OUT"),
+    )
+
+    assert first.status_code == 201
+    assert duplicate.status_code == 201
+    assert "duplicate_in" in duplicate.get_json()["event"]["flag_reasons"]
+    assert exit_without_entry.status_code == 201
+    assert "out_without_in" in exit_without_entry.get_json()["event"]["flag_reasons"]
+
+
 def test_events_endpoint_filters_and_paginates(client, db, users):
     register_bus(client, users)
     post_event(client, event_payload(bus_number="BUS-001", gate="Gate 1"))

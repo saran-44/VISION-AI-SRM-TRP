@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import time as time_module
 from collections import Counter, defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
@@ -17,6 +18,8 @@ FLAG_LABELS = {
     "unregistered_plate": "Unregistered plate",
     "low_ocr_confidence": "Low OCR confidence",
     "long_overstay": "Long overstay",
+    "out_without_in": "Exit without entry",
+    "duplicate_in": "Duplicate entry",
 }
 
 EXPORT_FIELDS = [
@@ -104,6 +107,7 @@ def compute_flag_reasons(db, event: dict[str, Any], config: Config) -> list[str]
         },
         sort=[("timestamp", DESCENDING), ("_id", DESCENDING)],
     )
+    has_unmatched_in = False
     if prior_in:
         later_out = db.events.find_one(
             {
@@ -114,9 +118,14 @@ def compute_flag_reasons(db, event: dict[str, Any], config: Config) -> list[str]
             {"_id": 1},
         )
         if not later_out:
+            has_unmatched_in = True
             hours_inside = (event["timestamp"] - prior_in["timestamp"]).total_seconds() / 3600
             if hours_inside > config.overstay_hours:
                 reasons.append("long_overstay")
+    if event["direction"] == "IN" and has_unmatched_in:
+        reasons.append("duplicate_in")
+    if event["direction"] == "OUT" and not has_unmatched_in:
+        reasons.append("out_without_in")
     return sorted(set(reasons))
 
 
@@ -152,10 +161,17 @@ def ingest_event(db, payload: EventCreate, config: Config, *, source: str = "dev
     event["flagged"] = bool(event["flag_reasons"])
     result = db.events.insert_one(event)
     event["_id"] = result.inserted_id
+    if hasattr(db, "_stats_cache"):
+        db._stats_cache = None
     return public_doc(event)
 
 
 def compute_stats(db, config: Config) -> dict[str, Any]:
+    cached = getattr(db, "_stats_cache", None)
+    if config.stats_cache_seconds and cached:
+        cached_at, cached_value = cached
+        if time_module.monotonic() - cached_at < config.stats_cache_seconds:
+            return cached_value
     now = naive_now()
     start, end = day_bounds(config)
     # "Inside" is the latest event of each bus, so the scan is bounded to the
@@ -217,7 +233,7 @@ def compute_stats(db, config: Config) -> dict[str, Any]:
         reason_counts.update(event.get("flag_reasons", []))
 
     last_event_doc = db.events.find_one({}, sort=event_sort())
-    return {
+    result = {
         "generated_at": iso_utc(now),
         "timezone": config.app_timezone,
         "total_buses": db.buses.count_documents({}),
@@ -239,6 +255,9 @@ def compute_stats(db, config: Config) -> dict[str, Any]:
         },
         "last_event": public_doc(last_event_doc),
     }
+    if config.stats_cache_seconds:
+        db._stats_cache = (time_module.monotonic(), result)
+    return result
 
 
 def compute_analytics(db, analytics_filter: AnalyticsFilter, config: Config) -> dict[str, Any]:
@@ -328,7 +347,7 @@ def events_for_export(db, event_filter: EventFilter, config: Config, *, max_rows
                 "camera_id": public.get("camera_id", ""),
                 "confidence": public.get("confidence", ""),
                 "flagged": "yes" if public.get("flagged") else "no",
-                "flag_reasons": ", ".join(public.get("flag_reasons", [])),
+                "flag_reasons": ";".join(public.get("flag_reasons", [])),
             }
         )
     return rows

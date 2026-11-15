@@ -134,6 +134,9 @@ class Config:
     # event list are unaffected).
     stats_lookback_days: float = 45.0
     event_debounce_seconds: int = 60
+    sse_max_connections: int = 4
+    mjpeg_max_connections: int = 2
+    stats_cache_seconds: int = 5
     camera_streams: dict[str, dict[str, str]] = field(default_factory=dict)
     # The camera the gate PC grabs frames from itself: an HTTP snapshot URL, an
     # RTSP URL, or usb:0. Empty means "use the browser camera only".
@@ -180,6 +183,9 @@ class Config:
             overstay_hours=_float("OVERSTAY_HOURS", 12.0),
             stats_lookback_days=_float("STATS_LOOKBACK_DAYS", 45.0),
             event_debounce_seconds=_int("VISION_EVENT_DEBOUNCE_SECONDS", 60),
+            sse_max_connections=_int("SSE_MAX_CONNECTIONS", 4),
+            mjpeg_max_connections=_int("MJPEG_MAX_CONNECTIONS", 2),
+            stats_cache_seconds=_int("STATS_CACHE_SECONDS", 5),
             camera_streams=camera_streams,
             camera_source=os.getenv("CAMERA_SOURCE", "").strip(),
             firebase=firebase,
@@ -306,6 +312,12 @@ class Config:
             raise RuntimeError("STATS_LOOKBACK_DAYS must be at least 1")
         if self.event_debounce_seconds < 0:
             raise RuntimeError("VISION_EVENT_DEBOUNCE_SECONDS must be zero or positive")
+        if self.sse_max_connections < 1:
+            raise RuntimeError("SSE_MAX_CONNECTIONS must be positive")
+        if self.mjpeg_max_connections < 1:
+            raise RuntimeError("MJPEG_MAX_CONNECTIONS must be positive")
+        if self.stats_cache_seconds < 0:
+            raise RuntimeError("STATS_CACHE_SECONDS must be zero or positive")
         if self.jwt_ttl_minutes < 1 or self.jwt_ttl_minutes > 60:
             raise RuntimeError("JWT_TTL_MINUTES must be between 1 and 60")
         known_providers = {"password", "google.com"}

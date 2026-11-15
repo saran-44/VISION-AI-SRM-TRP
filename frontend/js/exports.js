@@ -20,7 +20,7 @@ function normalizeEvent(event) {
     camera_id: event.camera_id || '',
     confidence: event.confidence ?? '',
     flagged: event.flagged ? 'yes' : 'no',
-    flag_reasons: (event.flag_reasons || []).join(', '),
+    flag_reasons: (event.flag_reasons || []).join(';'),
   };
 }
 

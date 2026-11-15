@@ -69,9 +69,13 @@ early instead of being silently ignored.
 | `unregistered_plate` | The normalized bus number does not exist in the `buses` collection. |
 | `low_ocr_confidence` | `confidence` is below `OCR_CONFIDENCE_THRESHOLD` (default `0.75`). |
 | `long_overstay` | The bus's last unmatched `IN` event is older than `OVERSTAY_HOURS` (default `12`). |
+| `out_without_in` | An `OUT` event has no unmatched earlier `IN` event for the bus. |
+| `duplicate_in` | An `IN` event arrives while the bus already has an unmatched `IN` event. |
 
 Every ingested event is also written to the audit log with the actor
 `device-client`.
+
+CSV exports serialize multiple `flag_reasons` with a semicolon (`;`).
 
 Repeated detections are suppressed by `(bus_number, direction, gate)` within
 `VISION_EVENT_DEBOUNCE_SECONDS`. Set that variable to `0` to disable suppression.
