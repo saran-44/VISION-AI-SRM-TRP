@@ -74,8 +74,9 @@ jobs:
       - name: Install the vision extras (CPU wheels)
         run: |
           python -m pip install --upgrade pip
-          pip install -r backend/requirements-vision.txt \
-            --extra-index-url https://download.pytorch.org/whl/cpu
+          pip install torch==2.9.1 torchvision==0.24.1 \
+            --index-url https://download.pytorch.org/whl/cpu
+          pip install -r backend/requirements-vision.txt
           python -m pip uninstall -y opencv-python || true
           python -m pip install --no-deps opencv-python-headless==4.10.0.84
           python scripts/check_env.py
