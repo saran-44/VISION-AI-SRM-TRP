@@ -771,10 +771,19 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
                 or payload.get("vision_plate_mode")
                 or (payload.get("stages") if isinstance(payload.get("stages"), dict) else {}).get("plate_mode")
             )
+            detect_kwargs: dict[str, Any] = {}
+            if plate_mode_override:
+                import inspect
+                try:
+                    sig = inspect.signature(detect)
+                    if "plate_mode" in sig.parameters or any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values()):
+                        detect_kwargs["plate_mode"] = str(plate_mode_override)
+                except (ValueError, TypeError):
+                    pass
             result = detect(
                 image,
                 stages=stage_overrides_from_payload(payload),
-                plate_mode=str(plate_mode_override) if plate_mode_override else None,
+                **detect_kwargs,
             )
         except ImageRejected as exc:
             # The caller's own upload is unusable: that is a 400, never a 503.

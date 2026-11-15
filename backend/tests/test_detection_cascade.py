@@ -504,3 +504,44 @@ def test_the_setup_checklist_separates_required_from_optional():
     # components (torch, OCR, …) can, and this test host has none of them.
     assert "anpr" not in setup["missing"]
     assert setup["missing"] == [name for name in setup["missing"] if name != "anpr"]
+
+
+def test_map_box_to_full_frame_with_scaling():
+    box_in_crop = [20, 30, 100, 60]
+    crop_offset = (500, 400)
+    scale = (2.0, 2.0)
+    full_box = vision.map_box_to_full_frame(box_in_crop, crop_offset, scale)
+    assert full_box == [510, 415, 550, 430]
+
+    full_box_unscaled = vision.map_box_to_full_frame(box_in_crop, crop_offset)
+    assert full_box_unscaled == [520, 430, 600, 460]
+
+
+def test_plate_stage_runs_on_vehicle_crop_when_vehicle_present(clean_env, tmp_path, monkeypatch):
+    """When the vehicle stage identifies a vehicle box, plate detector runs on the crop."""
+    v_model = _vehicle_model(tmp_path, clean_env, [(0.90, 5, [100, 100, 400, 400])])
+    p_model = _plate_model(tmp_path, clean_env, [(0.85, 0, [20, 30, 80, 50])], names={0: "licence"})
+    monkeypatch.setattr(
+        vision,
+        "load_stage_model",
+        lambda stage: v_model if stage == vision.STAGE_VEHICLE else (p_model if stage == vision.STAGE_NUMBER_PLATE else None),
+    )
+    monkeypatch.setattr(vision, "read_text", lambda img: "TN 48 BK 2106")
+
+    class MockImage:
+        width = 1000
+        height = 1000
+        def crop(self, box):
+            return MockImage()
+
+    result = vision.DetectionResult()
+    result.stage_flags = {s: True for s in vision.STAGE_ORDER}
+
+    vision._run_vehicle_stage(MockImage(), result, threshold=0.25, size=960)
+    assert len(result.vehicle_boxes) == 1
+
+    vision._run_plate_stage(MockImage(), result, threshold=0.25, size=960)
+    assert len(result.plate_candidates) == 1
+    assert result.plate_candidates[0].bbox == [105, 115, 165, 135]
+    assert result.plate_candidates[0].confidence == 0.85
+    assert result.plate_candidates[0].bus_number == "TN 48 BK 2106"

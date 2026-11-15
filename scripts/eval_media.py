@@ -207,10 +207,10 @@ def run_evaluation(
 
             read_bus = matched_cand.bus_number if matched_cand else None
             read_vh = None
-            if matched_cand and getattr(matched_cand, "class_name", "") == "plate":
-                read_vh = matched_cand.raw_text
+            if matched_cand and getattr(matched_cand, "class_name", "") in {"plate", "licence"}:
+                read_vh = matched_cand.bus_number or matched_cand.raw_text
             elif result.plate_candidates:
-                read_vh = result.plate_candidates[0].raw_text
+                read_vh = result.plate_candidates[0].bus_number or result.plate_candidates[0].raw_text
 
             bus_ok = match_bus_number(exp_bus, read_bus)
             vh_ok = match_vehicle_number(exp_vh, read_vh)
@@ -280,7 +280,7 @@ def run_evaluation(
                 read_bus = best_c.bus_number if best_c else None
                 read_vh = None
                 if res.plate_candidates:
-                    read_vh = res.plate_candidates[0].raw_text
+                    read_vh = res.plate_candidates[0].bus_number or res.plate_candidates[0].raw_text
 
                 conf = float(best_c.confidence) if best_c else 0.0
                 bbox = best_c.bbox if best_c else []

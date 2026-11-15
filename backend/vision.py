@@ -256,6 +256,7 @@ class DetectionResult:
     stage_flags: dict[str, bool] = field(default_factory=dict)
     plate_candidates: list[PlateCandidate] = field(default_factory=list)
     vehicle: dict[str, Any] | None = None
+    vehicle_boxes: list[list[int]] = field(default_factory=list)
     cascade: str = CASCADE_NONE
 
     def to_dict(self) -> dict[str, Any]:
@@ -292,6 +293,7 @@ class DetectionResult:
             "stage_flags": dict(self.stage_flags),
             "plate_candidates": [candidate.to_dict() for candidate in self.plate_candidates],
             "vehicle": self.vehicle,
+            "vehicle_boxes": list(self.vehicle_boxes),
             "cascade": self.cascade,
         }
 
@@ -798,6 +800,45 @@ def normalize_plate(text: str) -> str:
     return cleaned
 
 
+def format_vehicle_plate(text: str) -> str:
+    """Format or extract an Indian vehicle registration number (e.g. TN 48 BK 2129)."""
+    if not text:
+        return ""
+    upper = text.upper()
+    m = re.search(r"([A-Z]{2})\s*(\d{1,2})\s*([A-Z]{0,3})\s*(\d{4})", upper)
+    if m:
+        parts = [m.group(1), m.group(2)]
+        if m.group(3):
+            parts.append(m.group(3))
+        parts.append(m.group(4))
+        return " ".join(parts)
+    m2 = re.search(r"([A-Z]{1,3})\s*(\d{4})\s*([A-Z]{2})\s*(\d{1,2})", upper)
+    if m2:
+        return f"{m2.group(3)} {m2.group(4)} {m2.group(1)} {m2.group(2)}"
+    return normalize_plate(text)
+
+
+def map_box_to_full_frame(
+    box_in_crop: list[int] | tuple[int, int, int, int],
+    crop_offset: tuple[int, int],
+    scale: tuple[float, float] = (1.0, 1.0),
+) -> list[int]:
+    """Map a bounding box detected inside an image crop back to full-frame coordinates.
+
+    `box_in_crop`: [x1, y1, x2, y2] relative to the crop passed to the detector.
+    `crop_offset`: (crop_x1, crop_y1) origin of the crop in the full-frame coordinate system.
+    `scale`: (scale_x, scale_y) scaling factor applied to the crop before detection.
+    """
+    bx1, by1, bx2, by2 = box_in_crop
+    sx, sy = scale
+    orig_bx1 = int(round(bx1 / sx)) if sx != 0 else bx1
+    orig_by1 = int(round(by1 / sy)) if sy != 0 else by1
+    orig_bx2 = int(round(bx2 / sx)) if sx != 0 else bx2
+    orig_by2 = int(round(by2 / sy)) if sy != 0 else by2
+    ox, oy = crop_offset
+    return [ox + orig_bx1, oy + orig_by1, ox + orig_bx2, oy + orig_by2]
+
+
 # --------------------------------------------------------------------------- #
 # Detection
 # --------------------------------------------------------------------------- #
@@ -809,7 +850,7 @@ def normalize_plate(text: str) -> str:
 # therefore *resize targets*, not refusals: a 12 MP phone photo — the single most
 # common thing a gate operator will upload — used to be rejected outright with
 # "Image is larger than the 12 MP limit", which reads as a broken install.
-MAX_IMAGE_PIXELS = 12_000_000
+MAX_IMAGE_PIXELS = 16_000_000
 # Beyond this, downscaling still means holding a multi-hundred-megabyte bitmap in
 # memory, so it stays a hard refusal. 120 MP is far above any camera frame.
 MAX_INPUT_PIXELS = 120_000_000
@@ -849,6 +890,7 @@ def decode_image(payload: bytes | str) -> "Any":
                     f"Image is larger than the {MAX_INPUT_PIXELS // 1_000_000} MP limit"
                 )
             probe.load()
+            orig = probe.copy()
             image = probe.copy()
     except ImageRejected:
         raise
@@ -864,6 +906,7 @@ def decode_image(payload: bytes | str) -> "Any":
     if scale < 1.0:
         target = (max(1, int(image.width * scale)), max(1, int(image.height * scale)))
         image = image.resize(target, Image.LANCZOS)
+    image._orig_image = orig
     return image
 
 
@@ -1255,7 +1298,7 @@ def _run_sticker_stage(image, result: DetectionResult, *, model=None, threshold:
 
 
 def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: int) -> None:
-    """Stage 2: an optional number-plate checkpoint, used when no sticker read."""
+    """Stage 2: an optional number-plate checkpoint, run on vehicle crops or full frame."""
     import time
 
     path = plate_model_path()
@@ -1273,7 +1316,6 @@ def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: 
     gate = plate_threshold()
     try:
         model = load_stage_model(STAGE_NUMBER_PLATE)
-        rows = _predict_rows(model, image, size, min(gate, 0.05))
     except StageNotConfigured as exc:
         report.skipped = exc.reason
         report.detail = str(exc)
@@ -1284,16 +1326,146 @@ def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: 
         return
 
     report.ran = True
-    report.ms = int((time.perf_counter() - started) * 1000)
     names = getattr(model, "names", {}) or {}
-    result.plate_candidates = _ocr_rows(
-        image,
-        rows,
-        names,
-        threshold=gate,
-        limit=max_crops(),
-        upscale=True,
-    )
+
+    high_res = getattr(image, "_orig_image", image)
+    img_w = getattr(image, "width", 0) or 1
+    img_h = getattr(image, "height", 0) or 1
+    high_w = getattr(high_res, "width", img_w) or img_w
+    high_h = getattr(high_res, "height", img_h) or img_h
+    scale_x = high_w / img_w
+    scale_y = high_h / img_h
+
+    candidates: list[PlateCandidate] = []
+
+    # If vehicle stage produced vehicle boxes, run plate detector on each vehicle crop
+    if result.vehicle_boxes:
+        for v_bbox in result.vehicle_boxes:
+            w = v_bbox[2] - v_bbox[0]
+            h = v_bbox[3] - v_bbox[1]
+            margin_x = int(w * 0.05)
+            margin_y = int(h * 0.05)
+            cx1 = max(0, v_bbox[0] - margin_x)
+            cy1 = max(0, v_bbox[1] - margin_y)
+            cx2 = min(img_w, v_bbox[2] + margin_x)
+            cy2 = min(img_h, v_bbox[3] + margin_y)
+
+            orig_cx1 = max(0, int(round(cx1 * scale_x)))
+            orig_cy1 = max(0, int(round(cy1 * scale_y)))
+            orig_cx2 = min(high_w, int(round(cx2 * scale_x)))
+            orig_cy2 = min(high_h, int(round(cy2 * scale_y)))
+
+            if orig_cx2 <= orig_cx1 or orig_cy2 <= orig_cy1:
+                continue
+
+            v_crop = _crop(high_res, [orig_cx1, orig_cy1, orig_cx2, orig_cy2])
+            if v_crop is None:
+                continue
+            cw = getattr(v_crop, "width", orig_cx2 - orig_cx1)
+            ch = getattr(v_crop, "height", orig_cy2 - orig_cy1)
+
+            try:
+                p_rows = _predict_rows(model, v_crop, size, min(gate, 0.05))
+            except Exception as exc:
+                logger.debug("Plate prediction error on crop: %s", exc)
+                p_rows = []
+
+            crop_candidates: list[PlateCandidate] = []
+            for conf, cid, p_box in p_rows:
+                if conf < gate:
+                    break
+                full_box = map_box_to_full_frame(p_box, (orig_cx1, orig_cy1), (scale_x, scale_y))
+                print(
+                    f"Plate stage: crop size={cw}x{ch}, crop_bbox={p_box}, full_bbox={full_box}, conf={conf:.4f}",
+                    flush=True,
+                )
+                p_crop = _crop(v_crop, p_box)
+                raw_text = ""
+                if p_crop is not None:
+                    p_crop_up = _prepare_plate_crop(p_crop)
+                    try:
+                        raw_text = read_text(p_crop_up)
+                    except Exception as exc:
+                        logger.debug("Plate crop OCR error: %s", exc)
+                        raw_text = ""
+                fmt = format_vehicle_plate(raw_text)
+                cand = PlateCandidate(
+                    confidence=conf,
+                    bbox=full_box,
+                    class_id=cid,
+                    class_name=str(names.get(cid, "plate")),
+                    raw_text=raw_text.strip(),
+                    bus_number=fmt,
+                )
+                if not cand.raw_text and p_crop is not None:
+                    cand.crop_path = diagnostics.save_ocr_crop(p_crop)
+                crop_candidates.append(cand)
+                candidates.append(cand)
+
+            # If no plate candidate in this vehicle crop read a valid registration number, check for painted / stenciled numbers
+            if not any(c.bus_number for c in crop_candidates) and hasattr(v_crop, "convert"):
+                try:
+                    engine = _ocr_rapidocr()
+                    import numpy as np
+                    arr = np.array(v_crop.convert("RGB"))
+                    res, _ = engine(arr)
+                    if res:
+                        for box, txt, score in res:
+                            fmt = format_vehicle_plate(txt)
+                            clean = fmt.replace(" ", "")
+                            if (
+                                len(clean) >= 6
+                                and any(clean.startswith(c) for c in ("TN", "KL", "KA", "PY", "AP", "DL", "MH"))
+                                and any(c.isdigit() for c in clean)
+                            ):
+                                bx1 = int(round(min(pt[0] for pt in box)))
+                                by1 = int(round(min(pt[1] for pt in box)))
+                                bx2 = int(round(max(pt[0] for pt in box)))
+                                by2 = int(round(max(pt[1] for pt in box)))
+                                crop_bbox = [bx1, by1, bx2, by2]
+                                full_bbox = map_box_to_full_frame(
+                                    crop_bbox, (orig_cx1, orig_cy1), (scale_x, scale_y)
+                                )
+                                print(
+                                    f"Plate stage: crop size={cw}x{ch}, crop_bbox={crop_bbox}, full_bbox={full_bbox}, conf={float(score):.4f}",
+                                    flush=True,
+                                )
+                                cand = PlateCandidate(
+                                    confidence=float(score),
+                                    bbox=full_bbox,
+                                    class_id=0,
+                                    class_name="plate",
+                                    raw_text=txt.strip(),
+                                    bus_number=fmt,
+                                )
+                                candidates.append(cand)
+                                break
+                except Exception as exc:
+                    logger.debug("Vehicle crop OCR fallback error: %s", exc)
+    else:
+        # Full-frame fallback when no vehicle was detected
+        try:
+            rows = _predict_rows(model, image, size, min(gate, 0.05))
+            candidates = _ocr_rows(
+                image,
+                rows,
+                names,
+                threshold=gate,
+                limit=max_crops(),
+                upscale=True,
+            )
+            for c in candidates:
+                print(
+                    f"Plate stage: crop size={img_w}x{img_h}, crop_bbox={c.bbox}, full_bbox={c.bbox}, conf={c.confidence:.4f}",
+                    flush=True,
+                )
+        except Exception as exc:
+            report.skipped = "error"
+            report.detail = f"{type(exc).__name__}: {exc}"
+            return
+
+    report.ms = int((time.perf_counter() - started) * 1000)
+    result.plate_candidates = candidates
     report.found = len(result.plate_candidates)
     report.best_confidence = max(
         (candidate.confidence for candidate in result.plate_candidates), default=0.0
@@ -1341,19 +1513,22 @@ def _run_vehicle_stage(image, result: DetectionResult, *, threshold: float, size
     accepted = vehicle_classes()
     gate = vehicle_threshold()
     best: tuple[float, str, list[int]] | None = None
+    vehicle_boxes: list[list[int]] = []
     for confidence, class_id, coords in rows:
         if confidence < gate:
             break
         class_name = str(names.get(class_id, class_id)).strip().lower()
         if class_name not in accepted:
             continue
+        vehicle_boxes.append(list(coords))
         if best is None or confidence > best[0]:
             best = (confidence, class_name, coords)
 
+    result.vehicle_boxes = vehicle_boxes
     if best is None:
         report.result = "none"
         return
-    report.found = 1
+    report.found = len(vehicle_boxes)
     report.best_confidence = best[0]
     report.result = "identified"
     result.vehicle = {
@@ -1446,6 +1621,17 @@ def detect(
             detail="Sticker detection is switched off for this scan.",
         ))
 
+    if enabled[STAGE_VEHICLE]:
+        _run_vehicle_stage(image, result, threshold=threshold, size=size)
+    else:
+        result.stages.append(StageReport(
+            name=STAGE_VEHICLE,
+            enabled=False,
+            model=str(vehicle_model_path().name),
+            skipped="disabled",
+            detail="Vehicle classification is switched off for this scan.",
+        ))
+
     active_plate_mode = (plate_mode or globals()["plate_mode"]()).strip().lower()
     if active_plate_mode != PLATE_MODE_ALWAYS:
         active_plate_mode = PLATE_MODE_FALLBACK
@@ -1470,16 +1656,7 @@ def detect(
     else:
         _run_plate_stage(image, result, threshold=threshold, size=size)
 
-    if enabled[STAGE_VEHICLE]:
-        _run_vehicle_stage(image, result, threshold=threshold, size=size)
-    else:
-        result.stages.append(StageReport(
-            name=STAGE_VEHICLE,
-            enabled=False,
-            model=str(vehicle_model_path().name),
-            skipped="disabled",
-            detail="Vehicle classification is switched off for this scan.",
-        ))
+    result.stages.sort(key=lambda s: STAGE_ORDER.index(s.name) if s.name in STAGE_ORDER else 99)
 
     result.inference_ms = int((time.perf_counter() - started) * 1000)
     result.cascade = _cascade_name(result)
