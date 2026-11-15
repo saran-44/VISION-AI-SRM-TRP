@@ -182,7 +182,7 @@ class Config:
             ocr_confidence_threshold=_float("OCR_CONFIDENCE_THRESHOLD", 0.75),
             overstay_hours=_float("OVERSTAY_HOURS", 12.0),
             stats_lookback_days=_float("STATS_LOOKBACK_DAYS", 45.0),
-            event_debounce_seconds=_int("VISION_EVENT_DEBOUNCE_SECONDS", 60),
+            event_debounce_seconds=_int("EVENT_DEBOUNCE_SECONDS", _int("VISION_EVENT_DEBOUNCE_SECONDS", 60)),
             sse_max_connections=_int("SSE_MAX_CONNECTIONS", 4),
             mjpeg_max_connections=_int("MJPEG_MAX_CONNECTIONS", 2),
             stats_cache_seconds=_int("STATS_CACHE_SECONDS", 5),

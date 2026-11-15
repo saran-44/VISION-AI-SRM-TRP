@@ -350,6 +350,24 @@ export function renderCameraTile(options) {
     setPlaceholder('No stream configured for this camera.');
   }
 
+  const verdictStrip = el('div', { class: 'verdict-strip', 'data-verdict-strip': id }, [
+    el('div', { class: 'verdict-indicators' }, [
+      el('span', { class: 'verdict-pill pill-light neutral', 'data-verdict': 'light' }, [
+        el('span', { class: 'pill-dot' }),
+        el('span', { class: 'pill-label', text: 'Light: —' }),
+      ]),
+      el('span', { class: 'verdict-pill pill-focus neutral', 'data-verdict': 'focus' }, [
+        el('span', { class: 'pill-dot' }),
+        el('span', { class: 'pill-label', text: 'Focus: —' }),
+      ]),
+      el('span', { class: 'verdict-pill pill-size neutral', 'data-verdict': 'size' }, [
+        el('span', { class: 'pill-dot' }),
+        el('span', { class: 'pill-label', text: 'Size: —' }),
+      ]),
+    ]),
+    el('div', { class: 'verdict-advice', 'data-verdict': 'advice', text: 'Camera ready. Position subject in frame.' }),
+  ]);
+
   const tile = el('div', { class: 'card camera-tile', 'data-camera-id': id }, [
     el('div', { class: 'card-header' }, [
       el('h2', { class: 'card-title', style: 'font-size:1rem;' }, [
@@ -358,6 +376,7 @@ export function renderCameraTile(options) {
       ]),
       badge,
     ]),
+    verdictStrip,
     container,
     controls,
   ]);
@@ -400,4 +419,132 @@ export function renderCameras(host, cameras = [], handlers = {}) {
       onCapture: handlers.onCapture,
     }));
   });
+}
+
+/**
+ * Update the verdict strip on a camera tile with scan feedback.
+ *
+ * @param {HTMLElement} host - tile element or parent container
+ * @param {object} payload - scan response from /api/detection/scan
+ */
+export function updateVerdictStrip(host, payload = {}) {
+  const strip = host?.querySelector ? host.querySelector('.verdict-strip') : document.querySelector('.verdict-strip');
+  if (!strip) return;
+
+  const lightPill = strip.querySelector('[data-verdict="light"]');
+  const focusPill = strip.querySelector('[data-verdict="focus"]');
+  const sizePill = strip.querySelector('[data-verdict="size"]');
+  const adviceEl = strip.querySelector('[data-verdict="advice"]');
+
+  const brightness = payload.frame?.brightness;
+  const sharpness = payload.frame?.sharpness;
+
+  // 1. Light (brightness)
+  let lightClass = 'neutral';
+  let lightText = 'Light: —';
+  let advice = '';
+
+  if (brightness !== null && brightness !== undefined) {
+    const b = Number(brightness);
+    if (b < 12) {
+      lightClass = 'red';
+      lightText = `Light: Black (${Math.round(b)})`;
+      advice = 'the camera returned a black frame';
+    } else if (b < 35) {
+      lightClass = 'red';
+      lightText = `Light: Dark (${Math.round(b)})`;
+      advice = 'too dark: light the subject';
+    } else if (b < 60) {
+      lightClass = 'amber';
+      lightText = `Light: Dim (${Math.round(b)})`;
+      advice = 'low light: increase illumination';
+    } else if (b > 230) {
+      lightClass = 'amber';
+      lightText = `Light: Bright (${Math.round(b)})`;
+      advice = 'overexposed: reduce glare';
+    } else {
+      lightClass = 'green';
+      lightText = `Light: Good (${Math.round(b)})`;
+    }
+  }
+
+  // 2. Focus (sharpness)
+  let focusClass = 'neutral';
+  let focusText = 'Focus: —';
+  if (sharpness !== null && sharpness !== undefined) {
+    const s = Number(sharpness);
+    if (s < 30) {
+      focusClass = 'red';
+      focusText = `Focus: Blurry (${Math.round(s)})`;
+      if (!advice) advice = 'frame is blurry: hold camera steady';
+    } else if (s < 60) {
+      focusClass = 'amber';
+      focusText = `Focus: Soft (${Math.round(s)})`;
+      if (!advice) advice = 'the frame is soft as well: focus and stillness matter';
+    } else {
+      focusClass = 'green';
+      focusText = `Focus: Sharp (${Math.round(s)})`;
+    }
+  }
+
+  // 3. Size (crop px)
+  const candidates = payload.detection?.candidates || [];
+  let maxCrop = 0;
+  for (const c of candidates) {
+    if (c.bbox && c.bbox.length === 4) {
+      const h = Math.abs(c.bbox[2] - c.bbox[0]);
+      const w = Math.abs(c.bbox[3] - c.bbox[1]);
+      const sz = Math.min(h, w);
+      if (sz > maxCrop) maxCrop = sz;
+    }
+  }
+
+  let sizeClass = 'neutral';
+  let sizeText = 'Size: —';
+  if (candidates.length === 0) {
+    sizeClass = 'red';
+    sizeText = 'Size: No box';
+    if (!advice) advice = 'move closer';
+  } else if (maxCrop < 45) {
+    sizeClass = 'red';
+    sizeText = `Size: Small (${Math.round(maxCrop)}px)`;
+    if (!advice) advice = 'move closer';
+  } else if (maxCrop < 120) {
+    sizeClass = 'amber';
+    sizeText = `Size: Medium (${Math.round(maxCrop)}px)`;
+    if (!advice) advice = 'move closer for higher accuracy';
+  } else {
+    sizeClass = 'green';
+    sizeText = `Size: Good (${Math.round(maxCrop)}px)`;
+  }
+
+  // Advice fallback
+  if (!advice) {
+    if (payload.bus_number) {
+      advice = `Bus ${payload.bus_number} detected successfully.`;
+    } else if (payload.advice) {
+      advice = payload.advice;
+    } else {
+      advice = 'Position subject clearly in frame.';
+    }
+  }
+
+  if (lightPill) {
+    lightPill.className = `verdict-pill pill-light ${lightClass}`;
+    const lbl = lightPill.querySelector('.pill-label');
+    if (lbl) lbl.textContent = lightText;
+  }
+  if (focusPill) {
+    focusPill.className = `verdict-pill pill-focus ${focusClass}`;
+    const lbl = focusPill.querySelector('.pill-label');
+    if (lbl) lbl.textContent = focusText;
+  }
+  if (sizePill) {
+    sizePill.className = `verdict-pill pill-size ${sizeClass}`;
+    const lbl = sizePill.querySelector('.pill-label');
+    if (lbl) lbl.textContent = sizeText;
+  }
+  if (adviceEl) {
+    adviceEl.textContent = advice;
+  }
 }

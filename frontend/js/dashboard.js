@@ -4,7 +4,7 @@ import { downloadExport } from './exports.js';
 import { analyticsParams, eventParams, exportParams, readFilters } from './filters.js';
 import { mountShell } from './layout.js';
 import { connectLive } from './sse.js';
-import { renderCameras, renderCameraTile, requestWebcam, stopStream } from './cameras.js';
+import { renderCameras, renderCameraTile, requestWebcam, stopStream, updateVerdictStrip } from './cameras.js';
 import { STAGES, appendStagesToForm, currentStageFlags, describeScan, responseError, scanDetail, scanFailureText, setStageFlag } from './detection-stages.js';
 import { renderEventsTable } from './tables.js';
 import { clear, el, formatDateTime, formatNumber, setState, showToast } from './ui.js';
@@ -164,6 +164,7 @@ function applyScanResult(payload, meta = {}) {
     statusNode.className = `scan-status ${good ? '' : 'text-danger'}`.trim();
   }
   if (metaNode) metaNode.textContent = scanDetail(payload);
+  updateVerdictStrip(browserCameraTile || document.getElementById('cameraGrid'), payload);
   renderStageWarning();
   analytics.detectionResult(busNumber, payload.confidence);
   analytics.captureFrame(meta.cameraId || 'gate-camera');

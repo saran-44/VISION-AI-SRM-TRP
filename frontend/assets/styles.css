@@ -1383,3 +1383,82 @@ body.dark-theme {
 @media (max-width: 768px) {
     .chart-wrap canvas { height: 200px !important; }
 }
+
+/* --- Camera Verdict Strip ------------------------------------------------ */
+.verdict-strip {
+    margin: 0.4rem 0 0.6rem 0;
+    padding: 0.5rem 0.75rem;
+    background: var(--surface-sunken, #f5eefe);
+    border: 1px solid var(--border, #ece2f9);
+    border-radius: 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.verdict-indicators {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.verdict-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.2;
+    transition: background 0.2s, color 0.2s;
+}
+
+.verdict-pill .pill-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.verdict-pill.green {
+    background: rgba(34, 197, 94, 0.15);
+    color: #15803d;
+}
+.verdict-pill.green .pill-dot {
+    background: #22c55e;
+}
+
+.verdict-pill.amber {
+    background: rgba(245, 158, 11, 0.15);
+    color: #b45309;
+}
+.verdict-pill.amber .pill-dot {
+    background: #f59e0b;
+}
+
+.verdict-pill.red {
+    background: rgba(239, 68, 68, 0.15);
+    color: #b91c1c;
+}
+.verdict-pill.red .pill-dot {
+    background: #ef4444;
+}
+
+.verdict-pill.neutral {
+    background: rgba(156, 163, 175, 0.15);
+    color: #6b7280;
+}
+.verdict-pill.neutral .pill-dot {
+    background: #9ca3af;
+}
+
+.verdict-advice {
+    font-size: 0.8rem;
+    color: var(--text-muted, #6e6488);
+    font-style: italic;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
