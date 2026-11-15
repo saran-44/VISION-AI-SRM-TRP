@@ -5,15 +5,7 @@ import { analyticsParams, eventParams, exportParams, readFilters } from './filte
 import { mountShell } from './layout.js';
 import { connectLive } from './sse.js';
 import { renderCameras, renderCameraTile, requestWebcam, stopStream } from './cameras.js';
-import {
-  STAGES,
-  appendStagesToForm,
-  currentStageFlags,
-  describeScan,
-  scanDetail,
-  scanFailureText,
-  setStageFlag,
-} from './detection-stages.js';
+import { STAGES, appendStagesToForm, currentStageFlags, describeScan, responseError, scanDetail, scanFailureText, setStageFlag } from './detection-stages.js';
 import { renderEventsTable } from './tables.js';
 import { clear, el, formatDateTime, formatNumber, setState, showToast } from './ui.js';
 import { analytics, initFirebase } from './firebase.js';
@@ -147,7 +139,7 @@ async function scanFrame(blob, meta = {}) {
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
-      throw new Error(payload?.error || `Scan failed (${response.status}).`);
+      throw new Error(responseError(payload, response.status));
     }
 
     applyScanResult(payload, meta);

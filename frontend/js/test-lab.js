@@ -8,14 +8,7 @@
 import { apiGet, apiPost } from './api.js';
 import { renderCameraTile } from './cameras.js';
 import { mountShell } from './layout.js';
-import {
-  STAGES,
-  appendStagesToForm,
-  currentStageFlags,
-  describeScan,
-  renderStageChips,
-  setStageFlag,
-} from './detection-stages.js';
+import { STAGES, appendStagesToForm, currentStageFlags, describeScan, renderStageChips, responseError, setStageFlag } from './detection-stages.js';
 import { badge, clear, el, icon, setState, showToast } from './ui.js';
 
 const STATUS_VARIANT = { pass: 'status-in', warn: 'status-out', fail: 'status-out' };
@@ -191,7 +184,7 @@ async function scanFrame(blob) {
       body,
     });
     const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(payload?.error || `Scan failed (${response.status}).`);
+    if (!response.ok) throw new Error(responseError(payload, response.status));
     if (plate) plate.textContent = payload.bus_number || 'UNKNOWN';
     // The response says *why* it has no number: nothing detected, everything
     // below the confidence threshold, a plate the OCR missed — and which stage

@@ -209,7 +209,56 @@ to delete it on purpose.
 
 ---
 
-## 7. Troubleshooting
+## 7. Collecting a report when something is wrong
+
+The console is hidden, so nothing a failure prints survives on screen. Two
+things do survive:
+
+**Every failure is written down.** Unhandled exceptions, database errors and
+every scan that produced no number are appended to
+`C:\ProgramData\VisionAI\logs\errors.log` — one block each, with a short
+`ref=` and, for a scan, the measurements that explain it:
+
+```
+--- 2026-11-13T23:31:02+05:30 SCAN ref=9943b270
+reason   : unreadable
+frame    : 1280x720, sharpness 93.0, brightness 142.0, tiles 2
+saved    : C:\ProgramData\VisionAI\failed-frames\fail-20261113-233102.jpg
+advice   : Sticker detected at 0.85 but the OCR read no text. ...
+```
+
+When the portal returns a 500 the response carries the matching `ref`, so a
+report can be tied to the request that failed. The file rotates once at 1 MB
+into `errors.log.1`, so it never grows without limit; `VISION_ERROR_LOG=false`
+turns it off.
+
+**One command turns all of it into one block.** From the bundle:
+
+```bash
+VisionAI.exe --report            # prints it and writes logs\report.txt
+VisionAI.exe --report --deep     # also loads the detector (~10 s)
+```
+
+From a source checkout:
+
+```bash
+python scripts/gate_report.py --env-file "C:/ProgramData/VisionAI/gate.env"
+python scripts/gate_report.py --out report.txt      # keep it, to attach
+python scripts/gate_report.py --clear               # empty the log afterwards
+```
+
+The report holds, in order: the version and paths, the configuration (both the
+environment and `gate.env`), the vision settings, what the camera answered, the
+model files and their sizes, the full 16-check preflight, the recorded errors,
+the scans that produced no number, and the warnings from `portal.log`.
+
+Every password, device key, bearer token and JWT is masked before it is
+written — `rtsp://admin:***@…`, `SECRET_KEY=***` — so the block can be pasted
+as it is. That masking is tested; the report is meant to leave the machine.
+
+---
+
+## 8. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -230,7 +279,7 @@ to delete it on purpose.
 
 ---
 
-## 8. What this install does **not** do yet
+## 9. What this install does **not** do yet
 
 - **Cloud sync.** The gate database is local and authoritative. Pushing events
   to Supabase/Render and reconciling ids is stage 2 of the "both" decision and

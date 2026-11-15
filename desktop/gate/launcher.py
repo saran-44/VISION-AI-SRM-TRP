@@ -106,7 +106,8 @@ def hide_console() -> None:
 
     Double-clicking it to *run* the portal must not leave a black window on the
     gate desk, so the console is hidden when the portal starts. It is kept for
-    --setup (the wizard reads input) and --check (it prints the report).
+    --setup (the wizard reads input), --check and --report (they print text the
+    operator has to read or copy).
     """
     if os.name != "nt":
         return
@@ -457,6 +458,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="copy the gate database safely (default: %PROGRAMDATA%%\\VisionAI\\backups)")
     parser.add_argument("--deep", action="store_true", help="with --check: also load the detector")
     parser.add_argument("--json", action="store_true", help="with --check: machine-readable output")
+    parser.add_argument("--report", action="store_true",
+                        help="collect everything needed to diagnose this PC into one text block")
+    parser.add_argument("--out", default="", help="with --report: also write the report here")
     parser.add_argument("--no-browser", action="store_true", help="do not open the portal in a browser")
     parser.add_argument("--no-tray", action="store_true", help="run without the tray icon")
     parser.add_argument("--verbose", action="store_true")
@@ -470,6 +474,27 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.backup is not None:
         return run_backup(args.backup or None)
+
+    if args.report:
+        from backend.report import build_report
+
+        text = build_report(deep=args.deep)
+        print(text)
+        target = Path(args.out).expanduser() if args.out else log_file().parent / "report.txt"
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text + "\n", encoding="utf-8")
+            print(f"\nwritten to {target}")
+        except OSError as exc:
+            print(f"\ncould not write {target}: {exc}", file=sys.stderr)
+        if sys.stdin and sys.stdin.isatty():
+            # Double-clicked from Explorer the window would close on the text
+            # that was the whole point of running it.
+            try:
+                input("\nPress Enter to close...")
+            except (EOFError, KeyboardInterrupt):
+                pass
+        return 0
 
     if args.check:
         from backend.preflight import format_report, main as preflight_main

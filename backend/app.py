@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask, Response, current_app, g, jsonify, make_response, redirect, request, send_from_directory, stream_with_context
+from werkzeug.exceptions import HTTPException
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -28,6 +29,7 @@ from .auth import (
     set_auth_cookie,
     verify_password,
 )
+from . import diagnostics
 from .config import DEMO_ADMIN_EMAIL, GATE_ENVIRONMENT, Config
 from .db import ASCENDING, DESCENDING, get_database_for_startup, iso_utc, public_doc, utc_naive, valid_id
 from .frame_source import FrameSourceError, describe as describe_camera, snapshot as camera_snapshot_frame
@@ -118,6 +120,7 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         SECRET_KEY=os.urandom(32).hex(),
     )
     app.json.sort_keys = False
+
     if config.trust_proxy_headers:
         # Only trusted when an operator explicitly opts in, because the headers
         # are client-controlled when there is no proxy in front of the app.
@@ -821,6 +824,9 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         # and a dark night would quietly rotate the ring with black JPEGs.
         if not (candidate and candidate.bus_number) and result.reason != "frame_unusable":
             response["frame"]["saved"] = save_failed_frame(image)
+        # Not an exception, but the error that matters: a scan that produced no
+        # number, with the measurements that explain it.
+        diagnostics.log_scan(response, source=str(response.get("source") or ""))
 
         record_audit(
             db,
@@ -1181,6 +1187,8 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
     def database_error(_error):
         # Driver messages and SQL may contain credentials or personal data.
         current_app.logger.error("Database request failed (%s)", type(_error).__name__)
+        # The type only: the message can carry SQL, credentials or personal data.
+        diagnostics.log_error("database", f"{type(_error).__name__}", request=request)
         if request.path.startswith("/api/"):
             return jsonify({"error": "A temporary data service error occurred"}), 503
         return make_response("Service temporarily unavailable", 503)
@@ -1188,8 +1196,26 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
     @app.errorhandler(Exception)
     def unhandled_error(error):
         current_app.logger.exception("Unhandled request error: %s", type(error).__name__)
+        # The console is hidden on the gate PC, so the traceback also goes to
+        # <data>/logs/errors.log, and the caller gets the reference to quote.
+        ref = diagnostics.log_error(
+            "unhandled", f"{type(error).__name__}: {error}", exc=error, request=request
+        )
         if request.path.startswith("/api/"):
-            return jsonify({"error": "An unexpected server error occurred"}), 500
-        return make_response("An unexpected server error occurred", 500)
+            return (
+                jsonify(
+                    {
+                        "error": "An unexpected server error occurred",
+                        "ref": ref,
+                        "detail": "The traceback is recorded: VisionAI.exe --report",
+                    }
+                ),
+                500,
+            )
+        return make_response(
+            f"An unexpected server error occurred.\nReference {ref}.\n"
+            "Run VisionAI.exe --report on the gate PC to collect the details.\n",
+            500,
+        )
 
     return app
