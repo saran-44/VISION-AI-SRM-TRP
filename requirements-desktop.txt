@@ -8,6 +8,8 @@
 # has no GPU for).
 
 -r backend/requirements-vision.txt
+ultralytics==8.4.20
 waitress==3.0.2
 pystray==0.19.5
 pyinstaller==6.11.1
+pytest

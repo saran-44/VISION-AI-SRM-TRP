@@ -93,7 +93,7 @@ def test_runtime_role_can_operate_but_cannot_change_schema_or_audit(db, config):
                                  dbname=parts.path.lstrip("/"), user=role, password=password,
                                  autocommit=True) as runtime:
                 runtime.execute("SELECT * FROM transport_portal.schema_version")
-                runtime.execute("INSERT INTO transport_portal.buses (_id, bus_number) VALUES ('a00000000000000000000001', 'ROLE-TEST')")
+                runtime.execute("INSERT INTO transport_portal.buses (_id, bus_number) VALUES ('a00000000000000000000001', 'ROLE-1')")
                 runtime.execute("INSERT INTO transport_portal.audit_logs (_id, timestamp, action) VALUES ('a00000000000000000000002', now(), 'test')")
                 with pytest.raises(psycopg.errors.InsufficientPrivilege):
                     runtime.execute("UPDATE transport_portal.audit_logs SET action = 'changed'")
@@ -111,7 +111,7 @@ def test_runtime_role_can_operate_but_cannot_change_schema_or_audit(db, config):
             runtime_url = f"postgresql://{role}:{quote(password, safe='')}@{parts.hostname}:{parts.port or 5432}/{parts.path.lstrip('/')}"
             app = create_app(replace(config, database_url=runtime_url))
             response = app.test_client().post("/api/events", headers={"X-Device-Key": DEVICE_KEY}, json={
-                "bus_number": "ROLE-TEST", "direction": "IN", "gate": "Gate 1", "camera_id": "cam",
+                "bus_number": "ROLE-1", "direction": "IN", "gate": "Gate 1", "camera_id": "cam",
                 "confidence": 0.9, "timestamp": "2026-01-01T00:00:00Z",
             })
             assert response.status_code == 201

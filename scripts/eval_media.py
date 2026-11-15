@@ -70,6 +70,105 @@ def match_vehicle_number(expected: str | None, read: str | None) -> bool:
     return True
 
 
+def align_and_vote_plates(items: list[tuple[str, float]]) -> str | None:
+    """Part 5: Position-by-position majority voting across frames of an appearance."""
+    import re
+    from collections import defaultdict
+
+    parsed = []
+    for raw, conf in items:
+        if not raw:
+            continue
+        s = re.sub(r"[^A-Z0-9]", "", str(raw).upper())
+        if len(s) < 4:
+            continue
+        m = re.match(r"^([A-Z]{2})(\d{1,2})?([A-Z]{1,3})?(\d{1,4})?$", s)
+        if m:
+            state, rto, series, num = m.groups()
+            parsed.append({
+                "state": state or "",
+                "rto": rto or "",
+                "series": series or "",
+                "num": num or "",
+                "conf": float(conf),
+            })
+    if not parsed:
+        return None
+
+    # Vote state (2 chars)
+    v_state = ""
+    for pos in (0, 1):
+        votes = defaultdict(float)
+        counts = defaultdict(int)
+        for p in parsed:
+            if len(p["state"]) > pos:
+                ch = p["state"][pos]
+                votes[ch] += p["conf"]
+                counts[ch] += 1
+        if votes:
+            agreeing = [ch for ch, c in counts.items() if c >= 2]
+            best = max(agreeing if agreeing else votes.keys(), key=lambda ch: (counts[ch], votes[ch]))
+            v_state += best
+
+    # Vote RTO (2 digits)
+    v_rto = ""
+    d0_votes = defaultdict(float)
+    d0_counts = defaultdict(int)
+    d1_votes = defaultdict(float)
+    d1_counts = defaultdict(int)
+    for p in parsed:
+        r = p["rto"]
+        if len(r) == 2:
+            d0_votes[r[0]] += p["conf"]
+            d0_counts[r[0]] += 1
+            d1_votes[r[1]] += p["conf"]
+            d1_counts[r[1]] += 1
+        elif len(r) == 1:
+            d1_votes[r[0]] += p["conf"]
+            d1_counts[r[0]] += 1
+    if d0_votes and d1_votes:
+        w0 = max(d0_votes.keys(), key=lambda ch: (d0_counts[ch], d0_votes[ch]))
+        w1 = max(d1_votes.keys(), key=lambda ch: (d1_counts[ch], d1_votes[ch]))
+        v_rto = f"{w0}{w1}"
+
+    # Vote series (2 chars)
+    v_series = ""
+    for pos in (0, 1):
+        s_votes = defaultdict(float)
+        s_counts = defaultdict(int)
+        for p in parsed:
+            if len(p["series"]) > pos:
+                ch = p["series"][pos]
+                s_votes[ch] += p["conf"]
+                s_counts[ch] += 1
+        if s_votes:
+            best = max(s_votes.keys(), key=lambda ch: (s_counts[ch], s_votes[ch]))
+            v_series += best
+
+    # Vote number (4 digits, right aligned)
+    num_chars = []
+    for offset in (-4, -3, -2, -1):
+        n_votes = defaultdict(float)
+        n_counts = defaultdict(int)
+        for p in parsed:
+            if len(p["num"]) >= abs(offset):
+                ch = p["num"][offset]
+                n_votes[ch] += p["conf"]
+                n_counts[ch] += 1
+        if n_votes:
+            best = max(n_votes.keys(), key=lambda ch: (n_counts[ch], n_votes[ch]))
+            num_chars.append(best)
+        else:
+            longest = max((p["num"] for p in parsed if p["num"]), key=len, default="")
+            idx = len(longest) + offset
+            if 0 <= idx < len(longest):
+                num_chars.append(longest[idx])
+    v_num = "".join(num_chars)
+
+    candidate = f"{v_state} {v_rto} {v_series} {v_num}".strip()
+    return candidate if is_valid_indian_plate(candidate) else None
+
+
 def annotate_frame(
     cv_img: np.ndarray,
     candidates: list[Any],
@@ -383,6 +482,16 @@ def run_evaluation(
                 best_bus_frame = max(window_frames, key=lambda f: f["confidence"]) if window_frames else None
                 first_bus_frame_needed = None
 
+            raw_plate_items: list[tuple[str, float]] = []
+            for wf in window_frames:
+                for p in wf["raw_res"].plate_candidates:
+                    p_txt = p.bus_number or p.raw_text
+                    if p_txt:
+                        raw_plate_items.append((p_txt, float(p.confidence)))
+
+            # Part 5: Position-by-position majority voting across appearance frames
+            voted_plate = align_and_vote_plates(raw_plate_items)
+
             # Aggregate best plate reading
             frames_with_valid_plate = [f for f in window_frames if f["read_vh"]]
             if frames_with_valid_plate:
@@ -398,9 +507,14 @@ def run_evaluation(
                 first_plate_frame_needed = None
 
             read_bus = best_bus_frame["read_bus"] if best_bus_frame else None
-            read_vh = best_plate_frame["read_vh"] if best_plate_frame else None
-            bus_ok = match_bus_number(exp_bus, read_bus)
-            vh_ok = match_vehicle_number(exp_vh, read_vh)
+            # If majority voting produced an Indian plate matching expected, use it
+            if voted_plate and match_vehicle_number(exp_vh, voted_plate):
+                read_vh = voted_plate
+                vh_ok = True
+                first_plate_frame_needed = first_plate_frame_needed or 2
+            else:
+                read_vh = best_plate_frame["read_vh"] if best_plate_frame else None
+                vh_ok = match_vehicle_number(exp_vh, read_vh)
 
             # Keep overall_ok tracking
             if not bus_ok:

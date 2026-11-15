@@ -549,6 +549,7 @@ def test_plate_stage_runs_on_vehicle_crop_when_vehicle_present(clean_env, tmp_pa
 
 def test_clahe_dual_pass_recovers_text_when_plain_fails(monkeypatch):
     """When plain OCR returns empty/low score, CLAHE variant is selected."""
+    pytest.importorskip("PIL")
     from PIL import Image
 
     def mock_ocr(crop):
@@ -633,6 +634,7 @@ def test_validate_fallback_text_rejects_campus_banner():
 
 def test_plate_stage_cached_per_frame(monkeypatch):
     """A2: If plate stage is called multiple times on one frame, it runs once and caches."""
+    pytest.importorskip("PIL")
     from pathlib import Path
     from PIL import Image
 

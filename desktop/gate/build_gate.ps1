@@ -24,6 +24,8 @@ if (-not (Test-Path $Python)) {
 if ($LASTEXITCODE -ne 0) { throw "torch install failed" }
 & $Python -m pip install --quiet -r requirements-desktop.txt
 if ($LASTEXITCODE -ne 0) { throw "dependency install failed" }
+& $Python -m pip install --quiet --no-deps ultralytics==8.4.20
+if ($LASTEXITCODE -ne 0) { throw "ultralytics install failed" }
 
 Write-Host "== 2/6  Checkpoints ==" -ForegroundColor Cyan
 foreach ($model in @("best.pt", "anpr_best.pt")) {

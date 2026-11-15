@@ -78,6 +78,8 @@ jobs:
             --index-url https://download.pytorch.org/whl/cpu \
             --extra-index-url https://pypi.org/simple
           pip install --no-deps ultralytics==8.4.20
+          python -m pip uninstall -y opencv-python || true
+          python -m pip install --no-deps opencv-python-headless==4.10.0.84
           python scripts/check_env.py
 
       - name: The checkpoint must load and report its classes
@@ -140,6 +142,7 @@ jobs:
   windows-gate:
     name: Windows gate bundle (untested)
     runs-on: windows-latest
+    continue-on-error: true
     # This is intentionally marked untested until a successful hosted run exists.
     steps:
       - uses: actions/checkout@v4

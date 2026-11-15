@@ -825,17 +825,35 @@ def apply_clahe(crop):
     return crop
 
 
-def _run_rapidocr_with_score(image, engine) -> tuple[str, float]:
+def _run_rapidocr_with_score(image, engine, *, use_det: bool = True) -> tuple[str, float]:
     if not hasattr(image, "convert"):
         return ("", 0.0)
     import numpy as np
 
     array = np.array(image.convert("RGB"))
-    result, _ = engine(array)
+    try:
+        result, _ = engine(array, use_det=use_det)
+    except Exception:
+        result, _ = engine(array)
     if not result:
         return ("", 0.0)
-    text = " ".join(str(item[1]) for item in result)
-    score = max((float(item[2]) for item in result), default=0.0)
+    texts: list[str] = []
+    scores: list[float] = []
+    for item in result:
+        if len(item) >= 3:
+            texts.append(str(item[1]))
+            try:
+                scores.append(float(item[2]))
+            except (ValueError, TypeError):
+                scores.append(0.0)
+        elif len(item) == 2:
+            texts.append(str(item[0]))
+            try:
+                scores.append(float(item[1]))
+            except (ValueError, TypeError):
+                scores.append(0.0)
+    text = " ".join(t for t in texts if t)
+    score = max(scores, default=0.0)
     return (text, score)
 
 
@@ -848,15 +866,15 @@ def read_text(image, engine_name: str | None = None) -> str:
     return _default_read_text_with_score(image, engine_name)[0]
 
 
-def read_text_with_score(image, engine_name: str | None = None) -> tuple[str, float]:
+def read_text_with_score(image, engine_name: str | None = None, *, use_det: bool = True) -> tuple[str, float]:
     """Read text and OCR confidence score out of an image using the configured OCR backend."""
     if read_text is not _orig_read_text:
         txt = read_text(image, engine_name)
         return (txt, 0.9 if txt else 0.0)
-    return _default_read_text_with_score(image, engine_name)
+    return _default_read_text_with_score(image, engine_name, use_det=use_det)
 
 
-def _default_read_text_with_score(image, engine_name: str | None = None) -> tuple[str, float]:
+def _default_read_text_with_score(image, engine_name: str | None = None, *, use_det: bool = True) -> tuple[str, float]:
     engine_name = (engine_name or ocr_engine_name()).lower()
     if engine_name == "none":
         return ("", 0.0)
@@ -879,7 +897,7 @@ def _default_read_text_with_score(image, engine_name: str | None = None) -> tupl
                 return (txt, 0.8 if txt else 0.0)
             if name == "rapidocr":
                 engine = _ocr_rapidocr()
-                return _run_rapidocr_with_score(image, engine)
+                return _run_rapidocr_with_score(image, engine, use_det=use_det)
             raise VisionUnavailable(f"Unknown OCR engine '{name}'")
         except VisionUnavailable as exc:
             errors.append(str(exc))
@@ -1183,6 +1201,8 @@ def tile_settings() -> int:
 
 def tile_count(width: int, height: int, requested: int | None = None) -> int:
     """How many tiles per axis to use for a frame this size."""
+    if max(width, height) < 1024:
+        return 1
     wanted = tile_settings() if requested is None else requested
     if wanted == 0:  # auto: a gate-sized frame gets 2×2, a small crop does not
         return 2 if max(width, height) >= 1024 else 1
@@ -1300,7 +1320,7 @@ def sticker_upscale() -> int:
 
 
 def _prepare_crop_for_ocr(crop, factor: int):
-    """Enlarge a small crop so the OCR has pixels to work with."""
+    """Enlarge a small crop so the OCR has pixels to work with, capped at 960 px."""
     size = getattr(crop, "size", None)
     try:
         if not size or len(size) != 2:
@@ -1318,8 +1338,10 @@ def _prepare_crop_for_ocr(crop, factor: int):
         # No Pillow on this host: the OCR still gets the original crop.
         return crop
     resample = getattr(getattr(Image, "Resampling", Image), "LANCZOS", 1)
+    new_w = min(960, width * factor)
+    new_h = height * factor if new_w == width * factor else max(1, int(round(height * factor * (new_w / (width * factor)))))
     try:
-        return crop.resize((width * factor, height * factor), resample)
+        return crop.resize((new_w, new_h), resample)
     except Exception:  # pragma: no cover - defensive
         return crop
 
@@ -1335,7 +1357,7 @@ def _ocr_rows(
     names: dict,
     *,
     threshold: float,
-    limit: int,
+    limit: int = 2,
     class_filter: int | None = None,
     upscale: bool = False,
     upscale_factor: int | None = None,
@@ -1344,16 +1366,25 @@ def _ocr_rows(
 
     `class_filter` keeps a single class id; `None` keeps every class, which is
     what a single-class number-plate checkpoint (`Class 0 = licence`) needs.
-    `upscale` applies the plate enlargement; `upscale_factor` applies an
-    explicit one (the sticker path passes `VISION_STICKER_UPSCALE`).
     """
     candidates: list[PlateCandidate] = []
+    effective_limit = min(limit or 2, 2)
+
+    # Per-frame crop OCR cache to avoid running OCR on the same crop twice
+    ocr_cache = getattr(image, "_ocr_cache", None)
+    if ocr_cache is None:
+        ocr_cache = {}
+        try:
+            image._ocr_cache = ocr_cache
+        except Exception:
+            pass
+
     for confidence, class_id, coords in rows:
         if confidence < threshold:
-            break  # everything after this one is weaker still
+            break
         if class_filter is not None and class_id != class_filter:
             continue
-        if len(candidates) >= limit:
+        if len(candidates) >= effective_limit:
             break
         class_name = names.get(class_id, CLASS_LABELS.get(class_id, str(class_id)))
         candidate = PlateCandidate(
@@ -1364,59 +1395,54 @@ def _ocr_rows(
         )
         crop = _crop(image, coords)
         if crop is not None:
+            cache_key = tuple(coords)
+            if ocr_cache is not None and cache_key in ocr_cache:
+                raw_text, score_plain, norm_text, variant = ocr_cache[cache_key]
+                candidate.raw_text = raw_text
+                candidate.bus_number = norm_text
+                candidate.ocr_variant = variant
+                candidates.append(candidate)
+                continue
+
             if upscale_factor and upscale_factor > 1:
                 crop = _prepare_crop_for_ocr(crop, upscale_factor)
             elif upscale:
                 crop = _prepare_plate_crop(crop)
+
+            # Single-pass OCR: tight crop recognition without DBNet (use_det=False)
             try:
+                raw_plain, score_plain = read_text_with_score(crop, use_det=False)
+            except TypeError:
                 raw_plain, score_plain = read_text_with_score(crop)
             except VisionUnavailable as exc:
                 logger.info("OCR unavailable for this frame: %s", exc)
                 raw_plain, score_plain = "", 0.0
             norm_plain = normalize_plate(raw_plain)
 
-            # Dual-pass CLAHE variant (runs during real OCR or explicit read_text_with_score testing)
-            if read_text is _orig_read_text:
+            # If tight recognition was empty, fall back only if read_text wasn't directly patched
+            if not norm_plain and read_text is _orig_read_text:
                 crop_clahe = apply_clahe(crop)
                 try:
+                    raw_clahe, score_clahe = read_text_with_score(crop_clahe, use_det=False)
+                except TypeError:
                     raw_clahe, score_clahe = read_text_with_score(crop_clahe)
                 except VisionUnavailable:
                     raw_clahe, score_clahe = "", 0.0
                 norm_clahe = normalize_plate(raw_clahe)
-            else:
-                raw_clahe, score_clahe, norm_clahe = "", 0.0, ""
-
-            # Select higher-confidence non-empty result (or consensus)
-            if norm_plain and not norm_clahe:
-                candidate.raw_text = raw_plain.strip()
-                candidate.bus_number = norm_plain
-                candidate.ocr_variant = "plain"
-            elif norm_clahe and not norm_plain:
-                candidate.raw_text = raw_clahe.strip()
-                candidate.bus_number = norm_clahe
-                candidate.ocr_variant = "clahe"
-            elif norm_plain and norm_clahe:
-                if norm_plain == norm_clahe:
-                    candidate.bus_number = norm_plain
-                    if score_clahe > score_plain:
-                        candidate.raw_text = raw_clahe.strip()
-                        candidate.ocr_variant = "clahe"
-                    else:
-                        candidate.raw_text = raw_plain.strip()
-                        candidate.ocr_variant = "plain"
-                elif score_clahe > score_plain:
-                    candidate.raw_text = raw_clahe.strip()
-                    candidate.bus_number = norm_clahe
+                if norm_clahe:
+                    raw_plain, score_plain, norm_plain = raw_clahe, score_clahe, norm_clahe
                     candidate.ocr_variant = "clahe"
-                else:
-                    candidate.raw_text = raw_plain.strip()
-                    candidate.bus_number = norm_plain
-                    candidate.ocr_variant = "plain"
-            else:
-                candidate.raw_text = raw_plain.strip() or raw_clahe.strip()
-                candidate.bus_number = ""
+
+            candidate.raw_text = raw_plain.strip()
+            candidate.bus_number = norm_plain if norm_plain else ""
+            if not getattr(candidate, "ocr_variant", None):
                 candidate.ocr_variant = "plain"
+            if not norm_plain:
                 candidate.crop_path = diagnostics.save_ocr_crop(crop)
+
+            if ocr_cache is not None:
+                ocr_cache[cache_key] = (candidate.raw_text, score_plain, candidate.bus_number, candidate.ocr_variant)
+
         candidates.append(candidate)
     return candidates
 
@@ -2313,8 +2339,13 @@ def warm_models(*, force: bool = False) -> dict[str, Any]:
 
     import time
     started = time.perf_counter()
-    from PIL import Image
-    dummy = Image.new("RGB", (64, 64), (128, 128, 128))
+    try:
+        from PIL import Image
+        dummy = Image.new("RGB", (64, 64), (128, 128, 128))
+    except ImportError:
+        _warmup_ms = 0.0
+        _is_warm = True
+        return {"warm": True, "warmup_ms": 0.0, "note": "PIL not installed"}
 
     # 1. Sticker model
     try:
