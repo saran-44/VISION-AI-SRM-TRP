@@ -568,6 +568,15 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             return error
         event = ingest_event(db, payload, config, source="device")
         if event.get("duplicate"):
+            record_audit(
+                db,
+                {"email": "device-client", "role": "device"},
+                "event_deduplicated",
+                "events",
+                event.get("event", {}).get("id") or event.get("id"),
+                after=event,
+                flask_request=request,
+            )
             return jsonify(event), 200
         record_audit(
             db,
@@ -820,13 +829,17 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         # A number read by the plate stage is returned exactly like one read
         # from a sticker: callers keep the same three fields.
         candidate = best_identification(result) or best_candidate(result)
+        bus_num = (candidate.bus_number or None) if candidate else None
+        scan_reason = result.reason
+        if candidate and not candidate.bus_number and scan_reason in ("success", "ok"):
+            scan_reason = "ocr_unreadable"
         response: dict[str, Any] = {
             "detection": result.to_dict(),
-            "bus_number": candidate.bus_number if candidate else None,
+            "bus_number": bus_num,
             "confidence": candidate.confidence if candidate else None,
             "raw_text": candidate.raw_text if candidate else None,
             # Why the scan returned no number, in the caller's words.
-            "reason": result.reason,
+            "reason": scan_reason,
             "advice": result.advice,
             "source": payload.get("source", "device"),
             # Additive: which stage answered, and what kind of vehicle it was.
@@ -962,6 +975,15 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             return error
         event = ingest_event(db, payload, config, source="test-lab")
         if event.get("duplicate"):
+            record_audit(
+                db,
+                g.current_user,
+                "event_deduplicated",
+                "events",
+                event.get("event", {}).get("id") or event.get("id"),
+                after=event,
+                flask_request=request,
+            )
             return jsonify(event), 200
         record_audit(
             db,

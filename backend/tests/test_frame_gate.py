@@ -84,6 +84,7 @@ def test_a_refusal_is_fast() -> None:
 def test_a_bright_sharp_frame_is_not_refused(monkeypatch) -> None:
     """With no checkpoint on this host, falling through means raising — which proves the gate let it past."""
     monkeypatch.setenv("VISION_QUALITY_GATE", "refuse")
+    monkeypatch.setattr("backend.vision.load_model", lambda *a, **k: (_ for _ in ()).throw(VisionUnavailable("checkpoint missing")))
     with pytest.raises(VisionUnavailable):
         detect(_bright_sharp_frame())
 
@@ -91,6 +92,7 @@ def test_a_bright_sharp_frame_is_not_refused(monkeypatch) -> None:
 def test_the_gate_can_be_switched_off(monkeypatch) -> None:
     monkeypatch.setenv("VISION_QUALITY_GATE", "off")
     assert quality_gate() == "off"
+    monkeypatch.setattr("backend.vision.load_model", lambda *a, **k: (_ for _ in ()).throw(VisionUnavailable("checkpoint missing")))
     with pytest.raises(VisionUnavailable):
         detect(_dark_frame())
 
@@ -311,6 +313,7 @@ def test_a_black_frame_is_refused_end_to_end_without_a_checkpoint(
 def test_a_washed_out_but_bright_frame_is_still_scanned(monkeypatch) -> None:
     """Sharpness never refuses by default: a soft frame can still hold a sticker."""
     monkeypatch.delenv("VISION_MIN_SHARPNESS", raising=False)
+    monkeypatch.setattr("backend.vision.load_model", lambda *a, **k: (_ for _ in ()).throw(VisionUnavailable("checkpoint missing")))
     flat = PIL.new("RGB", (320, 240), (200, 200, 200))  # bright, zero edges
     with pytest.raises(VisionUnavailable):  # reached the model, i.e. was not refused
         detect(flat)

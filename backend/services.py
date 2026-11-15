@@ -167,32 +167,33 @@ def ingest_event(db, payload: EventCreate, config: Config, *, source: str = "dev
 
 
 def compute_stats(db, config: Config) -> dict[str, Any]:
-    cached = getattr(db, "_stats_cache", None)
-    if config.stats_cache_seconds and cached:
-        cached_at, cached_value = cached
-        if time_module.monotonic() - cached_at < config.stats_cache_seconds:
-            return cached_value
     now = naive_now()
     start, end = day_bounds(config)
-    event_projection = {
-        "bus_number": 1,
-        "direction": 1,
-        "timestamp": 1,
-        "flagged": 1,
-        "flag_reasons": 1,
-        "gate": 1,
-        "camera_id": 1,
-        "confidence": 1,
-    }
+    # "Inside" is the latest event of each bus, so the scan is bounded to the
+    # lookback window instead of reading every row ever written: on the free
+    # instance this runs once every few seconds and must not grow with the
+    # table. `STATS_LOOKBACK_DAYS` (default 45) is deliberately far longer than
+    # a bus stays on campus, so nothing that is still inside can be missed.
+    cutoff = now - timedelta(days=config.stats_lookback_days)
+    all_events = list(
+        db.events.find(
+            {"timestamp": {"$gte": cutoff}},
+            {
+                "bus_number": 1,
+                "direction": 1,
+                "timestamp": 1,
+                "flagged": 1,
+                "flag_reasons": 1,
+                "gate": 1,
+                "camera_id": 1,
+                "confidence": 1,
+            },
+        ).sort([("timestamp", ASCENDING), ("_id", ASCENDING)])
+    )
+
     latest_by_bus: dict[str, dict[str, Any]] = {}
-    for bus_number in db.events.distinct("bus_number"):
-        latest = db.events.find_one(
-            {"bus_number": bus_number},
-            event_projection,
-            sort=[("timestamp", DESCENDING), ("_id", DESCENDING)],
-        )
-        if latest:
-            latest_by_bus[bus_number] = latest
+    for event in all_events:
+        latest_by_bus[event["bus_number"]] = event
 
     inside_buses: list[dict[str, Any]] = []
     for bus_number, event in latest_by_bus.items():
