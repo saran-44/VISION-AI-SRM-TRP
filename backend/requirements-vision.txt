@@ -7,19 +7,16 @@
 #   The default torch wheel on PyPI is the CUDA build and pulls ~3 GB of
 #   NVIDIA runtime libraries. Prefer the CPU index on small servers:
 #
-#     pip install torch==2.9.1+cpu torchvision==0.24.1+cpu \
-#         --index-url https://download.pytorch.org/whl/cpu
-#     pip install -r backend/requirements-vision.txt
-# Ultralytics is installed separately with --no-deps so its opencv-python
-# dependency cannot replace the headless wheel:
-#     pip install --no-deps ultralytics==8.4.20
+#     pip install torch==2.9.1 torchvision==0.24.1 \
+#         --extra-index-url https://download.pytorch.org/whl/cpu
 #
 # opencv-python-headless is used deliberately: the full opencv-python wheel
 # needs libGL.so.1, which is missing on minimal server images and breaks
 # `import cv2`.
 
-torch==2.9.1+cpu
-torchvision==0.24.1+cpu
+torch==2.9.1
+torchvision==0.24.1
+ultralytics==8.4.20
 opencv-python-headless==4.10.0.84
 Pillow>=10.0.0
 
@@ -28,16 +25,3 @@ Pillow>=10.0.0
 # (see docs/DETECTION.md).
 rapidocr-onnxruntime==1.4.4
 pytesseract>=0.3.10
-
-# Runtime dependencies normally pulled by ultralytics. Keeping them explicit
-# makes the --no-deps install reproducible without installing headful OpenCV.
-matplotlib>=3.3.0
-numpy>=1.23.0
-psutil
-pyyaml>=5.3.1
-requests>=2.23.0
-scipy>=1.4.1
-seaborn>=0.11.0
-thop>=0.1.1
-tqdm>=4.64.0
-safetensors>=0.3.1
