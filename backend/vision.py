@@ -260,12 +260,43 @@ class DetectionResult:
     vehicle: dict[str, Any] | None = None
     vehicle_boxes: list[list[int]] = field(default_factory=list)
     cascade: str = CASCADE_NONE
+    decode_ms: int = 0
+    sticker_infer_ms: int = 0
+    sticker_ocr_ms: int = 0
+    vehicle_infer_ms: int = 0
+    plate_infer_ms: int = 0
+    plate_infer_crops_ms: list[int] = field(default_factory=list)
+    plate_ocr_ms: int = 0
+    fallback_ocr_ms: int = 0
+    reconcile_ms: int = 0
 
     def to_dict(self) -> dict[str, Any]:
+        total_step_ms = (
+            self.decode_ms
+            + self.sticker_infer_ms
+            + self.sticker_ocr_ms
+            + self.vehicle_infer_ms
+            + self.plate_infer_ms
+            + self.plate_ocr_ms
+            + self.fallback_ocr_ms
+            + self.reconcile_ms
+        )
         return {
             "candidates": [candidate.to_dict() for candidate in self.candidates],
             "model": self.model,
             "inference_ms": self.inference_ms,
+            "timings": {
+                "decode": self.decode_ms,
+                "sticker_infer": self.sticker_infer_ms,
+                "sticker_ocr": self.sticker_ocr_ms,
+                "vehicle_infer": self.vehicle_infer_ms,
+                "plate_infer": self.plate_infer_ms,
+                "plate_infer_crops": self.plate_infer_crops_ms,
+                "plate_ocr": self.plate_ocr_ms,
+                "fallback_ocr": self.fallback_ocr_ms,
+                "reconcile": self.reconcile_ms,
+                "total": total_step_ms,
+            },
             "frame_width": self.frame_width,
             "frame_height": self.frame_height,
             "boxes_total": self.boxes_total,
@@ -579,9 +610,19 @@ def plate_max_crops() -> int:
 
 
 def plate_ocr_fallback_enabled() -> bool:
-    """`VISION_PLATE_OCR_FALLBACK`: whether whole-bumper OCR runs if ANPR finds no box."""
-    val = os.getenv("VISION_PLATE_OCR_FALLBACK", "1").strip().lower()
-    return val not in {"0", "false", "no", "off"}
+    """`VISION_PLATE_OCR_FALLBACK`: whether whole-bumper OCR runs if ANPR finds no box (default OFF)."""
+    val = os.getenv("VISION_PLATE_OCR_FALLBACK", "0").strip().lower()
+    return val in {"1", "true", "yes", "on"}
+
+
+def vehicle_image_size() -> int:
+    """Inference letterbox size for the vehicle detector (`VISION_VEHICLE_IMAGE_SIZE`, default 640)."""
+    raw = os.getenv("VISION_VEHICLE_IMAGE_SIZE", "640").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return 640
+    return max(320, min(1536, value))
 
 
 def vehicle_threshold() -> float:
@@ -857,6 +898,14 @@ def normalize_plate(text: str) -> str:
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" -")
     if len(cleaned) < 2 or len(cleaned) > 20 or not any(character.isdigit() for character in cleaned):
         return ""
+    tokens = cleaned.split()
+    if len(tokens) > 1:
+        orphan_digits = [t for t in tokens if len(t) == 1 and t.isdigit()]
+        complete_numbers = [t for t in tokens if len(t) >= 2 and t.isdigit()]
+        if orphan_digits:
+            if len(complete_numbers) == 1 and len(orphan_digits) + len(complete_numbers) == len(tokens):
+                return complete_numbers[0]
+            return ""
     return cleaned
 
 
@@ -946,6 +995,8 @@ def decode_image(payload: bytes | str) -> "Any":
     resize and nothing else. Only a genuinely bomb-sized canvas (over
     `MAX_INPUT_PIXELS`) and unreadable bytes are rejected.
     """
+    import time
+    t_dec0 = time.perf_counter()
     Image = _require_pil()
     # PIL's own guard warns at this size before we ever resize. Keep it well
     # above anything we accept so a large-but-legitimate photo is not noisy.
@@ -989,6 +1040,7 @@ def decode_image(payload: bytes | str) -> "Any":
         target = (max(1, int(image.width * scale)), max(1, int(image.height * scale)))
         image = image.resize(target, Image.LANCZOS)
     image._orig_image = orig
+    image._decode_ms = int((time.perf_counter() - t_dec0) * 1000)
     return image
 
 
@@ -1387,9 +1439,9 @@ def _run_sticker_stage(image, result: DetectionResult, *, model=None, threshold:
     # is not installed": raise, so the API keeps answering 503 with the checklist.
     model = model or load_model()
 
+    t_sinf0 = time.perf_counter()
     rows = _predict_tiled(model, image, size, min(threshold, 0.05), result.tiles)
-    report.ran = True
-    report.ms = int((time.perf_counter() - started) * 1000)
+    result.sticker_infer_ms = int((time.perf_counter() - t_sinf0) * 1000)
 
     names = getattr(model, "names", {}) or {}
     sticker_id = sticker_class_id(model)
@@ -1401,6 +1453,7 @@ def _run_sticker_stage(image, result: DetectionResult, *, model=None, threshold:
     result.boxes_other_class = sum(
         1 for confidence, class_id, _ in rows if confidence >= threshold and class_id != sticker_id
     )
+    t_socr0 = time.perf_counter()
     result.candidates = _ocr_rows(
         image,
         rows,
@@ -1410,8 +1463,11 @@ def _run_sticker_stage(image, result: DetectionResult, *, model=None, threshold:
         class_filter=sticker_id,
         upscale_factor=sticker_upscale(),
     )
+    result.sticker_ocr_ms = int((time.perf_counter() - t_socr0) * 1000)
     result.boxes_above_threshold = len(result.candidates)
 
+    report.ran = True
+    report.ms = result.sticker_infer_ms + result.sticker_ocr_ms
     report.found = len(result.candidates)
     report.best_confidence = max((candidate.confidence for candidate in result.candidates), default=0.0)
     report.result = _stage_outcome(result.candidates)
@@ -1492,11 +1548,12 @@ def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: 
             w = v_bbox[2] - v_bbox[0]
             h = v_bbox[3] - v_bbox[1]
             margin_x = int(w * 0.05)
-            margin_y = int(h * 0.05)
+            margin_y_top = int(h * 0.05)
+            margin_y_bottom = int(h * 0.15)
             cx1 = max(0, v_bbox[0] - margin_x)
-            cy1 = max(0, v_bbox[1] - margin_y)
+            cy1 = max(0, v_bbox[1] - margin_y_top)
             cx2 = min(img_w, v_bbox[2] + margin_x)
-            cy2 = min(img_h, v_bbox[3] + margin_y)
+            cy2 = min(img_h, v_bbox[3] + margin_y_bottom)
 
             orig_cx1 = max(0, int(round(cx1 * scale_x)))
             orig_cy1 = max(0, int(round(cy1 * scale_y)))
@@ -1512,37 +1569,64 @@ def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: 
             cw = getattr(v_crop, "width", orig_cx2 - orig_cx1)
             ch = getattr(v_crop, "height", orig_cy2 - orig_cy1)
 
-            # Adaptive plate imgsz: keep 960 for the largest crop if > 1500 px (retains busimage2 plate),
-            # otherwise min(640, max(320, max(cw, ch)))
-            if crop_idx == 0 and max(cw, ch) > 1500:
-                plate_imgsz = 960
-            else:
-                plate_imgsz = min(640, max(320, max(cw, ch)))
+            # Bumper band: bottom 45% of the vehicle crop
+            band_y1 = int(round(ch * 0.55))
+            band_crop = v_crop.crop((0, band_y1, cw, ch))
 
+            t_crop_infer0 = time.perf_counter()
             try:
-                p_rows = _predict_rows(model, v_crop, plate_imgsz, min(gate, 0.05))
+                p_rows = _predict_rows(model, band_crop, 640, min(gate, 0.05))
             except Exception as exc:
-                logger.debug("Plate prediction error on crop: %s", exc)
+                logger.debug("Plate prediction error on bumper band: %s", exc)
                 p_rows = []
+
+            y_offset = band_y1
+
+            # On large vehicle crops, if bumper band at 640 didn't yield a box >= gate,
+            # retry bumper band at 800, then full crop at 800 if still needed.
+            has_plate = any(conf >= gate for conf, _, _ in p_rows)
+            if not has_plate and max(cw, ch) > 1000:
+                try:
+                    p_rows_retry = _predict_rows(model, band_crop, 800, min(gate, 0.05))
+                except Exception:
+                    p_rows_retry = []
+                if any(conf >= gate for conf, _, _ in p_rows_retry):
+                    p_rows = p_rows_retry
+                    y_offset = band_y1
+                else:
+                    try:
+                        p_rows_full = _predict_rows(model, v_crop, 800, min(gate, 0.05))
+                    except Exception:
+                        p_rows_full = []
+                    if any(conf >= gate for conf, _, _ in p_rows_full):
+                        p_rows = p_rows_full
+                        y_offset = 0
+
+            crop_infer_ms = int((time.perf_counter() - t_crop_infer0) * 1000)
+            result.plate_infer_ms += crop_infer_ms
+            result.plate_infer_crops_ms.append(crop_infer_ms)
 
             crop_candidates: list[PlateCandidate] = []
             for conf, cid, p_box in p_rows:
                 if conf < gate:
                     break
-                full_box = map_box_to_full_frame(p_box, (orig_cx1, orig_cy1), (scale_x, scale_y))
+                crop_bbox = [p_box[0], p_box[1] + y_offset, p_box[2], p_box[3] + y_offset]
+                full_box = map_box_to_full_frame(crop_bbox, (orig_cx1, orig_cy1), (scale_x, scale_y))
                 print(
-                    f"Plate stage: crop size={cw}x{ch}, crop_bbox={p_box}, full_bbox={full_box}, conf={conf:.4f}",
+                    f"Plate stage: crop size={cw}x{ch}, crop_bbox={crop_bbox}, full_bbox={full_box}, conf={conf:.4f}",
                     flush=True,
                 )
-                p_crop = _crop(v_crop, p_box)
+                p_crop = _crop(v_crop, crop_bbox)
                 raw_text = ""
                 if p_crop is not None:
                     p_crop_up = _prepare_plate_crop(p_crop)
+                    t_ocr0 = time.perf_counter()
                     try:
                         raw_text = read_text(p_crop_up)
                     except Exception as exc:
                         logger.debug("Plate crop OCR error: %s", exc)
                         raw_text = ""
+                    result.plate_ocr_ms += int((time.perf_counter() - t_ocr0) * 1000)
                 fmt = format_vehicle_plate(raw_text)
                 cand = PlateCandidate(
                     confidence=conf,
@@ -1564,6 +1648,7 @@ def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: 
                 and not any(c.bus_number for c in crop_candidates)
                 and hasattr(v_crop, "convert")
             ):
+                t_fb0 = time.perf_counter()
                 try:
                     half_crop = v_crop.crop((0, ch // 2, cw, ch))
                     half_w, half_h = half_crop.size
@@ -1606,10 +1691,15 @@ def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: 
                                 break
                 except Exception as exc:
                     logger.debug("Vehicle crop OCR fallback error: %s", exc)
+                finally:
+                    result.fallback_ocr_ms += int((time.perf_counter() - t_fb0) * 1000)
     else:
         # Full-frame fallback when no vehicle was detected
         try:
+            t_ff0 = time.perf_counter()
             rows = _predict_rows(model, image, size, min(gate, 0.05))
+            result.plate_infer_ms += int((time.perf_counter() - t_ff0) * 1000)
+            t_ffocr0 = time.perf_counter()
             candidates = _ocr_rows(
                 image,
                 rows,
@@ -1618,6 +1708,7 @@ def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: 
                 limit=max_crops(),
                 upscale=True,
             )
+            result.plate_ocr_ms += int((time.perf_counter() - t_ffocr0) * 1000)
             for c in candidates:
                 print(
                     f"Plate stage: crop size={img_w}x{img_h}, crop_bbox={c.bbox}, full_bbox={c.bbox}, conf={c.confidence:.4f}",
@@ -1628,7 +1719,7 @@ def _run_plate_stage(image, result: DetectionResult, *, threshold: float, size: 
             report.detail = f"{type(exc).__name__}: {exc}"
             return
 
-    report.ms = int((time.perf_counter() - started) * 1000)
+    report.ms = result.plate_infer_ms + result.plate_ocr_ms + result.fallback_ocr_ms
     result.plate_candidates = candidates
     report.found = len(result.plate_candidates)
     report.best_confidence = max(
@@ -1666,7 +1757,10 @@ def _run_vehicle_stage(image, result: DetectionResult, *, threshold: float, size
         return
     try:
         model = load_stage_model(STAGE_VEHICLE)
-        rows = _predict_rows(model, image, size, min(vehicle_threshold(), 0.05))
+        v_size = vehicle_image_size() if size is None else size
+        t_v0 = time.perf_counter()
+        rows = _predict_rows(model, image, v_size, min(vehicle_threshold(), 0.05))
+        result.vehicle_infer_ms = int((time.perf_counter() - t_v0) * 1000)
     except StageNotConfigured as exc:
         report.skipped = exc.reason
         report.detail = str(exc)
@@ -1677,7 +1771,7 @@ def _run_vehicle_stage(image, result: DetectionResult, *, threshold: float, size
         return
 
     report.ran = True
-    report.ms = int((time.perf_counter() - started) * 1000)
+    report.ms = result.vehicle_infer_ms
     names = getattr(model, "names", {}) or {}
     accepted = vehicle_classes()
     gate = vehicle_threshold()
@@ -1693,7 +1787,15 @@ def _run_vehicle_stage(image, result: DetectionResult, *, threshold: float, size
         if best is None or confidence > best[0]:
             best = (confidence, class_name, coords)
 
-    result.vehicle_boxes = vehicle_boxes
+    merged_boxes = list(vehicle_boxes)
+    for i in range(len(vehicle_boxes)):
+        for j in range(i + 1, len(vehicle_boxes)):
+            b1 = vehicle_boxes[i]
+            b2 = vehicle_boxes[j]
+            if min(b1[2], b2[2]) > max(b1[0], b2[0]):
+                union_box = [min(b1[0], b2[0]), min(b1[1], b2[1]), max(b1[2], b2[2]), max(b1[3], b2[3])]
+                merged_boxes.append(union_box)
+    result.vehicle_boxes = merged_boxes
     if best is None:
         report.result = "none"
         return
@@ -1823,7 +1925,8 @@ def detect(
             )
         result.reason = "frame_unusable"
         result.advice = frame_unusable_advice(result, problems)
-        result.inference_ms = int((time.perf_counter() - started) * 1000)
+        result.decode_ms = int(getattr(image, "_decode_ms", 0))
+        result.inference_ms = result.decode_ms
         result.cascade = CASCADE_NONE
         return result
 
@@ -1839,7 +1942,7 @@ def detect(
         ))
 
     if enabled[STAGE_VEHICLE]:
-        _run_vehicle_stage(image, result, threshold=threshold, size=size)
+        _run_vehicle_stage(image, result, threshold=threshold, size=vehicle_image_size())
     else:
         result.stages.append(StageReport(
             name=STAGE_VEHICLE,
@@ -1875,9 +1978,21 @@ def detect(
 
     result.stages.sort(key=lambda s: STAGE_ORDER.index(s.name) if s.name in STAGE_ORDER else 99)
 
+    t_rec0 = time.perf_counter()
     reconcile_candidates(result)
+    result.reconcile_ms = int((time.perf_counter() - t_rec0) * 1000)
+    result.decode_ms = int(getattr(image, "_decode_ms", 0))
 
-    result.inference_ms = int((time.perf_counter() - started) * 1000)
+    result.inference_ms = (
+        result.decode_ms
+        + result.sticker_infer_ms
+        + result.sticker_ocr_ms
+        + result.vehicle_infer_ms
+        + result.plate_infer_ms
+        + result.plate_ocr_ms
+        + result.fallback_ocr_ms
+        + result.reconcile_ms
+    )
     result.cascade = _cascade_name(result)
     return _explain(result)
 

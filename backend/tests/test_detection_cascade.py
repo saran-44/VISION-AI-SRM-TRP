@@ -542,7 +542,7 @@ def test_plate_stage_runs_on_vehicle_crop_when_vehicle_present(clean_env, tmp_pa
 
     vision._run_plate_stage(MockImage(), result, threshold=0.25, size=960)
     assert len(result.plate_candidates) == 1
-    assert result.plate_candidates[0].bbox == [105, 115, 165, 135]
+    assert result.plate_candidates[0].bbox == [105, 665, 165, 685]
     assert result.plate_candidates[0].confidence == 0.85
     assert result.plate_candidates[0].bus_number == "TN 48 BK 2106"
 
@@ -660,3 +660,47 @@ def test_plate_stage_cached_per_frame(monkeypatch):
     assert getattr(img, "_plate_call_count", 0) == 2
     # Inference did not run again
     assert calls == 1
+
+
+def test_resolve_orphan_single_digit_bus_numbers():
+    """Defect 1: Orphan single digit next to complete number resolved or rejected."""
+    from backend import schemas
+
+    # Exactly the prompt strings: "89 9" and "10 5"
+    assert vision.normalize_plate("89 9") == "89"
+    assert vision.normalize_plate("10 5") == "10"
+    assert schemas.normalize_bus_number("89 9") == "89"
+    assert schemas.normalize_bus_number("10 5") == "10"
+
+    # Leading orphan digit
+    assert vision.normalize_plate("9 89") == "89"
+    assert schemas.normalize_bus_number("9 89") == "89"
+
+    # Ambiguous cases rejected
+    assert vision.normalize_plate("89 10 5") == ""
+    assert vision.normalize_plate("1 2") == ""
+
+
+def test_plate_ocr_fallback_default_and_toggle(clean_env, monkeypatch):
+    """Cost change 1: fallback OCR defaults to OFF, toggling ON works."""
+    assert vision.plate_ocr_fallback_enabled() is False
+
+    monkeypatch.setenv("VISION_PLATE_OCR_FALLBACK", "1")
+    assert vision.plate_ocr_fallback_enabled() is True
+
+    monkeypatch.setenv("VISION_PLATE_OCR_FALLBACK", "on")
+    assert vision.plate_ocr_fallback_enabled() is True
+
+    monkeypatch.setenv("VISION_PLATE_OCR_FALLBACK", "0")
+    assert vision.plate_ocr_fallback_enabled() is False
+
+
+def test_vehicle_image_size_default_and_override(clean_env, monkeypatch):
+    """Cost change 2: vehicle detector image size defaults to 640 and accepts overrides."""
+    assert vision.vehicle_image_size() == 640
+
+    monkeypatch.setenv("VISION_VEHICLE_IMAGE_SIZE", "960")
+    assert vision.vehicle_image_size() == 960
+
+    monkeypatch.setenv("VISION_VEHICLE_IMAGE_SIZE", "invalid")
+    assert vision.vehicle_image_size() == 640

@@ -12,7 +12,16 @@ CONTROL_RE = re.compile(r"[\x00-\x1f<>]")
 
 
 def normalize_bus_number(value: str) -> str:
-    return re.sub(r"\s+", " ", value.strip().upper())
+    cleaned = re.sub(r"\s+", " ", value.strip().upper())
+    tokens = cleaned.split()
+    if len(tokens) > 1:
+        orphan_digits = [t for t in tokens if len(t) == 1 and t.isdigit()]
+        complete_numbers = [t for t in tokens if len(t) >= 2 and t.isdigit()]
+        if orphan_digits:
+            if len(complete_numbers) == 1 and len(orphan_digits) + len(complete_numbers) == len(tokens):
+                return complete_numbers[0]
+            raise ValueError(f"Ambiguous bus number candidate with orphan digits: {value}")
+    return cleaned
 
 
 def clean_text(value: str) -> str:
