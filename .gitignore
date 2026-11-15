@@ -71,6 +71,7 @@ weights/
 runs/
 *-backup.pt
 *.pt.bak
+sticker.pt
 
 # The official SRM TRP crest and wordmark are branding assets, not captured
 # media, and must be tracked.

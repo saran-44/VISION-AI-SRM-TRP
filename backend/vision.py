@@ -1632,6 +1632,54 @@ def _cascade_name(result: DetectionResult) -> str:
     return CASCADE_NONE
 
 
+def reconcile_candidates(result: DetectionResult) -> None:
+    """Disqualify sticker candidates that overlap a number plate or match a plate suffix in that region.
+
+    A sticker detector firing on registration digits (e.g. '19' from stencil plate text
+    or plate digits) must never be accepted as a bus route number.
+    """
+    if not result.candidates or not result.plate_candidates:
+        return
+
+    for s_cand in result.candidates:
+        if not s_cand.bus_number:
+            continue
+        s_norm = s_cand.bus_number.replace(" ", "").upper()
+        sx1, sy1, sx2, sy2 = s_cand.bbox
+        s_area = max(0, sx2 - sx1) * max(0, sy2 - sy1)
+        s_cx = (sx1 + sx2) / 2
+        s_cy = (sy1 + sy2) / 2
+
+        disqualified = False
+        for p_cand in result.plate_candidates:
+            if not p_cand.bbox:
+                continue
+            px1, py1, px2, py2 = p_cand.bbox
+            p_norm = (p_cand.bus_number or p_cand.raw_text or "").replace(" ", "").upper()
+
+            # Overlap check with tolerance margin
+            margin = 30
+            mx1, my1, mx2, my2 = px1 - margin, py1 - margin, px2 + margin, py2 + margin
+            ix1 = max(sx1, mx1)
+            iy1 = max(sy1, my1)
+            ix2 = min(sx2, mx2)
+            iy2 = min(sy2, my2)
+            intersection = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+            iou = intersection / max(1, s_area + max(0, mx2 - mx1) * max(0, my2 - my1) - intersection)
+            overlap_ratio = intersection / max(1, s_area)
+
+            spatial_overlap = (mx1 <= s_cx <= mx2 and my1 <= s_cy <= my2) or iou > 0.05 or overlap_ratio > 0.15
+            is_suffix = len(s_norm) < len(p_norm) and len(s_norm) >= 2 and p_norm.endswith(s_norm)
+
+            if spatial_overlap or (is_suffix and (intersection > 0 or overlap_ratio > 0.05)):
+                disqualified = True
+                break
+
+        if disqualified:
+            logger.info("Reconciliation: disqualified sticker candidate %r at %s", s_cand.bus_number, s_cand.bbox)
+            s_cand.bus_number = None
+
+
 def detect(
     image,
     *,
@@ -1738,6 +1786,8 @@ def detect(
         _run_plate_stage(image, result, threshold=threshold, size=size)
 
     result.stages.sort(key=lambda s: STAGE_ORDER.index(s.name) if s.name in STAGE_ORDER else 99)
+
+    reconcile_candidates(result)
 
     result.inference_ms = int((time.perf_counter() - started) * 1000)
     result.cascade = _cascade_name(result)

@@ -572,3 +572,36 @@ def test_clahe_dual_pass_recovers_text_when_plain_fails(monkeypatch):
     assert len(candidates) == 1
     assert candidates[0].bus_number == "116"
     assert candidates[0].ocr_variant == "clahe"
+
+
+def test_sticker_overlapping_plate_is_disqualified():
+    """A sticker candidate that overlaps a plate box has its bus_number cleared."""
+    sticker_overlap = vision.PlateCandidate(
+        bus_number="19",
+        confidence=0.77,
+        bbox=[200, 200, 250, 240],
+        class_name="sticker",
+    )
+    sticker_valid = vision.PlateCandidate(
+        bus_number="57",
+        confidence=0.93,
+        bbox=[1000, 1000, 1100, 1100],
+        class_name="sticker",
+    )
+    plate = vision.PlateCandidate(
+        bus_number="TN 48 BK 2129",
+        raw_text="TN48BK2129",
+        confidence=0.99,
+        bbox=[190, 195, 300, 245],
+        class_name="plate",
+    )
+
+    result = vision.DetectionResult(
+        candidates=[sticker_overlap, sticker_valid],
+        plate_candidates=[plate],
+    )
+
+    vision.reconcile_candidates(result)
+
+    assert sticker_overlap.bus_number is None
+    assert sticker_valid.bus_number == "57"

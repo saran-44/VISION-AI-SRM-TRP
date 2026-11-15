@@ -195,9 +195,15 @@ def run_evaluation(
                         break
             elif exp_sticker is False:
                 for c in unmatched_candidates:
-                    if c.bus_number != "57" and c.bus_number != "104":
-                        matched_cand = c
-                        break
+                    if getattr(c, "class_name", "") in {"plate", "licence"}:
+                        if exp_vh and match_vehicle_number(exp_vh, c.bus_number or c.raw_text):
+                            matched_cand = c
+                            break
+                if matched_cand is None:
+                    for c in unmatched_candidates:
+                        if getattr(c, "class_name", "") in {"plate", "licence"}:
+                            matched_cand = c
+                            break
 
             if matched_cand is None and unmatched_candidates:
                 matched_cand = unmatched_candidates[0]
@@ -205,10 +211,19 @@ def run_evaluation(
             if matched_cand in unmatched_candidates:
                 unmatched_candidates.remove(matched_cand)
 
-            read_bus = matched_cand.bus_number if matched_cand else None
+            read_bus = matched_cand.bus_number if matched_cand and getattr(matched_cand, "class_name", "") not in {"plate", "licence"} else None
             read_vh = None
             if matched_cand and getattr(matched_cand, "class_name", "") in {"plate", "licence"}:
                 read_vh = matched_cand.bus_number or matched_cand.raw_text
+            elif exp_vh:
+                for p in result.plate_candidates:
+                    if match_vehicle_number(exp_vh, p.bus_number or p.raw_text):
+                        read_vh = p.bus_number or p.raw_text
+                        if p in unmatched_candidates:
+                            unmatched_candidates.remove(p)
+                        break
+                if not read_vh and result.plate_candidates:
+                    read_vh = result.plate_candidates[0].bus_number or result.plate_candidates[0].raw_text
             elif result.plate_candidates:
                 read_vh = result.plate_candidates[0].bus_number or result.plate_candidates[0].raw_text
 
