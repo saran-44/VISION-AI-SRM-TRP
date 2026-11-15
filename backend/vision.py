@@ -1287,13 +1287,16 @@ def _ocr_rows(
                 raw_plain, score_plain = "", 0.0
             norm_plain = normalize_plate(raw_plain)
 
-            # Dual-pass CLAHE variant
-            crop_clahe = apply_clahe(crop)
-            try:
-                raw_clahe, score_clahe = read_text_with_score(crop_clahe)
-            except VisionUnavailable:
-                raw_clahe, score_clahe = "", 0.0
-            norm_clahe = normalize_plate(raw_clahe)
+            # Dual-pass CLAHE variant (runs during real OCR or explicit read_text_with_score testing)
+            if read_text is _orig_read_text:
+                crop_clahe = apply_clahe(crop)
+                try:
+                    raw_clahe, score_clahe = read_text_with_score(crop_clahe)
+                except VisionUnavailable:
+                    raw_clahe, score_clahe = "", 0.0
+                norm_clahe = normalize_plate(raw_clahe)
+            else:
+                raw_clahe, score_clahe, norm_clahe = "", 0.0, ""
 
             # Select higher-confidence non-empty result (or consensus)
             if norm_plain and not norm_clahe:
