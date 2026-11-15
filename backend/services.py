@@ -398,6 +398,8 @@ def record_audit(db, actor: dict[str, Any] | None, action: str, collection: str,
         ),
     }
     db.audit_logs.insert_one(entry)
+    from backend.diagnostics import mirror_log_block
+    mirror_log_block(entry)
 
 
 def camera_config(config: Config) -> dict[str, Any]:
