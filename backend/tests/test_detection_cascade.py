@@ -605,3 +605,14 @@ def test_sticker_overlapping_plate_is_disqualified():
 
     assert sticker_overlap.bus_number is None
     assert sticker_valid.bus_number == "57"
+
+
+def test_warm_models_reports_warm_status_and_latency(monkeypatch):
+    """vision_status() reports warm=True and warmup_ms >= 0."""
+    res = vision.warm_models(force=True)
+    assert res["warm"] is True
+    assert res["warmup_ms"] >= 0
+
+    status = vision.vision_status()
+    assert status["warm"] is True
+    assert status["warmup_ms"] >= 0

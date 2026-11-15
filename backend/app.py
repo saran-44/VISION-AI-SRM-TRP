@@ -74,6 +74,7 @@ from .vision import (
     detect,
     stage_overrides_from_payload,
     vision_status,
+    warm_models,
 )
 
 
@@ -1335,5 +1336,11 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             "Run VisionAI.exe --report on the gate PC to collect the details.\n",
             500,
         )
+
+    if not app.config.get("TESTING") and os.getenv("VISION_WARMUP", "true").lower() == "true":
+        try:
+            warm_models()
+        except Exception as exc:
+            app.logger.debug("Startup model warmup skipped: %s", exc)
 
     return app

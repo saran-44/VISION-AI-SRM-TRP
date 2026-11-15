@@ -2098,11 +2098,63 @@ def stage_status() -> list[dict[str, Any]]:
     return rows
 
 
+_warmup_ms: int = 0
+_is_warm: bool = False
+
+
+def warm_models(*, force: bool = False) -> dict[str, Any]:
+    """Warm up all configured vision models and OCR backend at server startup."""
+    global _warmup_ms, _is_warm
+    if _is_warm and not force:
+        return {"warm": True, "warmup_ms": _warmup_ms}
+
+    import time
+    started = time.perf_counter()
+    from PIL import Image
+    dummy = Image.new("RGB", (64, 64), (128, 128, 128))
+
+    # 1. Sticker model
+    try:
+        model = load_model()
+        if hasattr(model, "predict"):
+            model.predict(source=dummy, imgsz=64, verbose=False)
+    except Exception as exc:
+        logger.debug("Warmup sticker model error: %s", exc)
+
+    # 2. Plate model
+    try:
+        p_model = load_stage_model(STAGE_NUMBER_PLATE)
+        if hasattr(p_model, "predict"):
+            p_model.predict(source=dummy, imgsz=64, verbose=False)
+    except Exception as exc:
+        logger.debug("Warmup plate model error: %s", exc)
+
+    # 3. Vehicle model
+    try:
+        v_model = load_stage_model(STAGE_VEHICLE)
+        if hasattr(v_model, "predict"):
+            v_model.predict(source=dummy, imgsz=64, verbose=False)
+    except Exception as exc:
+        logger.debug("Warmup vehicle model error: %s", exc)
+
+    # 4. OCR
+    try:
+        read_text(dummy)
+    except Exception as exc:
+        logger.debug("Warmup OCR error: %s", exc)
+
+    _warmup_ms = max(1, int((time.perf_counter() - started) * 1000))
+    _is_warm = True
+    return {"warm": True, "warmup_ms": _warmup_ms}
+
+
 def vision_status() -> dict[str, Any]:
     """Describe what the vision stack can currently do."""
     path = model_path()
     loaded = _model_cache.get("model")
     status: dict[str, Any] = {
+        "warm": _is_warm,
+        "warmup_ms": _warmup_ms,
         "model_path": str(path),
         "model_present": path.exists(),
         "model_loaded": loaded is not None,
