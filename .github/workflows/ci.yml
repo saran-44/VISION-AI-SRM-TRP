@@ -88,7 +88,8 @@ jobs:
           python -m pip install --no-deps opencv-python-headless==4.10.0.84
 
       - name: Check environment
-        run: python scripts/check_env.py
+        run: |
+          python scripts/check_env.py || (python -c "import torch; print('CUDA:', torch.version.cuda); from importlib import metadata; print('OpenCV:', [d.metadata['Name'] for d in metadata.distributions() if 'opencv' in d.metadata.get('Name','').lower()])"; exit 1)
 
       - name: The checkpoint must load and report its classes
         run: |
