@@ -524,6 +524,20 @@ def vehicle_model_path() -> Path:
     return Path(configured).expanduser() if configured else DEFAULT_VEHICLE_MODEL_PATH
 
 
+PLATE_MODE_FALLBACK = "fallback"
+PLATE_MODE_ALWAYS = "always"
+
+
+def plate_mode() -> str:
+    """Operating mode for the number-plate stage (`VISION_PLATE_MODE`).
+
+    'fallback': only runs if the sticker stage failed to read a number (default).
+    'always': always runs the plate stage if enabled, even after a sticker hit.
+    """
+    mode = os.getenv("VISION_PLATE_MODE", PLATE_MODE_FALLBACK).strip().lower()
+    return PLATE_MODE_ALWAYS if mode == PLATE_MODE_ALWAYS else PLATE_MODE_FALLBACK
+
+
 def plate_threshold() -> float:
     """Minimum confidence for a plate box (`VISION_PLATE_CONFIDENCE`).
 
@@ -1368,6 +1382,7 @@ def detect(
     model=None,
     threshold: float | None = None,
     stages=None,
+    plate_mode: str | None = None,
 ) -> DetectionResult:
     """Run the detection cascade over an image.
 
@@ -1431,6 +1446,10 @@ def detect(
             detail="Sticker detection is switched off for this scan.",
         ))
 
+    active_plate_mode = (plate_mode or globals()["plate_mode"]()).strip().lower()
+    if active_plate_mode != PLATE_MODE_ALWAYS:
+        active_plate_mode = PLATE_MODE_FALLBACK
+
     number_read = any(candidate.bus_number for candidate in result.candidates)
     if not enabled[STAGE_NUMBER_PLATE]:
         result.stages.append(StageReport(
@@ -1440,7 +1459,7 @@ def detect(
             skipped="disabled",
             detail="Number-plate detection is switched off for this scan.",
         ))
-    elif number_read:
+    elif number_read and active_plate_mode == PLATE_MODE_FALLBACK:
         result.stages.append(StageReport(
             name=STAGE_NUMBER_PLATE,
             enabled=True,

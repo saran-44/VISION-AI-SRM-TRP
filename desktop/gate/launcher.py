@@ -66,6 +66,7 @@ GATE_DEFAULTS = {
     # Measure the frame before loading a checkpoint and refuse the ones that
     # cannot contain a sticker (a dark frame cost 13 s and read nothing).
     "VISION_QUALITY_GATE": "refuse",
+    "VISION_PLATE_MODE": "always",
     "CAMERA_TIMEOUT": "8",
 }
 

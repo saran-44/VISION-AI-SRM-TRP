@@ -766,7 +766,16 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             image = decode_image(image_source)
             # The panel can switch a stage off for this scan only; anything it
             # does not name keeps the host default (VISION_STAGE_*).
-            result = detect(image, stages=stage_overrides_from_payload(payload))
+            plate_mode_override = (
+                payload.get("plate_mode")
+                or payload.get("vision_plate_mode")
+                or (payload.get("stages") if isinstance(payload.get("stages"), dict) else {}).get("plate_mode")
+            )
+            result = detect(
+                image,
+                stages=stage_overrides_from_payload(payload),
+                plate_mode=str(plate_mode_override) if plate_mode_override else None,
+            )
         except ImageRejected as exc:
             # The caller's own upload is unusable: that is a 400, never a 503.
             # Answering "cloud vision is unavailable, install the agent" for an

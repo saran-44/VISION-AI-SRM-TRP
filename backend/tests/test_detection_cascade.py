@@ -137,6 +137,25 @@ def test_a_readable_sticker_short_circuits_the_plate_stage(clean_env):
     assert result.reason == "ok"
 
 
+def test_plate_mode_always_runs_plate_stage_after_sticker_hit(clean_env, tmp_path):
+    """VISION_PLATE_MODE=always forces the plate stage to run even after sticker hit."""
+    clean_env.setenv("VISION_PLATE_MODE", "always")
+    clean_env.setattr(vision, "read_text", lambda image, engine_name=None: "TN 48 BK 2129")
+    sticker = _FakeModel([(0.91, 1, [400, 300, 520, 360])])
+    _plate_model(tmp_path, clean_env, [(0.85, 0, [500, 400, 620, 450])])
+
+    result = vision.detect(_FakeImage(), model=sticker, stages={"vehicle": False})
+
+    assert result.cascade == "sticker"
+    assert len(result.candidates) == 1
+    assert result.candidates[0].bus_number == "TN 48 BK 2129"
+    plate = next(stage for stage in result.stages if stage.name == vision.STAGE_NUMBER_PLATE)
+    assert plate.ran is True
+    assert plate.skipped == ""
+    assert len(result.plate_candidates) == 1
+    assert result.plate_candidates[0].raw_text == "TN 48 BK 2129"
+
+
 def test_the_sticker_stage_can_be_switched_off_for_one_scan(clean_env):
     """Panel toggle: sticker off must not even load the sticker model."""
     result = vision.detect(_FakeImage(), stages={"sticker": False, "vehicle": False})

@@ -121,6 +121,7 @@ def run_evaluation(
         manifest = json.load(f)
 
     out_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["VISION_PLATE_MODE"] = "always"
     annotated_dir = out_dir / "annotated"
     crops_dir = out_dir / "crops"
     annotated_dir.mkdir(parents=True, exist_ok=True)
