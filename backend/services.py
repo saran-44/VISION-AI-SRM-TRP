@@ -132,6 +132,22 @@ def ingest_event(db, payload: EventCreate, config: Config, *, source: str = "dev
         "created_at": naive_now(),
         "source": source,
     }
+    if config.event_debounce_seconds:
+        window = timedelta(seconds=config.event_debounce_seconds)
+        duplicate = db.events.find_one(
+            {
+                "bus_number": event["bus_number"],
+                "direction": event["direction"],
+                "gate": event["gate"],
+                "timestamp": {
+                    "$gte": event["timestamp"] - window,
+                    "$lte": event["timestamp"] + window,
+                },
+            },
+            sort=[("timestamp", ASCENDING), ("_id", ASCENDING)],
+        )
+        if duplicate:
+            return {"duplicate": True, "event": public_doc(duplicate)}
     event["flag_reasons"] = compute_flag_reasons(db, event, config)
     event["flagged"] = bool(event["flag_reasons"])
     result = db.events.insert_one(event)

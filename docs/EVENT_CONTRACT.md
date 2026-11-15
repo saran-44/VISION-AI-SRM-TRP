@@ -44,6 +44,10 @@ with no configured keys rejects all ingestion with `503`.
 | `confidence` | number | `0.0`–`1.0`, the OCR/ANPR confidence of the plate read. |
 | `timestamp` | string | ISO-8601 date-time. Naive values are interpreted as UTC. Timestamps more than 5 minutes in the future are rejected. |
 
+`bus_number` must contain at least two normalized characters and at least one
+digit. OCR values such as `hello world`, `A`, and an empty string are rejected;
+values such as `57`, `BUS-001`, and `TN 45 AB 1234` are accepted.
+
 Unknown extra fields are rejected with `400` so typos in the detector are caught
 early instead of being silently ignored.
 
@@ -52,6 +56,7 @@ early instead of being silently ignored.
 | Status | Body | Meaning |
 | --- | --- | --- |
 | `201` | `{"event": {...}}` | Stored. The event includes the computed `flagged` boolean and `flag_reasons` list. |
+| `200` | `{"duplicate": true, "event": {...}}` | An equivalent event for the same bus, direction, and gate was already stored within `VISION_EVENT_DEBOUNCE_SECONDS` (default 60). |
 | `400` | `{"error": "Validation failed", "details": [...]}` | The payload did not satisfy the contract. |
 | `401` | `{"error": "Invalid device API key"}` | Missing or wrong device key. |
 | `429` | `{"error": "Too many requests…"}` | Rate limited. |
@@ -67,6 +72,9 @@ early instead of being silently ignored.
 
 Every ingested event is also written to the audit log with the actor
 `device-client`.
+
+Repeated detections are suppressed by `(bus_number, direction, gate)` within
+`VISION_EVENT_DEBOUNCE_SECONDS`. Set that variable to `0` to disable suppression.
 
 ## Reference client
 

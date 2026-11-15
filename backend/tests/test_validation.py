@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from backend.tests.conftest import DEVICE_KEY, login_head_admin, login_transport_office
 
 VALID_EVENT = {
@@ -41,6 +43,20 @@ def test_event_rejects_future_timestamp(client, db, users):
 def test_event_rejects_control_characters_in_gate(client, db, users):
     response = post_event(client, {**VALID_EVENT, "gate": "Gate\x00<script>"})
     assert response.status_code == 400
+
+
+@pytest.mark.parametrize("bus_number", ["hello world", "A", ""])
+def test_event_rejects_garbage_bus_numbers(client, bus_number):
+    response = post_event(client, {**VALID_EVENT, "bus_number": bus_number})
+    assert response.status_code == 400
+    message = response.get_json()["details"][0]["message"].lower()
+    assert "digit" in message or "character" in message
+
+
+@pytest.mark.parametrize("bus_number", ["TN 45 AB 1234", "57", "BUS-001"])
+def test_event_accepts_readable_bus_numbers(client, bus_number):
+    response = post_event(client, {**VALID_EVENT, "bus_number": bus_number})
+    assert response.status_code == 201
 
 
 def test_bus_create_rejects_invalid_bus_number(client, db, users):

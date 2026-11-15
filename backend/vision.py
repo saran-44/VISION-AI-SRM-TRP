@@ -762,6 +762,8 @@ def normalize_plate(text: str) -> str:
     upper = text.upper().replace("\n", " ").strip()
     cleaned = PLATE_CLEAN_RE.sub("", upper)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" -")
+    if len(cleaned) < 2 or not any(character.isdigit() for character in cleaned):
+        return ""
     return cleaned
 
 

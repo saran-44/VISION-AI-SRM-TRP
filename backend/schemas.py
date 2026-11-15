@@ -177,6 +177,8 @@ class EventCreate(StrictModel):
         value = normalize_bus_number(value)
         if not BUS_NUMBER_RE.fullmatch(value):
             raise ValueError("Use letters, numbers, spaces, dot, dash or underscore only")
+        if len(value) < 2 or not any(character.isdigit() for character in value):
+            raise ValueError("Bus number must contain at least two characters and one digit")
         return value
 
     @field_validator("gate", "camera_id")

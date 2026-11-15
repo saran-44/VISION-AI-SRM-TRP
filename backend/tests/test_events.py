@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
+from backend.schemas import EventCreate
+from backend.services import ingest_event
 from backend.services import naive_now
-from backend.tests.conftest import DEVICE_KEY, login_head_admin, login_transport_office
+from backend.tests.conftest import DEVICE_KEY, build_config, login_head_admin, login_transport_office
 
 
 def event_payload(**overrides):
@@ -57,8 +61,54 @@ def test_event_ingestion_stores_a_valid_event(client, db, users):
     assert stored["source"] == "device"
 
 
+def test_event_ingestion_debounces_same_bus_direction_and_gate(client, db, users):
+    timestamp = naive_now().isoformat() + "Z"
+    payload = event_payload(timestamp=timestamp)
+
+    first = post_event(client, payload)
+    second = post_event(client, payload)
+
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert second.get_json()["duplicate"] is True
+    assert db.events.count_documents({}) == 1
+
+
+def test_event_ingestion_allows_events_after_debounce_window(client, db, users):
+    timestamp = naive_now()
+    first = post_event(client, event_payload(timestamp=timestamp.isoformat() + "Z"))
+    later = timestamp.replace(microsecond=0)
+    later = later + timedelta(seconds=61)
+    second = post_event(client, event_payload(timestamp=later.isoformat() + "Z"))
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert db.events.count_documents({}) == 2
+
+
+def test_event_ingestion_does_not_debounce_direction_or_gate_changes(client, db, users):
+    timestamp = naive_now().isoformat() + "Z"
+    first = post_event(client, event_payload(timestamp=timestamp))
+    different_direction = post_event(client, event_payload(timestamp=timestamp, direction="OUT"))
+    different_gate = post_event(client, event_payload(timestamp=timestamp, gate="Gate 2"))
+
+    assert first.status_code == 201
+    assert different_direction.status_code == 201
+    assert different_gate.status_code == 201
+    assert db.events.count_documents({}) == 3
+
+
+def test_event_ingestion_debounce_zero_preserves_old_behaviour(client, db, users, monkeypatch):
+    config = build_config(event_debounce_seconds=0)
+    timestamp = naive_now()
+    payload = EventCreate(**event_payload(timestamp=timestamp.isoformat() + "Z"))
+    assert "duplicate" not in ingest_event(db, payload, config)
+    assert "duplicate" not in ingest_event(db, payload, config)
+    assert db.events.count_documents({}) == 2
+
+
 def test_unregistered_plate_is_flagged(client, db, users):
-    response = post_event(client, event_payload(bus_number="BUS-UNKNOWN"))
+    response = post_event(client, event_payload(bus_number="BUS-999"))
     assert response.status_code == 201
     assert "unregistered_plate" in response.get_json()["event"]["flag_reasons"]
 
@@ -70,7 +120,7 @@ def test_low_confidence_is_flagged(client, db, users):
 
 
 def test_ingestion_is_audited(client, db, users):
-    post_event(client, event_payload(bus_number="BUS-UNKNOWN"))
+    post_event(client, event_payload(bus_number="BUS-999"))
     entry = db.audit_logs.find_one({"action": "event_ingested"})
     assert entry is not None
     assert entry["actor"] == "device-client"
@@ -114,11 +164,11 @@ def test_events_endpoint_filters_and_paginates(client, db, users):
 def test_flagged_filter_works(client, db, users):
     register_bus(client, users)
     post_event(client, event_payload(bus_number="BUS-001", confidence=0.95))
-    post_event(client, event_payload(bus_number="BUS-UNKNOWN", confidence=0.95))
+    post_event(client, event_payload(bus_number="BUS-999", confidence=0.95))
     login_head_admin(client, users)
     flagged = client.get("/api/events?flagged=true").get_json()
     assert flagged["total"] == 1
-    assert flagged["items"][0]["bus_number"] == "BUS-UNKNOWN"
+    assert flagged["items"][0]["bus_number"] == "BUS-999"
 
 
 def test_csv_export_is_protected_and_contains_headers(client, db, users):

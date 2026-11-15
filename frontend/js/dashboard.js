@@ -14,6 +14,7 @@ let currentFilters = {};
 let currentEvents = [];
 let flagLabels = {};
 let live = null;
+let cameraConfigSignature = '';
 
 function setStat(name, value) {
   const node = document.querySelector(`[data-stat="${name}"]`);
@@ -125,9 +126,7 @@ async function scanFrame(blob, meta = {}) {
     body.append('gate', 'Gate 1 Entry');
     body.append('direction', 'IN');
     body.append('source', 'browser');
-    // The same switches the Test Lab shows: an operator who turned sticker
-    // detection off expects the dashboard to leave it off.
-    appendStagesToForm(body);
+
 
     // The session cookie is the credential here; the device API key must never
     // be shipped to a browser (it would be readable by any script on the page

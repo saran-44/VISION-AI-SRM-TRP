@@ -8,7 +8,7 @@
  * Usage:  node scripts/check_auth_flow.mjs
  */
 import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -86,7 +86,9 @@ global.fetch = async (url, options = {}) => {
   return { ok: true, status: 200, json: async () => ({ ok: true }) };
 };
 
-const { signOut, finishGoogleRedirect } = await import(path.join(ROOT, 'frontend/js/auth.js'));
+const { signOut, finishGoogleRedirect } = await import(
+  `${pathToFileURL(path.join(ROOT, 'frontend/js/auth.js')).href}?check`,
+);
 
 // --- the test ---------------------------------------------------------------
 await signOut();

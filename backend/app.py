@@ -567,6 +567,8 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         if error:
             return error
         event = ingest_event(db, payload, config, source="device")
+        if event.get("duplicate"):
+            return jsonify(event), 200
         record_audit(
             db,
             {"email": "device-client", "role": "device"},
@@ -954,6 +956,8 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         if error:
             return error
         event = ingest_event(db, payload, config, source="test-lab")
+        if event.get("duplicate"):
+            return jsonify(event), 200
         record_audit(
             db,
             g.current_user,
