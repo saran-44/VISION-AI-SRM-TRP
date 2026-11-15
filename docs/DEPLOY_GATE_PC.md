@@ -254,6 +254,10 @@ full 16-check preflight, the recorded errors, the scans that produced no
 number, and the warnings from `portal.log`. An empty error list means nothing
 if the portal has not been running since the change — that line says which.
 
+A scan that found a sticker and read nothing also names the saved crop
+(`failed-crops\crop-*.jpg`), so the pixels the OCR was given can be looked at
+instead of described.
+
 Every password, device key, bearer token and JWT is masked before it is
 written — `rtsp://admin:***@…`, `SECRET_KEY=***` — so the block can be pasted
 as it is. That masking is tested; the report is meant to leave the machine.
@@ -272,8 +276,8 @@ as it is. That masking is tested; the report is meant to leave the machine.
 | `no box at all` | sticker too small, or the frame is soft | read the `frame` line: `sharpness` under 60 → clean the lens/let it focus; otherwise move closer or set `VISION_TILES=auto` (costs 4× the sticker stage) |
 | "Refused before inference: the frame is too dark" | the subject is not lit: mean brightness under 12/255 | turn a light on the gate (a phone torch across the sticker plate is enough), or use the camera's IR illuminator; every such frame was unreadable no matter the threshold. `VISION_QUALITY_GATE=off` in `gate.env` disables the check |
 | "vision settings" line shows an old value | `gate.env` was edited but the portal was not restarted | restart; the line is what the running process will actually use |
-| "Sticker detected … but the OCR read no text. The crop was about 50 px wide" | the box is real, the pixels are too few | set `VISION_STICKER_UPSCALE=3` in `gate.env` (a 50 px crop becomes 150 px), or scan from closer. `VISION_IMAGE_SIZE` does **not** help: the crop comes from the frame, not the tiles |
-| Failed scans leave no trace to inspect | `VISION_SAVE_FAILURES=false` | unset it: every scan that reads nothing writes `C:\ProgramData\VisionAI\failed-frames\fail-*.jpg` (newest 40), readable with `python scripts/frame_report.py` |
+| "Sticker detected … but the OCR read no text. The crop was about 25 px wide" | the box is real, the pixels are too few | the advice now says how many times closer to get (120 px of detail is the floor). A 25 px crop is a webcam at a distance, not a code problem: fill more of the frame, then move to the real gate camera. The crop the OCR saw is in `C:\ProgramData\VisionAI\failed-crops\` |
+| Failed scans leave no trace to inspect | `VISION_SAVE_FAILURES=false` | unset it: every scan that reads nothing writes `C:\ProgramData\VisionAI\failed-frames\fail-*.jpg` (newest 40), readable with `python scripts/frame_report.py`; a sticker found but not read also writes the crop itself to `failed-crops\` (newest 20) |
 | `port: already in use` | the portal is already running | open `http://127.0.0.1:8080/`; a second start reuses the running instance |
 | Browser says "site can't be reached" | the portal is not running | tray icon → Open portal, or Start Menu → the app |
 | `--setup` said "Use at least 12 characters" | the wizard rejects short passwords: it can create a `head_admin` that edits every record | run `--setup` again; it asks three times before stopping, and writes nothing until a password is accepted |
