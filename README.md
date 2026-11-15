@@ -382,7 +382,7 @@ for the detector, and whether the old LAN host is still needed, is decided in
 `vision-ai-srmtrp.web.app` address is a redirect to that service — see
 [the Firebase redirect guide](docs/DEPLOY_FIREBASE_REDIRECT.md).
 
-Handing the remaining work to an agent? [The Antigravity prompt](docs/ANTIGRAVITY_PROMPT.md)
+Handing the remaining work to an agent? [The Antigravity master prompt](docs/ANTIGRAVITY_MASTER_PROMPT.md)
 is a copy-paste brief with acceptance tests.
 
 Fast path on a fresh Git Bash install: the
