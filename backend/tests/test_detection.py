@@ -381,3 +381,38 @@ def test_the_batch_scanner_survives_an_unreadable_file(tmp_path):
     assert "Skipped broken.jpg" in completed.stderr
     assert "NameError" not in completed.stderr
     assert "image_rejected=1" in completed.stdout
+
+
+def test_scan_unreadable_ocr_returns_200_with_null_bus_number(client, users, monkeypatch):
+    import backend.app as app_module
+    from backend.vision import DetectionResult, PlateCandidate
+
+    login_head_admin(client, users)
+    candidate = PlateCandidate(
+        bus_number="",
+        confidence=0.88,
+        raw_text="hello world",
+        bbox=[10, 10, 50, 50],
+    )
+    result = DetectionResult(
+        boxes_total=1,
+        boxes_above_threshold=1,
+        best_confidence=0.88,
+        threshold=0.25,
+        candidates=[candidate],
+        reason="success",
+        cascade="sticker",
+    )
+    monkeypatch.setattr(app_module, "decode_image", lambda payload: None)
+    monkeypatch.setattr(app_module, "detect", lambda image, **kwargs: result)
+
+    response = client.post(
+        "/api/detection/scan",
+        data={"image": (io.BytesIO(_png_bytes()), "frame.jpg")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["bus_number"] is None
+    assert payload["reason"] == "ocr_unreadable"

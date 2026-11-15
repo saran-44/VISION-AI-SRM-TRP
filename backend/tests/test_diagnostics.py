@@ -293,3 +293,53 @@ def test_the_gate_report_script_marks_the_config_file(monkeypatch, tmp_path: Pat
     assert result.returncode == 0, result.stderr
     assert "gate config" in result.stdout
     assert "SKIP  gate config" not in result.stdout
+
+
+# ------------------------------------------------------------- log block mirroring
+def test_diagnostics_mirror_log_block(caplog):
+    import logging
+    from backend.diagnostics import mirror_log_block
+
+    with caplog.at_level(logging.INFO, logger="visionai.diagnostics"):
+        mirror_log_block("simple diagnostic text")
+        mirror_log_block({"key": "value", "count": 42})
+
+    records = [r for r in caplog.records if r.name == "visionai.diagnostics"]
+    assert len(records) >= 2
+    assert "simple diagnostic text" in records[0].message
+    assert '"key": "value"' in records[1].message
+
+
+def test_diagnostics_log_diagnostic_and_audit(caplog):
+    import logging
+    from backend.diagnostics import log_diagnostic, log_audit
+
+    with caplog.at_level(logging.INFO, logger="visionai.diagnostics"):
+        log_diagnostic("system", "Test diagnostic message", detail="extra")
+        log_audit("test_action", "admin@example.com", record_id="rec-1")
+
+    records = [r for r in caplog.records if r.name == "visionai.diagnostics"]
+    assert any("Test diagnostic message" in r.message for r in records)
+    assert any("test_action" in r.message for r in records)
+
+
+def test_stream_is_bounded_and_ends(db, users, monkeypatch):
+    import time
+    from backend.tests.conftest import login_head_admin, build_config
+    from backend.app import create_app
+
+    # Use a small lifetime of 1 second for the test
+    fast_config = build_config(api_sse_seconds=1)
+    app = create_app(fast_config, database_engine=db.engine)
+    app.config.update(TESTING=True)
+    fast_client = app.test_client()
+    login_head_admin(fast_client, users)
+
+    response = fast_client.get("/api/stream")
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("text/event-stream")
+
+    content = response.get_data(as_text=True)
+    assert "retry: " in content
+    assert "event: end" in content
+

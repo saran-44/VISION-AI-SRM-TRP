@@ -312,3 +312,31 @@ def summary() -> dict[str, Any]:
         "blocks": len(blocks),
         "last": blocks[-1][0][:4] if blocks else [],
     }
+
+
+def mirror_log_block(block: str | dict[str, Any], level: int = logging.INFO) -> None:
+    """Log a diagnostic text block or structured dictionary to the Python logger."""
+    import json
+    if isinstance(block, dict):
+        formatted = json.dumps(block, default=str)
+    else:
+        formatted = str(block).strip()
+    logger.log(level, formatted)
+
+
+def log_diagnostic(category: str, message: str, level: int = logging.INFO, **kwargs: Any) -> None:
+    """Record an operational diagnostic event with category and metadata."""
+    payload = {"category": category, "message": message, **kwargs}
+    mirror_log_block(payload, level=level)
+
+
+def log_audit(action: str, actor: str, record_id: str | None = None, **details: Any) -> None:
+    """Record an audit trail entry mirrored to the application logger."""
+    payload = {
+        "audit_action": action,
+        "actor": actor,
+        "record_id": record_id,
+        "details": details,
+    }
+    mirror_log_block(payload, level=logging.INFO)
+

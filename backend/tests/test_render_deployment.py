@@ -31,6 +31,10 @@ def test_free_image_honours_port_and_omits_the_vision_stack():
     # The platform injects $PORT; binding a hard-coded port would fail health checks.
     assert "${PORT:-10000}" in entrypoint
     assert "backend.app:create_app()" in entrypoint
+    assert 'GUNICORN_THREADS:-8' in entrypoint
+    assert '--graceful-timeout 30' in entrypoint
+    assert '--max-requests 800' in entrypoint
+    assert '--max-requests-jitter 80' in entrypoint
     # The CA arrives base64-encoded because free plans have no mounted secrets.
     assert "PGSSLROOTCERT_B64" in entrypoint
     assert 'export PGSSLROOTCERT="$CERT_DIR/supabase-ca.crt"' in entrypoint
@@ -48,6 +52,9 @@ def test_render_blueprint_is_one_free_service_with_prompted_secrets():
 
     for key in ("DATABASE_URL", "JWT_SECRET", "DEVICE_API_KEYS", "FIREBASE_API_KEY", "PGSSLROOTCERT_B64"):
         assert f"- key: {key}\n        sync: false" in blueprint, key
+
+    assert "- key: GUNICORN_THREADS\n        value: \"8\"" in blueprint
+    assert "- key: API_SSE_SECONDS\n        value: \"210\"" in blueprint
 
     # Never a private connection string in Git.
     assert "postgresql://" not in blueprint and "postgres://" not in blueprint

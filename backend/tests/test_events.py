@@ -62,16 +62,29 @@ def test_event_ingestion_stores_a_valid_event(client, db, users):
 
 
 def test_event_ingestion_debounces_same_bus_direction_and_gate(client, db, users):
+    register_bus(client, users)
     timestamp = naive_now().isoformat() + "Z"
     payload = event_payload(timestamp=timestamp)
 
     first = post_event(client, payload)
     second = post_event(client, payload)
+    third = post_event(client, payload)
 
     assert first.status_code == 201
     assert second.status_code == 200
     assert second.get_json()["duplicate"] is True
+    assert third.status_code == 200
+    assert third.get_json()["duplicate"] is True
     assert db.events.count_documents({}) == 1
+
+    login_head_admin(client, users)
+    events_res = client.get("/api/events").get_json()
+    assert events_res["total"] == 1
+    assert len(events_res["items"]) == 1
+
+    dedup_audit = db.audit_logs.find_one({"action": "event_deduplicated"})
+    assert dedup_audit is not None
+    assert dedup_audit["collection"] == "events"
 
 
 def test_event_ingestion_allows_events_after_debounce_window(client, db, users):

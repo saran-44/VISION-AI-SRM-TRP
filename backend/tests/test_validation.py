@@ -65,6 +65,33 @@ def test_event_accepts_readable_bus_numbers(client, bus_number):
     assert response.status_code == 201
 
 
+def test_normalize_plate_rejects_garbage_and_accepts_valid():
+    from backend.vision import normalize_plate
+    assert normalize_plate("hello world") == ""
+    assert normalize_plate("A") == ""
+    assert normalize_plate("A" * 25) == ""
+    assert normalize_plate("KL01AB1234") == "KL01AB1234"
+    assert normalize_plate("TN 45 AB 1234") == "TN 45 AB 1234"
+    assert normalize_plate("57") == "57"
+
+
+def test_event_rejects_hello_world_with_field_message(client):
+    response = post_event(client, {**VALID_EVENT, "bus_number": "HELLO WORLD"})
+    assert response.status_code in (400, 422)
+    data = response.get_json()
+    details = data.get("details", [])
+    assert any(item.get("field") == "bus_number" for item in details)
+    message = details[0]["message"].lower()
+    assert "digit" in message or "character" in message
+
+
+def test_event_accepts_and_stores_normalised_plate(client, db):
+    response = post_event(client, {**VALID_EVENT, "bus_number": "kl01ab1234"})
+    assert response.status_code == 201
+    stored = db.events.find_one({"bus_number": "KL01AB1234"})
+    assert stored is not None
+
+
 def test_bus_create_rejects_invalid_bus_number(client, db, users):
     login_transport_office(client, users)
     response = client.post("/api/buses", json={"bus_number": "bad/../plate", "capacity": 40})
