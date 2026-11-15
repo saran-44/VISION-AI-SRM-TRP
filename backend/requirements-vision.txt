@@ -7,15 +7,15 @@
 #   The default torch wheel on PyPI is the CUDA build and pulls ~3 GB of
 #   NVIDIA runtime libraries. Prefer the CPU index on small servers:
 #
-#     pip install torch==2.9.1 torchvision==0.24.1 \
+#     pip install -r backend/requirements-vision.txt \
 #         --extra-index-url https://download.pytorch.org/whl/cpu
 #
 # opencv-python-headless is used deliberately: the full opencv-python wheel
 # needs libGL.so.1, which is missing on minimal server images and breaks
 # `import cv2`.
 
-torch==2.9.1
-torchvision==0.24.1
+torch==2.9.1+cpu
+torchvision==0.24.1+cpu
 ultralytics==8.4.20
 opencv-python-headless==4.10.0.84
 Pillow>=10.0.0
