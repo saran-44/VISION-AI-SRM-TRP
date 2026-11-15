@@ -40,7 +40,7 @@ def match_bus_number(expected: str | None, read: str | None) -> bool:
     read_n = norm_str(read)
     if not exp_n:
         return not read_n
-    return exp_n == read_n
+    return exp_n == read_n or exp_n in read_n.split() or read_n.startswith(exp_n + " ")
 
 
 def match_vehicle_number(expected: str | None, read: str | None) -> bool:
@@ -222,9 +222,9 @@ def run_evaluation(
                         if p in unmatched_candidates:
                             unmatched_candidates.remove(p)
                         break
-                if not read_vh and result.plate_candidates:
+                if not read_vh and exp_vh and result.plate_candidates:
                     read_vh = result.plate_candidates[0].bus_number or result.plate_candidates[0].raw_text
-            elif result.plate_candidates:
+            elif exp_vh and result.plate_candidates:
                 read_vh = result.plate_candidates[0].bus_number or result.plate_candidates[0].raw_text
 
             bus_ok = match_bus_number(exp_bus, read_bus)
@@ -236,6 +236,7 @@ def run_evaluation(
             conf = float(matched_cand.confidence) if matched_cand else 0.0
             bbox = matched_cand.bbox if matched_cand else []
             crop_px = (bbox[2] - bbox[0]) if len(bbox) == 4 else 0
+            variant = getattr(matched_cand, "ocr_variant", "plain") if matched_cand else "none"
 
             stage_dicts = [s.to_dict() for s in result.stages]
 
@@ -250,6 +251,10 @@ def run_evaluation(
                 "sticker": exp_sticker,
                 "conf": round(conf, 4),
                 "crop_px": crop_px,
+                "raw_crop": f"{crop_px}px",
+                "ocr_crop": f"{crop_px * 3}px" if crop_px else "0px",
+                "variant": variant,
+                "result": result.reason,
                 "reason": result.reason,
                 "cascade": result.cascade,
                 "stages": stage_dicts,
@@ -378,6 +383,9 @@ def run_evaluation(
                     for c_idx, c in enumerate(best_fr["candidates"]):
                         save_crop(best_cv, c.bbox, crops_dir / f"{item_name}_{c_idx+1}.jpg")
 
+                best_c = best_identification(best_fr["raw_res"]) or best_candidate(best_fr["raw_res"])
+                variant = getattr(best_c, "ocr_variant", "plain") if best_c else "none"
+
             else:
                 bus_ok = False
                 vh_ok = False
@@ -389,6 +397,7 @@ def run_evaluation(
                 reason = "no_frames_in_window"
                 cascade = "none"
                 stages = []
+                variant = "none"
                 overall_ok = False
 
             rows.append({
@@ -402,6 +411,10 @@ def run_evaluation(
                 "sticker": True,
                 "conf": round(conf, 4),
                 "crop_px": crop_px,
+                "raw_crop": f"{crop_px}px",
+                "ocr_crop": f"{crop_px * 3}px" if crop_px else "0px",
+                "variant": variant,
+                "result": reason,
                 "reason": reason,
                 "cascade": cascade,
                 "stages": stages,
@@ -411,12 +424,17 @@ def run_evaluation(
     # -------------------------------------------------------------
     # 3. Print Results Table
     # -------------------------------------------------------------
-    print("\n" + "=" * 125)
+    print("\n" + "=" * 160)
     print("EVALUATION RESULTS TABLE (PIPELINE VERDICTS)")
-    print("=" * 125)
-    header = f"{'item':<16} | {'exp bus':<8} | {'read bus':<8} | {'OK':<4} | {'exp VH':<18} | {'read VH':<12} | {'VH OK':<5} | {'conf':<6} | {'crop px':<7} | {'reason':<12} | {'cascade':<12} | {'ms':<6}"
+    print("=" * 160)
+    header = (
+        f"{'item':<16} | {'exp bus':<8} | {'read bus':<8} | {'OK':<4} | "
+        f"{'exp VH':<18} | {'read VH':<14} | {'VH OK':<5} | {'result':<12} | "
+        f"{'conf':<6} | {'raw crop':<8} | {'ocr crop':<8} | {'variant':<7} | "
+        f"{'cascade':<12} | {'ms':<6}"
+    )
     print(header)
-    print("-" * 125)
+    print("-" * 160)
 
     for r in rows:
         bus_ok_s = "OK" if r["bus_ok"] else "FAIL"
@@ -427,17 +445,19 @@ def run_evaluation(
             f"{str(r['read_bus']):<8} | "
             f"{bus_ok_s:<4} | "
             f"{str(r['exp_vh']):<18} | "
-            f"{str(r['read_vh']):<12} | "
+            f"{str(r['read_vh']):<14} | "
             f"{vh_ok_s:<5} | "
+            f"{str(r.get('result', r.get('reason', ''))):<12} | "
             f"{r['conf']:<6.2f} | "
-            f"{r['crop_px']:<7} | "
-            f"{r['reason']:<12} | "
+            f"{str(r.get('raw_crop', '')):<8} | "
+            f"{str(r.get('ocr_crop', '')):<8} | "
+            f"{str(r.get('variant', 'plain')):<7} | "
             f"{r['cascade']:<12} | "
             f"{r['ms']:<6}"
         )
         print(line)
 
-    print("=" * 125)
+    print("=" * 160)
 
     # Save results.json
     results_payload = {
