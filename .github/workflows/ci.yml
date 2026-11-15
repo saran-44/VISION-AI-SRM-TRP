@@ -136,3 +136,20 @@ jobs:
 
       - name: Fail if credentials are committed
         run: python scripts/scan_secrets.py
+
+  windows-gate:
+    name: Windows gate bundle (untested)
+    runs-on: windows-latest
+    # This is intentionally marked untested until a successful hosted run exists.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build portable one-dir bundle
+        shell: pwsh
+        run: .\desktop\gate\build_gate.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: visionai-gate-dist
+          path: dist/
