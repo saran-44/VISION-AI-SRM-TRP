@@ -15,6 +15,7 @@ __pycache__/
 .venv/
 .venv-agent/
 .venv-gate/
+.venv-pack/
 venv/
 env/
 .pytest_cache/
@@ -98,3 +99,7 @@ ui-debug.log
 .DS_Store
 Thumbs.db
 *.swp
+
+# --- Generated handover packs (regenerate with team_pack/*.py) --------------
+team_pack/pdf/
+team_pack/*.zip
