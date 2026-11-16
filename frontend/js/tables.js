@@ -71,6 +71,7 @@ export function renderEventsTable(tbody, events, flagLabels = {}) {
         ['Event ID', event.id],
         ['Timestamp', formatDateTime(event.timestamp)],
         ['Bus number', event.bus_number],
+        ['Vehicle number', event.vehicle_number || '—'],
         ['Direction', event.direction],
         ['Gate', event.gate],
         ['Camera', event.camera_id],
@@ -83,6 +84,7 @@ export function renderEventsTable(tbody, events, flagLabels = {}) {
     tbody.append(el('tr', {}, [
       el('td', { text: formatDateTime(event.timestamp) }),
       el('td', {}, [busBadge(event.bus_number)]),
+      el('td', { text: event.vehicle_number || '—' }),
       el('td', {}, [directionBadge(event.direction)]),
       el('td', { text: event.gate || '—' }),
       el('td', { text: event.camera_id || '—' }),

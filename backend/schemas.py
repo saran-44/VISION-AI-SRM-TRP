@@ -172,6 +172,7 @@ class EventCreate(StrictModel):
     camera_id: str = Field(min_length=1, max_length=60)
     confidence: float = Field(ge=0.0, le=1.0)
     timestamp: DateTime
+    plate_number: str | None = Field(default=None, max_length=60)
 
     @field_validator("direction", mode="before")
     @classmethod

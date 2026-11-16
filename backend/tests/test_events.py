@@ -286,3 +286,77 @@ def test_update_without_fields_is_rejected(client, db, users):
     login_transport_office(client, users)
     response = client.put("/api/buses/" + "0" * 24, json={})
     assert response.status_code in (400, 404)
+
+
+def test_event_resolves_vehicle_number_from_fleet(client, db, users):
+    login_transport_office(client, users)
+    client.post(
+        "/api/buses",
+        json={"bus_number": "BUS-101", "registration_number": "TN 48 BH 6091", "route": "R1", "capacity": 40},
+    )
+    res = post_event(client, event_payload(bus_number="BUS-101"))
+    assert res.status_code == 201
+    created = res.get_json()["event"]
+    assert created["vehicle_number"] == "TN 48 BH 6091"
+    assert created["vehicle_number_source"] == "fleet"
+
+    login_head_admin(client, users)
+    events = client.get("/api/events?bus_number=BUS-101").get_json()["items"]
+    assert len(events) == 1
+    assert events[0]["vehicle_number"] == "TN 48 BH 6091"
+    assert events[0]["vehicle_number_source"] == "fleet"
+
+
+def test_event_plate_agrees_with_fleet(client, db, users):
+    login_transport_office(client, users)
+    client.post(
+        "/api/buses",
+        json={"bus_number": "BUS-102", "registration_number": "TN 48 BK 2106", "route": "R2", "capacity": 40},
+    )
+    res = post_event(client, event_payload(bus_number="BUS-102", plate_number="TN 48 BK 2106"))
+    assert res.status_code == 201
+    created = res.get_json()["event"]
+    assert created["vehicle_number"] == "TN 48 BK 2106"
+    assert created["vehicle_number_source"] == "plate"
+    assert "plate_mismatch" not in (created.get("flag_reasons") or [])
+
+
+def test_event_plate_disagrees_with_fleet(client, db, users):
+    login_transport_office(client, users)
+    client.post(
+        "/api/buses",
+        json={"bus_number": "BUS-103", "registration_number": "TN 48 BH 6091", "route": "R3", "capacity": 40},
+    )
+    res = post_event(client, event_payload(bus_number="BUS-103", plate_number="TN 48 XX 9999"))
+    assert res.status_code == 201
+    created = res.get_json()["event"]
+    assert created["vehicle_number"] == "TN 48 BH 6091"
+    assert created["vehicle_number_source"] == "fleet"
+    assert "plate_mismatch" in created["flag_reasons"]
+    assert created["flagged"] is True
+
+
+def test_event_unregistered_bus_has_no_vehicle_number(client, db, users):
+    res = post_event(client, event_payload(bus_number="BUS-999"))
+    assert res.status_code == 201
+    created = res.get_json()["event"]
+    assert created["vehicle_number"] is None
+    assert created["vehicle_number_source"] == "none"
+    assert "unregistered_plate" in created["flag_reasons"]
+    assert created["flagged"] is True
+
+
+def test_events_export_includes_vehicle_number_column(client, db, users):
+    login_transport_office(client, users)
+    client.post(
+        "/api/buses",
+        json={"bus_number": "BUS-104", "registration_number": "TN 48 BK 2129", "route": "R4", "capacity": 40},
+    )
+    post_event(client, event_payload(bus_number="BUS-104"))
+    login_head_admin(client, users)
+    export_res = client.get("/api/export/events.csv")
+    assert export_res.status_code == 200
+    csv_text = export_res.data.decode("utf-8-sig")
+    assert "vehicle_number" in csv_text.splitlines()[0]
+    assert "TN 48 BK 2129" in csv_text
+

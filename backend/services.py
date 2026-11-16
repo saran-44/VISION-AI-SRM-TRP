@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import time as time_module
 from collections import Counter, defaultdict
 from datetime import date, datetime, time, timedelta, timezone
@@ -20,11 +21,13 @@ FLAG_LABELS = {
     "long_overstay": "Long overstay",
     "out_without_in": "Exit without entry",
     "duplicate_in": "Duplicate entry",
+    "plate_mismatch": "Plate mismatch",
 }
 
 EXPORT_FIELDS = [
     "timestamp",
     "bus_number",
+    "vehicle_number",
     "direction",
     "gate",
     "camera_id",
@@ -91,11 +94,60 @@ def query_events(db, event_filter: EventFilter, config: Config, *, limit: int | 
     return list(cursor)
 
 
+def resolve_vehicle_info(db, event_dict: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Resolve vehicle_number, vehicle_number_source, and update flag_reasons at read time."""
+    if not event_dict:
+        return None
+    doc = dict(event_dict)
+    bus_number = normalize_bus_number(doc.get("bus_number"))
+    bus = db.buses.find_one({"bus_number": bus_number}) if bus_number else None
+
+    ocr_plate = doc.get("plate_number") or doc.get("raw_plate") or doc.get("ocr_plate")
+    reasons = list(doc.get("flag_reasons") or [])
+
+    if bus:
+        fleet_reg = (bus.get("registration_number") or "").strip()
+        vehicle_num = fleet_reg if fleet_reg else None
+
+        if ocr_plate and fleet_reg:
+            c_ocr = re.sub(r"[^A-Z0-9]", "", str(ocr_plate).upper())
+            c_fleet = re.sub(r"[^A-Z0-9]", "", str(fleet_reg).upper())
+            if c_ocr and c_fleet and c_ocr == c_fleet:
+                source = "plate"
+            else:
+                source = "fleet"
+                if "plate_mismatch" not in reasons:
+                    reasons.append("plate_mismatch")
+        else:
+            source = "fleet"
+    else:
+        vehicle_num = None
+        source = "none"
+        if "unregistered_plate" not in reasons:
+            reasons.append("unregistered_plate")
+
+    doc["vehicle_number"] = vehicle_num
+    doc["vehicle_number_source"] = source
+    doc["flag_reasons"] = sorted(set(reasons))
+    doc["flagged"] = bool(doc["flag_reasons"])
+    return doc
+
+
 def compute_flag_reasons(db, event: dict[str, Any], config: Config) -> list[str]:
     reasons: list[str] = []
     bus_number = normalize_bus_number(event["bus_number"])
-    if not db.buses.find_one({"bus_number": bus_number}, {"_id": 1}):
+    bus = db.buses.find_one({"bus_number": bus_number})
+    if not bus:
         reasons.append("unregistered_plate")
+    else:
+        ocr_plate = event.get("plate_number") or event.get("raw_plate") or event.get("ocr_plate")
+        if ocr_plate:
+            fleet_reg = (bus.get("registration_number") or "").strip()
+            if fleet_reg:
+                c_ocr = re.sub(r"[^A-Z0-9]", "", str(ocr_plate).upper())
+                c_fleet = re.sub(r"[^A-Z0-9]", "", str(fleet_reg).upper())
+                if c_ocr and c_fleet and c_ocr != c_fleet:
+                    reasons.append("plate_mismatch")
     if float(event["confidence"]) < config.ocr_confidence_threshold:
         reasons.append("low_ocr_confidence")
 
@@ -157,13 +209,19 @@ def ingest_event(db, payload: EventCreate, config: Config, *, source: str = "dev
         )
         if duplicate:
             return {"duplicate": True, "event": public_doc(duplicate)}
-    event["flag_reasons"] = compute_flag_reasons(db, event, config)
+    event_with_plate = dict(event)
+    if data.get("plate_number"):
+        event_with_plate["plate_number"] = data["plate_number"].strip()
+    event["flag_reasons"] = compute_flag_reasons(db, event_with_plate, config)
     event["flagged"] = bool(event["flag_reasons"])
     result = db.events.insert_one(event)
     event["_id"] = result.inserted_id
     if hasattr(db, "_stats_cache"):
         db._stats_cache = None
-    return public_doc(event)
+    res = public_doc(event)
+    if data.get("plate_number"):
+        res["plate_number"] = data["plate_number"].strip()
+    return res
 
 
 def compute_stats(db, config: Config) -> dict[str, Any]:
@@ -248,7 +306,7 @@ def compute_stats(db, config: Config) -> dict[str, Any]:
             "ocr_confidence_threshold": config.ocr_confidence_threshold,
             "overstay_hours": config.overstay_hours,
         },
-        "last_event": public_doc(last_event_doc),
+        "last_event": resolve_vehicle_info(db, public_doc(last_event_doc)),
     }
     if config.stats_cache_seconds:
         db._stats_cache = (time_module.monotonic(), result)
@@ -332,11 +390,12 @@ def events_for_export(db, event_filter: EventFilter, config: Config, *, max_rows
     docs = query_events(db, event_filter, config, limit=max_rows)
     rows: list[dict[str, Any]] = []
     for doc in docs:
-        public = public_doc(doc)
+        public = resolve_vehicle_info(db, public_doc(doc)) or {}
         rows.append(
             {
                 "timestamp": public.get("timestamp", ""),
                 "bus_number": public.get("bus_number", ""),
+                "vehicle_number": public.get("vehicle_number", "") or "",
                 "direction": public.get("direction", ""),
                 "gate": public.get("gate", ""),
                 "camera_id": public.get("camera_id", ""),
@@ -373,7 +432,7 @@ def xlsx_bytes(rows: list[dict[str, Any]]) -> bytes:
         sheet.append([safe_cell(row.get(key, "")) for key in EXPORT_FIELDS])
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
-    widths = {"A": 22, "B": 16, "C": 10, "D": 18, "E": 16, "F": 12, "G": 10, "H": 36}
+    widths = {"A": 22, "B": 16, "C": 18, "D": 10, "E": 18, "F": 16, "G": 12, "H": 10, "I": 36}
     for column, width in widths.items():
         sheet.column_dimensions[column].width = width
     buffer = io.BytesIO()

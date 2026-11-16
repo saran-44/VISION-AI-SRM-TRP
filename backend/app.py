@@ -57,6 +57,7 @@ from .services import (
     ingest_event,
     naive_now,
     record_audit,
+    resolve_vehicle_info,
     xlsx_bytes,
 )
 from .firebase_auth import (
@@ -248,6 +249,9 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
 
     def serialize_many(docs) -> list[dict[str, Any]]:
         return [public_doc(doc) for doc in docs]
+
+    def serialize_events(docs) -> list[dict[str, Any]]:
+        return [resolve_vehicle_info(db, public_doc(doc)) for doc in docs]
 
     def paginated(collection, query: dict, search: SearchFilter, sort: list[tuple[str, int]]):
         total = collection.count_documents(query)
@@ -544,7 +548,7 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         docs = db.events.find(query).sort(event_sort()).skip(skip).limit(event_filter.page_size)
         return jsonify(
             {
-                "items": serialize_many(docs),
+                "items": serialize_events(docs),
                 "filters": {
                     "date": query_payload.get("date").isoformat() if query_payload.get("date") else None,
                     "date_from": iso_utc(event_filter.date_from) if event_filter.date_from else None,
@@ -569,26 +573,29 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
             return error
         event = ingest_event(db, payload, config, source="device")
         if event.get("duplicate"):
+            dup_resolved = resolve_vehicle_info(db, event.get("event"))
+            event["event"] = dup_resolved
             record_audit(
                 db,
                 {"email": "device-client", "role": "device"},
                 "event_deduplicated",
                 "events",
-                event.get("event", {}).get("id") or event.get("id"),
+                dup_resolved.get("id") if dup_resolved else None,
                 after=event,
                 flask_request=request,
             )
             return jsonify(event), 200
+        resolved = resolve_vehicle_info(db, event)
         record_audit(
             db,
             {"email": "device-client", "role": "device"},
             "event_ingested",
             "events",
-            event.get("id"),
-            after=event,
+            resolved.get("id") if resolved else None,
+            after=resolved,
             flask_request=request,
         )
-        return jsonify({"event": event}), 201
+        return jsonify({"event": resolved}), 201
 
     @app.get("/api/events/<event_id>")
     @require_roles("head_admin")
@@ -599,7 +606,7 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
         doc = db.events.find_one({"_id": oid})
         if not doc:
             return jsonify({"error": "Not found"}), 404
-        return jsonify({"event": public_doc(doc)})
+        return jsonify({"event": resolve_vehicle_info(db, public_doc(doc))})
 
     @app.get("/api/config/firebase")
     def firebase_config():
@@ -1068,7 +1075,7 @@ def create_app(config: Config | None = None, database_engine=None) -> Flask:
                 "type": "tick",
                 "generated_at": iso_utc(naive_now()),
                 "stats": compute_stats(db, config),
-                "recent_events": serialize_many(recent),
+                "recent_events": serialize_events(recent),
             }
             with cache["lock"]:
                 cache.update({"at": time.monotonic(), "value": value})
