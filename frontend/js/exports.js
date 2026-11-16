@@ -2,7 +2,7 @@ import { downloadFile, saveBlob, toQuery } from './api.js';
 import { showToast } from './ui.js';
 
 const EXPORT_FIELDS = [
-  'timestamp', 'bus_number', 'direction', 'gate',
+  'timestamp', 'bus_number', 'vehicle_number', 'direction', 'gate',
   'camera_id', 'confidence', 'flagged', 'flag_reasons',
 ];
 
@@ -15,6 +15,7 @@ function normalizeEvent(event) {
   return {
     timestamp: event.timestamp || '',
     bus_number: event.bus_number || '',
+    vehicle_number: event.vehicle_number || '',
     direction: event.direction || '',
     gate: event.gate || '',
     camera_id: event.camera_id || '',

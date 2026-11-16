@@ -70,6 +70,14 @@ If something isn't working and technical support asks for a diagnostic report:
 
 ## 5. How to Reinstall or Reset
 
+### 5.1 Windows Defender SmartScreen Workaround
+When running the installer (`VisionAI-Setup.exe`) or executable for the first time, Windows SmartScreen may show a blue banner: *"Windows protected your PC"*.
+Because this is an internal campus software build without an expensive commercial EV code-signing certificate:
+1. Click **More info** on the prompt.
+2. Click **Run anyway**.
+The application is safe and contains no malware.
+
+### 5.2 Reinstall Steps
 If the application files become corrupted or you need to set up on a new PC:
 1. Ensure Python 3.11 is installed on the computer.
 2. In the `VISION-AI-SRM-TRP` folder, open PowerShell as Administrator and run:
