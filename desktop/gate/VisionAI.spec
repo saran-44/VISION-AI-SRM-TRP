@@ -14,7 +14,10 @@ from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
-ROOT = Path(SPECPATH).resolve().parents[2]  # noqa: F821 - injected by PyInstaller
+spec_dir = Path(SPECPATH).resolve()
+if spec_dir.is_file():
+    spec_dir = spec_dir.parent
+ROOT = spec_dir.parents[1]  # noqa: F821 - injected by PyInstaller
 
 # The portal, the checkpoints, and the gate launcher itself.
 datas = [
@@ -28,6 +31,18 @@ if vehicle_model.exists():
 else:
     print("WARNING: weights/vehicle.pt is missing; the vehicle stage will be skipped")
 
+try:
+    import rapidocr_onnxruntime
+    rapidocr_dir = Path(rapidocr_onnxruntime.__file__).parent
+    models_dir = rapidocr_dir / "models"
+    if models_dir.exists():
+        datas.append((str(models_dir), "rapidocr_onnxruntime/models"))
+    cfg_file = rapidocr_dir / "config.yaml"
+    if cfg_file.exists():
+        datas.append((str(cfg_file), "rapidocr_onnxruntime"))
+except Exception as exc:
+    print(f"WARNING: could not find rapidocr_onnxruntime models: {exc}")
+
 # Heavy packages that ship model files, DLLs or plugin directories.
 binaries = []
 hiddenimports = [
@@ -39,6 +54,7 @@ hiddenimports = [
     "backend.frame_source",
     "backend.vision",
     "backend.seed_demo",
+    "backend.report",
     "cv2",
     "PIL._tkinter_finder",
 ]

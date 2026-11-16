@@ -24,6 +24,7 @@ import logging
 import math
 import os
 import re
+import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,7 +35,10 @@ from . import diagnostics
 logger = logging.getLogger(__name__)
 
 # Root of the repository (backend/ -> repo root).
-ROOT = Path(__file__).resolve().parents[1]
+if getattr(sys, "frozen", False):
+    ROOT = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+else:
+    ROOT = Path(__file__).resolve().parents[1]
 
 # Default location of the trained model inside the repository.
 DEFAULT_MODEL_PATH = ROOT / "best.pt"

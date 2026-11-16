@@ -88,7 +88,7 @@ def data_dir() -> Path:
     if override:
         return Path(override).expanduser()
     if os.name == "nt":
-        root = os.getenv("PROGRAMDATA", r"C:\ProgramData")
+        root = os.getenv("APPDATA") or str(Path.home() / "AppData" / "Roaming")
         return Path(root) / "VisionAI"
     return Path.home() / ".visionai"
 
@@ -178,6 +178,9 @@ def apply_environment(values: dict[str, str] | None = None) -> dict[str, str]:
     merged["VISION_DATA_DIR"] = str(data_dir())
     merged["VISION_GATE_CONFIG"] = str(config_file())
     merged.setdefault("DATABASE_URL", f"sqlite:///{(data_dir() / 'data' / 'gate.db').as_posix()}")
+    for key, val in os.environ.items():
+        if key in merged or key in ("PORT", "DATABASE_URL", "JWT_SECRET", "ENVIRONMENT"):
+            merged[key] = val
     for key, value in merged.items():
         os.environ.setdefault(key, str(value))
     return merged
@@ -199,6 +202,39 @@ def running_port() -> int | None:
         if payload and payload.get("service") == "srm-trp-transport":
             return port
     return None
+
+
+def focus_existing_window() -> bool:
+    """Find and bring the existing portal or browser window to the foreground."""
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        candidates = []
+
+        def enum_windows_callback(hwnd, extra):
+            if user32.IsWindowVisible(hwnd):
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buffer = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buffer, length + 1)
+                    title = buffer.value.lower()
+                    if "vision ai" in title or "srm trp" in title:
+                        candidates.append(hwnd)
+            return True
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        user32.EnumWindows(WNDENUMPROC(enum_windows_callback), 0)
+        if candidates:
+            hwnd = candidates[0]
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            user32.SetForegroundWindow(hwnd)
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def free_port(preferred: int) -> int:
@@ -517,12 +553,19 @@ def main(argv: list[str] | None = None) -> int:
     already = running_port()
     if already:
         logger.info("The portal is already running on port %s", already)
+        print(f"The portal is already running on port {already}; focusing existing window.")
+        focus_existing_window()
         if not args.no_browser:
             open_browser(already, logger)
         return 0
 
     hide_console()
-    port = free_port(port)
+    chosen_port = free_port(port)
+    if chosen_port != port:
+        msg = f"Port {port} is in use; tried next port and bound to port {chosen_port}."
+        logger.warning(msg)
+        print(msg)
+    port = chosen_port
     logger.info("%s starting on http://%s:%s", APP_NAME, args.host, port)
     try:
         from backend.app import create_app
@@ -543,9 +586,27 @@ def main(argv: list[str] | None = None) -> int:
         threading.Timer(1.0, lambda: open_browser(port, logger)).start()
     if not args.no_tray:
         tray_icon(port, server, logger)
+
+    try:
+        import signal
+
+        def _clean_stop(signum, frame):
+            logger.info("Clean shutdown signal received (%s)", signum)
+            if server is not None:
+                try:
+                    server.close()
+                except Exception:
+                    pass
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, _clean_stop)
+        signal.signal(signal.SIGTERM, _clean_stop)
+    except Exception:
+        pass
+
     try:
         run()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         logger.info("Stopped by the operator")
     finally:
         if server is not None:
@@ -553,7 +614,7 @@ def main(argv: list[str] | None = None) -> int:
                 server.close()
             except Exception:  # noqa: BLE001
                 pass
-        logger.info("Portal stopped")
+        logger.info("Portal stopped cleanly")
     return 0
 
 

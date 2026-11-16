@@ -157,7 +157,7 @@ def test_event_flags_distinguish_duplicate_entry_and_exit_without_entry(client, 
     first = post_event(client, event_payload(bus_number="BUS-101"))
     duplicate = post_event(
         client,
-        event_payload(bus_number="BUS-101", gate="Gate 2", timestamp=naive_now().isoformat() + "Z"),
+        event_payload(bus_number="BUS-101", gate="Gate 2", timestamp=(naive_now() + timedelta(seconds=1)).isoformat() + "Z"),
     )
     exit_without_entry = post_event(
         client,

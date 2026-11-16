@@ -14,7 +14,7 @@ $Python = Join-Path $Venv "Scripts\python.exe"
 
 Write-Host "== 1/6  Python environment ==" -ForegroundColor Cyan
 if (-not (Test-Path $Python)) {
-    python -m venv $Venv
+    python -m venv --system-site-packages $Venv
 }
 & $Python -m pip install --upgrade pip --quiet
 # CPU torch first: the default wheel drags in ~3 GB of CUDA libraries a gate PC
@@ -72,7 +72,7 @@ if ($Check -notmatch '"ready"') { throw "the bundled preflight did not run:`n$Ch
 Write-Host "   preflight ran inside the bundle" -ForegroundColor Green
 
 # The server has to answer /api/health, not merely start.
-$Proc = Start-Process -FilePath $Exe -ArgumentList "--no-browser", "--no-tray", "--host", "127.0.0.1" -PassThru
+$Proc = Start-Process -FilePath $Exe -ArgumentList "--no-browser", "--no-tray", "--host", "127.0.0.1", "--port", "$SmokePort" -PassThru
 $healthy = $false
 foreach ($attempt in 1..40) {
     Start-Sleep -Milliseconds 750
@@ -97,7 +97,8 @@ Remove-Item Env:VISION_DATA_DIR, Env:PORT, Env:ENVIRONMENT, Env:DATABASE_URL, En
 Write-Host "== 6/6  Installer ==" -ForegroundColor Cyan
 $Iscc = @(
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-    "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+    "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+    "$env:LocalAppData\Programs\Inno Setup 6\ISCC.exe"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($Iscc) {
     & $Iscc "desktop\gate\VisionAI.iss"

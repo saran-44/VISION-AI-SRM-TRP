@@ -69,6 +69,8 @@ class Report:
 # ------------------------------------------------------------------ helpers
 def _project_root() -> Path:
     """Repository root when run from source, bundle root when frozen."""
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     return Path(__file__).resolve().parents[1]
 
 

@@ -33,6 +33,8 @@ CONFIG_KEYS = ("ENVIRONMENT", "PORT", "APP_TIMEZONE", "DATABASE_URL_KIND")
 
 
 def _project_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     return Path(__file__).resolve().parents[1]
 
 

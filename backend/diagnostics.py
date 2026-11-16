@@ -67,7 +67,8 @@ def data_root() -> Path:
     if override:
         return Path(override).expanduser()
     if os.name == "nt":
-        return Path(os.getenv("PROGRAMDATA", r"C:\ProgramData")) / "VisionAI"
+        root = os.getenv("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        return Path(root) / "VisionAI"
     return Path.home() / ".visionai"
 
 

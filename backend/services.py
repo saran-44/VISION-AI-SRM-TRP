@@ -103,7 +103,7 @@ def compute_flag_reasons(db, event: dict[str, Any], config: Config) -> list[str]
         {
             "bus_number": bus_number,
             "direction": "IN",
-            "timestamp": {"$lt": event["timestamp"]},
+            "timestamp": {"$lte": event["timestamp"]},
         },
         sort=[("timestamp", DESCENDING), ("_id", DESCENDING)],
     )

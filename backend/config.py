@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parents[1]
+if getattr(sys, "frozen", False):
+    ROOT = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+else:
+    ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env", override=False)
 
 # The demo account created only when DEMO_MODE is on. The address is reserved

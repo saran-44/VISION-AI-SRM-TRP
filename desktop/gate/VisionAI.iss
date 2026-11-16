@@ -36,8 +36,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; Admin is required for Program Files; the data folder needs PROGRAMDATA write,
 ; which the installer creates with an explicit ACL below.
 PrivilegesRequired=admin
+; CloseApplications=yes
 CloseApplications=yes
-RestartIfNeededBySystem=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -52,18 +52,18 @@ Source: "..\..\dist\VisionAI\*"; DestDir: "{app}"; Flags: ignoreversion recurses
 Source: "gate.env.example"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
-; The gate database, its backups and the logs live here, outside the program
+; The gate database, its backups and the logs live in %APPDATA%\VisionAI, outside the program
 ; folder, so an upgrade replaces the application and leaves the records alone.
-Name: "{commonappdata}\VisionAI"; Permissions: users-modify
-Name: "{commonappdata}\VisionAI\data"; Permissions: users-modify
-Name: "{commonappdata}\VisionAI\logs"; Permissions: users-modify
-Name: "{commonappdata}\VisionAI\backups"; Permissions: users-modify
+Name: "{userappdata}\VisionAI"; Permissions: users-modify
+Name: "{userappdata}\VisionAI\data"; Permissions: users-modify
+Name: "{userappdata}\VisionAI\logs"; Permissions: users-modify
+Name: "{userappdata}\VisionAI\backups"; Permissions: users-modify
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
 Name: "{group}\First-time setup"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--setup"; WorkingDir: "{app}"; Comment: "Create the database and the administrator account"
 Name: "{group}\Check this PC"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--check --deep"; WorkingDir: "{app}"; Comment: "Run the preflight: camera, database, detector, OCR"
-Name: "{group}\Data folder"; Filename: "{commonappdata}\VisionAI"; Comment: "Database, logs and backups"
+Name: "{group}\Data folder"; Filename: "{userappdata}\VisionAI"; Comment: "Database, logs and backups"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 ; Autostart starts the portal without opening a browser window on the operator.
@@ -80,7 +80,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Start the portal now"; Flags: p
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#MyAppExeName} /F"; Flags: runhidden skipifdoesntexist
 
 [UninstallDelete]
-; Only the program folder. %PROGRAMDATA%\VisionAI is deliberately not listed:
+; Only the program folder. %APPDATA%\VisionAI is deliberately not listed:
 ; uninstalling must not destroy the gate's event history.
 Type: filesandordirs; Name: "{app}"
 
@@ -91,7 +91,7 @@ var
 begin
   if CurStep = ssPostInstall then
   begin
-    DataDir := ExpandConstant('{commonappdata}\VisionAI');
+    DataDir := ExpandConstant('{userappdata}\VisionAI');
     if not DirExists(DataDir) then
       ForceDirectories(DataDir);
   end;
@@ -100,9 +100,9 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
-    if DirExists(ExpandConstant('{commonappdata}\VisionAI')) then
+    if DirExists(ExpandConstant('{userappdata}\VisionAI')) then
       MsgBox('The gate database and its logs were kept in:' + #13#10 +
-             ExpandConstant('{commonappdata}\VisionAI') + #13#10#13#10 +
+             ExpandConstant('{userappdata}\VisionAI') + #13#10#13#10 +
              'Delete that folder only if you have finished with the event history.',
              mbInformation, MB_OK);
 end;
