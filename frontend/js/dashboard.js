@@ -5,7 +5,7 @@ import { analyticsParams, eventParams, exportParams, readFilters } from './filte
 import { mountShell } from './layout.js';
 import { connectLive } from './sse.js';
 import { renderCameras, renderCameraTile, requestWebcam, stopStream, updateVerdictStrip } from './cameras.js';
-import { STAGES, appendStagesToForm, currentStageFlags, describeScan, responseError, scanDetail, scanFailureText, setStageFlag } from './detection-stages.js';
+import { STAGES, appendStagesToForm, currentStageFlags, describeScan, renderStageChips, responseError, scanDetail, scanFailureText, setStageFlag } from './detection-stages.js';
 import { renderEventsTable } from './tables.js';
 import { clear, el, formatDateTime, formatNumber, setState, showToast } from './ui.js';
 import { analytics, initFirebase } from './firebase.js';
@@ -13,6 +13,7 @@ import { analytics, initFirebase } from './firebase.js';
 let currentFilters = {};
 let currentEvents = [];
 let flagLabels = {};
+let latestScanPayload = null;
 let live = null;
 let cameraConfigSignature = '';
 
@@ -45,28 +46,38 @@ function renderStats(stats) {
   if (breakdown) breakdown.textContent = parts.length ? parts.join(' · ') : 'No flagged events today.';
   const lastUpdated = document.getElementById('lastUpdated');
   if (lastUpdated) lastUpdated.textContent = `Updated ${formatDateTime(stats.generated_at)}`;
-  renderLastDetected(stats.last_event);
+  if (!latestScanPayload) renderLastDetected(stats.last_event);
 }
 
 function renderLastDetected(event) {
   const plate = document.getElementById('plateValue');
   const status = document.getElementById('scanStatus');
+  const vehicle = document.getElementById('scanVehicle');
   const meta = document.getElementById('scanMeta');
+  const stages = document.getElementById('scanStages');
   const state = document.getElementById('lastDetectedState');
   if (!state) return;
   if (!event) {
     plate.textContent = '—';
     status.textContent = 'Awaiting first detection';
+    status.className = 'scan-status';
+    vehicle.textContent = 'Vehicle type: not reported';
     meta.textContent = 'No events have been ingested yet.';
-    setState(state, 'empty', 'The detection system has not posted any events.');
+    renderStageChips(stages, []);
+    setState(state, 'empty', 'No bus movement has been recorded yet.');
     return;
   }
   setState(state, 'ok');
   plate.textContent = event.bus_number || 'UNKNOWN';
   const reasons = event.flag_reasons || [];
-  status.textContent = reasons.length ? `Flagged: ${reasons.map((reason) => flagLabels[reason] || reason).join(', ')}` : 'Authorized movement';
+  status.textContent = reasons.length ? `Flagged movement: ${reasons.map((reason) => flagLabels[reason] || reason).join(', ')}` : 'Movement recorded';
   status.className = `scan-status ${reasons.length ? 'text-danger' : ''}`.trim();
+  vehicle.textContent = `Vehicle type: ${event.vehicle?.label || 'not reported'}`;
   meta.textContent = `${event.direction || '—'} · ${event.gate || '—'} · ${Math.round((event.confidence || 0) * 100)}% confidence · ${formatDateTime(event.timestamp)}`;
+  renderStageChips(stages, event.stages || []);
+  if (!event.stages?.length && stages) {
+    stages.append(el('span', { class: 'stage-chip is-idle', text: 'Stage not reported' }));
+  }
 }
 
 function setChartState(type, message) {
@@ -155,15 +166,25 @@ async function scanFrame(blob, meta = {}) {
 function applyScanResult(payload, meta = {}) {
   const statusNode = document.getElementById('scanStatus');
   const plateNode = document.getElementById('plateValue');
+  const vehicleNode = document.getElementById('scanVehicle');
   const metaNode = document.getElementById('scanMeta');
+  const stageHost = document.getElementById('scanStages');
   const busNumber = payload.bus_number;
-  if (plateNode) plateNode.textContent = busNumber || 'UNKNOWN';
+  latestScanPayload = payload;
+  setState(document.getElementById('lastDetectedState'), 'ok');
+  if (plateNode) plateNode.textContent = busNumber || 'No bus read';
   if (statusNode) {
     const { good, text } = describeScan(payload);
     statusNode.textContent = text;
     statusNode.className = `scan-status ${good ? '' : 'text-danger'}`.trim();
   }
+  if (vehicleNode) vehicleNode.textContent = `Vehicle type: ${payload.vehicle?.label || 'not detected'}`;
   if (metaNode) metaNode.textContent = scanDetail(payload);
+  renderStageChips(stageHost, payload.stages || []);
+  if (!payload.stages?.length && stageHost) {
+    const stage = payload.stage || payload.cascade;
+    stageHost.append(el('span', { class: 'stage-chip is-idle', text: stage ? `Stage: ${stage}` : 'Stage not reported' }));
+  }
   updateVerdictStrip(browserCameraTile || document.getElementById('cameraGrid'), payload);
   renderStageWarning();
   analytics.detectionResult(busNumber, payload.confidence);
@@ -290,7 +311,7 @@ function wire() {
     apiGet('/api/camera/status')
       .then((status) => {
         if (status && status.configured) {
-          gateScan.style.display = '';
+          gateScan.hidden = false;
           gateScan.title = `Gate camera: ${status.kind} ${status.source}`;
         }
       })

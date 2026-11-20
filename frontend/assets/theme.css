@@ -1271,11 +1271,11 @@ body.login-page {
 
    Two deliberate differences from the reference snippet this was built from:
 
-   1. The noise texture is an inline SVG data URI, not
-      transparenttextures.com/egg-shell.png. The CSP only allows `data:` for
-      images here, the portal must render identically offline and on an
-      intranet with no route to the public internet, and a third-party request
-      on every page load is a privacy answer nobody asked for. Same grain.
+   1. The noise texture is an inline SVG data URI, not a remote image. The CSP
+      only allows `data:` for images here, the portal must render identically
+      offline and on an intranet with no route to the public internet, and a
+      third-party request on every page load is a privacy answer nobody asked
+      for. Same grain.
    2. `--color-glass3d` is a tint, not `transparent`. With a 32 px backdrop
       blur over the light theme's near-white background, a fully transparent
       layer leaves text floating on whatever is behind the card; the tint is
