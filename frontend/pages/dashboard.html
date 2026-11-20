@@ -53,22 +53,23 @@
 
     <section class="middle-grid">
       <div id="cameraGrid" class="camera-grid" aria-label="Gate camera tiles"></div>
-      <article class="card hide-on-mobile glass3d">
+      <article class="card last-detected-card glass3d">
         <div class="card-header"><h2 class="card-title"><i class='bx bx-scan' aria-hidden="true"></i> Last Detected</h2></div>
-        <div id="lastDetectedState"></div>
+        <div id="lastDetectedState" aria-live="polite"></div>
         <div class="scan-details">
-          <p class="muted">Bus Number Detected</p>
-          <div id="plateValue" class="number-plate">—</div>
+          <p class="muted">Bus number</p>
+          <div id="plateValue" class="number-plate" aria-live="polite">—</div>
           <div id="stageWarning"></div>
-          <div id="scanStatus" class="scan-status">Awaiting first detection</div>
-          <div id="scanMeta" class="scan-meta">No events have been ingested yet.</div>
+          <div id="scanStatus" class="scan-status" aria-live="polite">Awaiting first detection</div>
+          <div id="scanVehicle" class="scan-meta" aria-live="polite">Vehicle type: not reported</div>
+          <div id="scanMeta" class="scan-meta" aria-live="polite">No events have been ingested yet.</div>
           <!-- Shown only when this PC has a gate camera configured: the gate PC
                grabs the frame itself, because a browser cannot open RTSP and a
                gate PC with no webcam has nothing to capture. -->
-          <button id="scanGateCamera" type="button" class="btn btn-primary scan-camera-btn" style="display:none">
+          <button id="scanGateCamera" type="button" class="btn btn-primary scan-camera-btn" hidden>
             <i class='bx bx-camera' aria-hidden="true"></i> Scan gate camera
           </button>
-          <div id="scanStages" class="stage-chips" aria-label="Detection stages"></div>
+          <div id="scanStages" class="stage-chips" aria-label="Detection stages" aria-live="polite"></div>
         </div>
       </article>
     </section>

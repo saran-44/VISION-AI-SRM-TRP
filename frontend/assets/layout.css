@@ -364,6 +364,75 @@ body.login-page {
         --shell-gap: 0.85rem;
     }
 
+    /* Keep the gate camera and its result in normal page flow on phones. */
+    .middle-grid {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    #cameraGrid {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) !important;
+        gap: var(--shell-gap);
+        overflow: visible;
+        padding-bottom: 0;
+    }
+
+    #cameraGrid > .card {
+        width: 100%;
+        min-width: 0;
+        flex: initial;
+        scroll-snap-align: none;
+    }
+
+    .last-detected-card {
+        padding: 1rem;
+    }
+
+    .last-detected-card .card-header {
+        margin-bottom: 0.75rem;
+    }
+
+    .last-detected-card .scan-details {
+        align-items: stretch;
+        justify-content: flex-start;
+        gap: 0.45rem;
+        padding: 0;
+        text-align: left;
+    }
+
+    .last-detected-card .scan-details > .muted {
+        margin: 0;
+        font-size: 0.78rem;
+    }
+
+    .last-detected-card .number-plate {
+        align-self: flex-start;
+        max-width: 100%;
+        margin: 0.15rem 0 0.35rem;
+        padding: 0.55rem 0.8rem;
+        font-size: clamp(1.2rem, 6vw, 1.55rem);
+        letter-spacing: 0.08em;
+        overflow-wrap: anywhere;
+    }
+
+    .last-detected-card .scan-status,
+    .last-detected-card .scan-meta {
+        overflow-wrap: anywhere;
+        line-height: 1.45;
+    }
+
+    .last-detected-card .stage-chips {
+        margin-top: 0.25rem;
+    }
+
+    .camera-controls .btn-primary,
+    .last-detected-card .scan-camera-btn {
+        width: 100%;
+        min-height: var(--tap);
+        justify-content: center;
+    }
+
     .stats-grid {
         /* two compact tiles per row beats one full-width card per stat */
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -442,8 +511,23 @@ body.login-page {
 }
 
 @media (max-width: 380px) {
-    .stats-grid {
-        grid-template-columns: 1fr;
+    .dashboard-content .stats-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.55rem;
+    }
+
+    .dashboard-content .stat-card {
+        min-width: 0;
+        padding: 0.75rem;
+        gap: 0.55rem;
+    }
+
+    .dashboard-content .stat-details {
+        min-width: 0;
+    }
+
+    .dashboard-content .stat-details h3 {
+        line-height: 1.2;
     }
 
     .filter-grid,
